@@ -23,17 +23,14 @@
 **
 ****************************************************************************/
 
+#include "googletest.h"
+
 #include <clangtranslationunit.h>
 #include <clangtranslationunitupdater.h>
 #include <diagnosticcontainer.h>
 #include <utf8string.h>
 
 #include <clang-c/Index.h>
-
-#include <gmock/gmock.h>
-#include <gmock/gmock-matchers.h>
-#include <gtest/gtest.h>
-#include "gtest-qt-printing.h"
 
 using ClangBackEnd::DiagnosticContainer;
 using ClangBackEnd::TranslationUnit;
@@ -56,8 +53,8 @@ protected:
 
     DiagnosticContainer createDiagnostic(const QString &text,
                                          ClangBackEnd::DiagnosticSeverity severity,
-                                         uint line,
-                                         uint column,
+                                         int line,
+                                         int column,
                                          const QString &filePath) const;
     QVector<DiagnosticContainer> diagnosticsFromMainFile() const;
     QVector<DiagnosticContainer> errorDiagnosticsFromHeaders() const;
@@ -144,8 +141,8 @@ void TranslationUnit::reparse()
 
 DiagnosticContainer TranslationUnit::createDiagnostic(const QString &text,
                                                       ClangBackEnd::DiagnosticSeverity severity,
-                                                      uint line,
-                                                      uint column,
+                                                      int line,
+                                                      int column,
                                                       const QString &filePath) const
 {
     return DiagnosticContainer(

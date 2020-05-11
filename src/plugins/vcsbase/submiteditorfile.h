@@ -37,8 +37,7 @@ namespace Internal {
 class SubmitEditorFile : public Core::IDocument
 {
 public:
-    explicit SubmitEditorFile(const VcsBaseSubmitEditorParameters *parameters,
-                              VcsBaseSubmitEditor *parent = 0);
+    explicit SubmitEditorFile(VcsBaseSubmitEditor *editor);
 
     OpenResult open(QString *errorString, const QString &fileName,
                     const QString &realFileName) override;

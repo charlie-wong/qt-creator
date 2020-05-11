@@ -1,5 +1,6 @@
 import qbs 1.0
 import qbs.FileInfo
+import qbs.Utilities
 import QtcFunctions
 
 Product {
@@ -7,6 +8,7 @@ Product {
     version: qtc.qtcreator_version
     property bool install: true
     property string installDir
+    property string installSourceBase: destinationDirectory
     property stringList installTags: type
     property string fileName: FileInfo.fileName(sourceDirectory) + ".qbs"
     property bool useNonGuiPchFile: false
@@ -17,21 +19,49 @@ Product {
 
     Depends { name: "cpp" }
     Depends { name: "qtc" }
-    Depends { name: product.name + " dev headers"; required: false }
+    Depends {
+        name: product.name + " dev headers";
+        required: false
+        Properties {
+            condition: Utilities.versionCompare(qbs.version, "1.13") >= 0
+            enableFallback: false
+        }
+    }
+    Depends { name: "Qt.core"; versionAtLeast: "5.12.0" }
+
+    // TODO: Should fall back to what came from Qt.core for Qt < 5.7, but we cannot express that
+    //       atm. Conditionally pulling in a module that sets the property is also not possible,
+    //       because conflicting scalar values would be reported (QBS-1225 would fix that).
+    cpp.minimumMacosVersion: project.minimumMacosVersion
+
+    cpp.cxxFlags: {
+        var flags = [];
+        if (qbs.toolchain.contains("clang")
+                && Utilities.versionCompare(cpp.compilerVersion, "10") >= 0) {
+             // Triggers a lot in Qt.
+            flags.push("-Wno-deprecated-copy", "-Wno-constant-logical-operand");
+        }
+        if (qbs.toolchain.contains("gcc") && !qbs.toolchain.contains("clang")) {
+            flags.push("-Wno-noexcept-type");
+            if (Utilities.versionCompare(cpp.compilerVersion, "9") >= 0)
+                flags.push("-Wno-deprecated-copy", "-Wno-init-list-lifetime");
+        } else if (qbs.toolchain.contains("msvc")) {
+            flags.push("/w44996");
+        }
+        return flags;
+    }
 
     cpp.cxxLanguageVersion: "c++14"
     cpp.defines: qtc.generalDefines
-    cpp.minimumOsxVersion: "10.7"
-    cpp.minimumWindowsVersion: qbs.architecture === "x86" ? "5.1" : "5.2"
+    cpp.minimumWindowsVersion: "6.1"
     cpp.useCxxPrecompiledHeader: useNonGuiPchFile || useGuiPchFile
     cpp.visibility: "minimal"
-
-    Depends { name: "Qt.core" }
 
     Group {
         fileTagsFilter: installTags
         qbs.install: install
         qbs.installDir: installDir
+        qbs.installSourceBase: installSourceBase
     }
 
     Group {

@@ -31,7 +31,6 @@
 
 #include <QVector>
 #include <QBoxLayout>
-#include <QTabWidget>
 #include <QTabBar>
 #include <QToolButton>
 #include <QSplitter>
@@ -78,20 +77,20 @@ SwitchSplitTabWidget::SwitchSplitTabWidget(QWidget *parent)
     m_tabBarBackground->layout()->addItem(new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding));
     m_tabBarBackground->layout()->addWidget(m_tabBar);
 
-    QToolButton *horizontalButton = new QToolButton;
+    auto horizontalButton = new QToolButton;
     horizontalButton->setObjectName("centralTabBar");
     horizontalButton->setIcon(Utils::Icon({{QLatin1String(":/qmldesigner/images/spliteditorvertically.png"),
-                                            Utils::Theme::TextColorNormal}}, Utils::Icon::Tint).icon());
+                                            Utils::Theme::IconsBaseColor}}).icon());
     horizontalButton->setIconSize(QSize(8, 16));
     connect(horizontalButton, &QToolButton::clicked, [this] () {
         m_splitter->setOrientation(Qt::Vertical);
         updateSplitterSizes();
         selectFakeTab();
     });
-    QToolButton *verticalButton = new QToolButton;
+    auto verticalButton = new QToolButton;
     verticalButton->setObjectName("centralTabBar");
     verticalButton->setIcon(Utils::Icon({{QLatin1String(":/qmldesigner/images/spliteditorhorizontally.png"),
-                                          Utils::Theme::TextColorNormal}}, Utils::Icon::Tint).icon());
+                                          Utils::Theme::IconsBaseColor}}).icon());
     verticalButton->setIconSize(QSize(8, 16));
     connect(verticalButton, &QToolButton::clicked, [this] () {
         m_splitter->setOrientation(Qt::Horizontal);
@@ -122,25 +121,32 @@ QWidget *SwitchSplitTabWidget::currentWidget() const
 
 void SwitchSplitTabWidget::updateSplitterSizes(int index)
 {
-    if (isHidden()) {
-        // we can not get the sizes if the splitter is hidden
-        m_splittSizesAreDirty = true;
-        return;
-    }
-    QVector<int> splitterSizes = m_splitter->sizes().toVector();
+    QVector<int> splitterSizes(m_splitter->count());
     int splitterFullSize = 0;
-    for (int size : splitterSizes)
-        splitterFullSize += size;
+    bool isHorizontal = m_splitter->orientation() == Qt::Horizontal;
+    for (int i = 0; i < m_splitter->count(); ++i) {
+        auto widget = m_splitter->widget(i);
+        splitterFullSize += isHorizontal ? widget->width() : widget->height();
+    }
+
     if (index > -1) {
-        // collapse all but not the one at index
+        // collapse all but the one at index
         splitterSizes.fill(0);
         splitterSizes.replace(index, splitterFullSize);
     } else {
-        // distribute full size
-        splitterSizes.fill(splitterFullSize / splitterSizes.count());
+        // distribute full size among enabled tabs
+        int divisor = splitterSizes.count();
+        for (int i = 0; i < m_splitter->count(); ++i) {
+            if (!m_tabBar->isTabEnabled(i + fakeTab))
+                --divisor;
+        }
+
+        int splitSize = splitterFullSize / divisor;
+        for (int i = 0; i < m_splitter->count(); ++i)
+            splitterSizes.replace(i, m_tabBar->isTabEnabled(i + fakeTab) ? splitSize : 0);
     }
+
     m_splitter->setSizes(splitterSizes.toList());
-    m_splittSizesAreDirty = false;
 }
 
 int SwitchSplitTabWidget::addTab(QWidget *w, const QString &label)
@@ -179,18 +185,8 @@ void SwitchSplitTabWidget::switchTo(QWidget *widget)
         updateSplitterSizes(widgetIndex);
         m_tabBar->setCurrentIndex(widgetIndex + fakeTab);
     }
+
     widget->setFocus();
-}
-
-bool SwitchSplitTabWidget::event(QEvent *event)
-{
-    if (event->type() == QEvent::Show && m_splittSizesAreDirty) {
-        bool returnValue = QWidget::event(event);
-        updateSplitterSizes(m_tabBar->currentIndex() - fakeTab);
-        return returnValue;
-    }
-
-    return QWidget::event(event);
 }
 
 void SwitchSplitTabWidget::updateSplitButtons()
@@ -204,14 +200,13 @@ void SwitchSplitTabWidget::selectFakeTab()
     m_tabBar->setCurrentIndex(0);
 }
 
-SwitchSplitTabWidget::Mode SwitchSplitTabWidget::mode()
+SwitchSplitTabWidget::Mode SwitchSplitTabWidget::mode() const
 {
     const bool isTabBarNecessary = count() > 1;
     const int fakeTabPosition = 0;
     const int hasSelectedTab = m_tabBar->currentIndex() > fakeTabPosition;
-    if (isTabBarNecessary && !hasSelectedTab)
-        return SplitMode;
-    return TabMode;
+    // Note: When splitting the view by dragging from the side of the view, SplitMode is not detected
+    return (isTabBarNecessary && !hasSelectedTab) ? SplitMode : TabMode;
 }
 
 } // namespace QmlDesigner

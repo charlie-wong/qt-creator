@@ -24,37 +24,38 @@
 ****************************************************************************/
 
 #include "callgrindcontroller.h"
-#include "../valgrindprocess.h"
+
+#include <ssh/sftpsession.h>
+#include <ssh/sshconnectionmanager.h>
+
+#include <utils/fileutils.h>
+#include <utils/hostosinfo.h>
+#include <utils/qtcassert.h>
+#include <utils/qtcprocess.h>
+#include <utils/temporaryfile.h>
 
 #include <QDebug>
 #include <QDir>
-
-#include <utils/hostosinfo.h>
-#include <utils/qtcassert.h>
-#include <utils/temporaryfile.h>
-#include <ssh/sftpchannel.h>
+#include <QEventLoop>
 
 #define CALLGRIND_CONTROL_DEBUG 0
 
-const QLatin1String CALLGRIND_CONTROL_BINARY("callgrind_control");
+using namespace ProjectExplorer;
+using namespace Utils;
 
 namespace Valgrind {
 namespace Callgrind {
 
-CallgrindController::CallgrindController(QObject *parent)
-    : QObject(parent)
-    , m_process(0)
-    , m_valgrindProc(0)
-    , m_lastOption(Unknown)
-{
-}
+const char CALLGRIND_CONTROL_BINARY[] = "callgrind_control";
+
+CallgrindController::CallgrindController() = default;
 
 CallgrindController::~CallgrindController()
 {
     cleanupTempFile();
 }
 
-QString toOptionString(CallgrindController::Option option)
+static QString toOptionString(CallgrindController::Option option)
 {
     /* callgrind_control help from v3.9.0
 
@@ -86,23 +87,15 @@ QString toOptionString(CallgrindController::Option option)
 
 void CallgrindController::run(Option option)
 {
-    if (m_process) {
+    if (m_controllerProcess) {
         emit statusMessage(tr("Previous command has not yet finished."));
         return;
     }
-    QTC_ASSERT(m_valgrindProc, return);
-
-    m_process = new ValgrindProcess(m_valgrindProc->device(), this);
-
-    connect(m_process, &ValgrindProcess::finished,
-            this, &CallgrindController::processFinished);
-    connect(m_process, &ValgrindProcess::error,
-            this, &CallgrindController::processError);
 
     // save back current running operation
     m_lastOption = option;
 
-    const QString optionString = toOptionString(option);
+    m_controllerProcess = new ApplicationLauncher;
 
     switch (option) {
         case CallgrindController::Dump:
@@ -122,31 +115,48 @@ void CallgrindController::run(Option option)
     }
 
 #if CALLGRIND_CONTROL_DEBUG
-    m_process->setProcessChannelMode(QProcess::ForwardedChannels);
+    m_controllerProcess->setProcessChannelMode(QProcess::ForwardedChannels);
 #endif
-    const int pid = Utils::HostOsInfo::isWindowsHost() ? 0 : m_valgrindProc->pid();
-    m_process->setValgrindExecutable(CALLGRIND_CONTROL_BINARY);
-    m_process->setValgrindArguments(QStringList() << optionString << QString::number(pid));
-    m_process->run(ProjectExplorer::ApplicationLauncher::Gui);
+    connect(m_controllerProcess, &ApplicationLauncher::processExited,
+            this, &CallgrindController::controllerProcessFinished);
+    connect(m_controllerProcess, &ApplicationLauncher::error,
+            this, &CallgrindController::handleControllerProcessError);
+    connect(m_controllerProcess, &ApplicationLauncher::finished,
+            this, &CallgrindController::controllerProcessClosed);
+
+    Runnable controller = m_valgrindRunnable;
+    controller.executable =  FilePath::fromString(CALLGRIND_CONTROL_BINARY);
+    controller.commandLineArguments = QString("%1 %2").arg(toOptionString(option)).arg(m_pid);
+
+    if (!m_valgrindRunnable.device
+            || m_valgrindRunnable.device->type() == ProjectExplorer::Constants::DESKTOP_DEVICE_TYPE)
+        m_controllerProcess->start(controller);
+    else
+        m_controllerProcess->start(controller, m_valgrindRunnable.device);
 }
 
-void CallgrindController::processError(QProcess::ProcessError)
+void CallgrindController::setValgrindPid(qint64 pid)
 {
-    QTC_ASSERT(m_process, return);
-    const QString error = m_process->errorString();
+    m_pid = pid;
+}
+
+void CallgrindController::handleControllerProcessError(QProcess::ProcessError)
+{
+    QTC_ASSERT(m_controllerProcess, return);
+    const QString error = m_controllerProcess->errorString();
     emit statusMessage(tr("An error occurred while trying to run %1: %2").arg(CALLGRIND_CONTROL_BINARY).arg(error));
 
-    m_process->deleteLater();
-    m_process = 0;
+    m_controllerProcess->deleteLater();
+    m_controllerProcess = nullptr;
 }
 
-void CallgrindController::processFinished(int rc, QProcess::ExitStatus status)
+void CallgrindController::controllerProcessFinished(int rc, QProcess::ExitStatus status)
 {
-    QTC_ASSERT(m_process, return);
-    const QString error = m_process->errorString();
+    QTC_ASSERT(m_controllerProcess, return);
+    const QString error = m_controllerProcess->errorString();
 
-    m_process->deleteLater(); // Called directly from finished() signal in m_process
-    m_process = 0;
+    m_controllerProcess->deleteLater(); // Called directly from finished() signal in m_process
+    m_controllerProcess = nullptr;
 
     if (rc != 0 || status != QProcess::NormalExit) {
         qWarning() << "Controller exited abnormally:" << error;
@@ -175,38 +185,49 @@ void CallgrindController::processFinished(int rc, QProcess::ExitStatus status)
     m_lastOption = Unknown;
 }
 
-void CallgrindController::setValgrindProcess(ValgrindProcess *proc)
+void CallgrindController::controllerProcessClosed(bool success)
 {
-    m_valgrindProc = proc;
+    Q_UNUSED(success)
+    //    QTC_ASSERT(m_remote.m_process, return);
+
+//    m_remote.m_errorString = m_remote.m_process->errorString();
+//    if (status == QSsh::SshRemoteProcess::FailedToStart) {
+//        m_remote.m_error = QProcess::FailedToStart;
+//        emit ValgrindProcessX::error(QProcess::FailedToStart);
+//    } else if (status == QSsh::SshRemoteProcess::NormalExit) {
+//        emit finished(m_remote.m_process->exitCode(), QProcess::NormalExit);
+//    } else if (status == QSsh::SshRemoteProcess::CrashExit) {
+//        m_remote.m_error = QProcess::Crashed;
+//        emit finished(m_remote.m_process->exitCode(), QProcess::CrashExit);
+//    }
+     controllerProcessFinished(0, QProcess::NormalExit);
 }
 
 void CallgrindController::getLocalDataFile()
 {
-    QTC_ASSERT(m_valgrindProc, return);
-
     // we look for callgrind.out.PID, but there may be updated ones called ~.PID.NUM
-    QString baseFileName = QString::fromLatin1("callgrind.out.%1").
-            arg(m_valgrindProc->pid());
-    const QString workingDir = m_valgrindProc->workingDirectory();
+    const QString baseFileName = QString("callgrind.out.%1").arg(m_pid);
+    const QString workingDir = m_valgrindRunnable.workingDirectory;
     // first, set the to-be-parsed file to callgrind.out.PID
-    QString fileName = workingDir.isEmpty() ? baseFileName : (workingDir + QLatin1Char('/') + baseFileName);
+    QString fileName = workingDir.isEmpty() ? baseFileName : (workingDir + '/' + baseFileName);
 
-    if (!m_valgrindProc->isLocal()) {
-        ///TODO: error handling
-        emit statusMessage(tr("Downloading remote profile data..."));
-        m_ssh = m_valgrindProc->connection();
-        // if there are files like callgrind.out.PID.NUM, set it to the most recent one of those
-        QString cmd = QString::fromLatin1("ls -t %1* | head -n 1").arg(fileName);
-        m_findRemoteFile = m_ssh->createRemoteProcess(cmd.toUtf8());
-        connect(m_findRemoteFile.data(), &QSsh::SshRemoteProcess::readyReadStandardOutput,
-                this, &CallgrindController::foundRemoteFile);
-        m_findRemoteFile->start();
+    if (m_valgrindRunnable.device
+            && m_valgrindRunnable.device->type() != ProjectExplorer::Constants::DESKTOP_DEVICE_TYPE) {
+//        ///TODO: error handling
+//        emit statusMessage(tr("Downloading remote profile data..."));
+//        m_ssh = m_valgrindProc->connection();
+//        // if there are files like callgrind.out.PID.NUM, set it to the most recent one of those
+//        QString cmd = QString::fromLatin1("ls -t %1* | head -n 1").arg(fileName);
+//        m_findRemoteFile = m_ssh->createRemoteProcess(cmd.toUtf8());
+//        connect(m_findRemoteFile.data(), &QSsh::SshRemoteProcess::readyReadStandardOutput,
+//                this, &CallgrindController::foundRemoteFile);
+//        m_findRemoteFile->start();
     } else {
-        QDir dir(workingDir, QString::fromLatin1("%1.*").arg(baseFileName), QDir::Time);
-        QStringList outputFiles = dir.entryList();
+        const QDir dir(workingDir, QString::fromLatin1("%1.*").arg(baseFileName), QDir::Time);
+        const QStringList outputFiles = dir.entryList();
         // if there are files like callgrind.out.PID.NUM, set it to the most recent one of those
         if (!outputFiles.isEmpty())
-            fileName = workingDir + QLatin1Char('/') + dir.entryList().first();
+            fileName = workingDir + '/' + outputFiles.first();
 
         emit localParseDataAvailable(fileName);
     }
@@ -216,12 +237,12 @@ void CallgrindController::foundRemoteFile()
 {
     m_remoteFile = m_findRemoteFile->readAllStandardOutput().trimmed();
 
-    m_sftp = m_ssh->createSftpChannel();
-    connect(m_sftp.data(), &QSsh::SftpChannel::finished,
+    m_sftp = m_ssh->createSftpSession();
+    connect(m_sftp.get(), &QSsh::SftpSession::commandFinished,
             this, &CallgrindController::sftpJobFinished);
-    connect(m_sftp.data(), &QSsh::SftpChannel::initialized,
+    connect(m_sftp.get(), &QSsh::SftpSession::started,
             this, &CallgrindController::sftpInitialized);
-    m_sftp->initialize();
+    m_sftp->start();
 }
 
 void CallgrindController::sftpInitialized()
@@ -233,14 +254,14 @@ void CallgrindController::sftpInitialized()
     dataFile.setAutoRemove(false);
     dataFile.close();
 
-    m_downloadJob = m_sftp->downloadFile(QString::fromUtf8(m_remoteFile), m_tempDataFile, QSsh::SftpOverwriteExisting);
+    m_downloadJob = m_sftp->downloadFile(QString::fromUtf8(m_remoteFile), m_tempDataFile);
 }
 
 void CallgrindController::sftpJobFinished(QSsh::SftpJobId job, const QString &error)
 {
     QTC_ASSERT(job == m_downloadJob, return);
 
-    m_sftp->closeChannel();
+    m_sftp->quit();
 
     if (error.isEmpty())
         emit localParseDataAvailable(m_tempDataFile);
@@ -252,6 +273,11 @@ void CallgrindController::cleanupTempFile()
         QFile::remove(m_tempDataFile);
 
     m_tempDataFile.clear();
+}
+
+void CallgrindController::setValgrindRunnable(const Runnable &runnable)
+{
+    m_valgrindRunnable = runnable;
 }
 
 } // namespace Callgrind

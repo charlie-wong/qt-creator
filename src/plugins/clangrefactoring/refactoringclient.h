@@ -27,9 +27,10 @@
 
 #include "refactoringengine.h"
 
-#include <searchhandle.h>
+#include "searchhandle.h"
 
 #include <refactoringclientinterface.h>
+#include <clangpchmanager/progressmanager.h>
 
 #include <functional>
 
@@ -42,25 +43,29 @@ class SourceRangeWithTextContainer;
 
 namespace ClangRefactoring {
 
+class ClangQueryExampleHighlighter;
+class ClangQueryHighlighter;
+
 class RefactoringClient final : public ClangBackEnd::RefactoringClientInterface
 {
 public:
+    RefactoringClient(ClangPchManager::ProgressManagerInterface &progressManager)
+        : m_progressManager(progressManager)
+    {}
+
     void alive() override;
-    void sourceLocationsForRenamingMessage(
-            ClangBackEnd::SourceLocationsForRenamingMessage &&message) override;
     void sourceRangesAndDiagnosticsForQueryMessage(
             ClangBackEnd::SourceRangesAndDiagnosticsForQueryMessage &&message) override;
+    void sourceRangesForQueryMessage(
+            ClangBackEnd::SourceRangesForQueryMessage &&message) override;
 
-    void setLocalRenamingCallback(
-            CppTools::RefactoringEngineInterface::RenameCallback &&localRenamingCallback) override;
+    void progress(ClangBackEnd::ProgressMessage &&message) override;
+
     void setRefactoringEngine(ClangRefactoring::RefactoringEngine *refactoringEngine);
     void setSearchHandle(ClangRefactoring::SearchHandle *searchHandleInterface);
     ClangRefactoring::SearchHandle *searchHandle() const;
-
-    bool hasValidLocalRenamingCallback() const;
-
-    static std::unordered_map<uint, QString> convertFilePaths(
-            const std::unordered_map<uint, ClangBackEnd::FilePath> &filePaths);
+    void setClangQueryExampleHighlighter(ClangQueryExampleHighlighter *highlighter);
+    void setClangQueryHighlighter(ClangQueryHighlighter *highlighter);
 
     void setExpectedResultCount(uint count);
     uint expectedResultCount() const;
@@ -68,9 +73,9 @@ public:
 
     void setRefactoringConnectionClient(ClangBackEnd::RefactoringConnectionClient *connectionClient);
 
+
 unittest_public:
-    void addSearchResult(const ClangBackEnd::SourceRangeWithTextContainer &sourceRange,
-                         std::unordered_map<uint, QString> &filePaths);
+    void addSearchResult(const ClangBackEnd::SourceRangeWithTextContainer &sourceRange);
 
 private:
     void addSearchResults(const ClangBackEnd::SourceRangesContainer &sourceRanges);
@@ -79,12 +84,14 @@ private:
     void sendSearchIsFinished();
 
 private:
-    CppTools::RefactoringEngineInterface::RenameCallback localRenamingCallback;
-    ClangBackEnd::RefactoringConnectionClient *connectionClient = nullptr;
-    ClangRefactoring::SearchHandle *searchHandle_ = nullptr;
-    ClangRefactoring::RefactoringEngine *refactoringEngine = nullptr;
-    uint expectedResultCount_ = 0;
-    uint resultCounter_ = 0;
+    ClangBackEnd::RefactoringConnectionClient *m_connectionClient = nullptr;
+    SearchHandle *m_searchHandle = nullptr;
+    RefactoringEngine *m_refactoringEngine = nullptr;
+    ClangQueryExampleHighlighter *m_clangQueryExampleHighlighter = nullptr;
+    ClangQueryHighlighter *m_clangQueryHighlighter = nullptr;
+    ClangPchManager::ProgressManagerInterface &m_progressManager;
+    uint m_expectedResultCount = 0;
+    uint m_resultCounter = 0;
 };
 
 } // namespace ClangRefactoring

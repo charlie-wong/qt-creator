@@ -29,56 +29,46 @@
 #include "itestparser.h"
 
 namespace Autotest {
-namespace Internal {
 
 class IFrameworkSettings;
-class ITestSettingsPage;
 
 class ITestFramework
 {
 public:
-    explicit ITestFramework(bool activeByDefault) : m_active(activeByDefault) {}
-    virtual ~ITestFramework()
-    {
-        delete m_rootNode;
-        delete m_testParser;
-    }
+    explicit ITestFramework(bool activeByDefault);
+    virtual ~ITestFramework();
 
     virtual const char *name() const = 0;
     virtual unsigned priority() const = 0;          // should this be modifyable?
-    virtual bool hasFrameworkSettings() const { return false; }
-    virtual IFrameworkSettings *createFrameworkSettings() const { return 0; }
-    virtual ITestSettingsPage *createSettingsPage(QSharedPointer<IFrameworkSettings> settings) const
-    {
-        Q_UNUSED(settings);
-        return 0;
-    }
 
-    TestTreeItem *rootNode()
-    {   if (!m_rootNode)
-            m_rootNode = createRootNode();
-        return m_rootNode;
-    }
+    virtual IFrameworkSettings *frameworkSettings() { return nullptr; }
 
-    ITestParser *testParser()
-    {
-        if (!m_testParser)
-            m_testParser = createTestParser();
-        return m_testParser;
-    }
+    TestTreeItem *rootNode();
+    ITestParser *testParser();
+
+    Core::Id settingsId() const;
+    Core::Id id() const;
 
     bool active() const { return m_active; }
     void setActive(bool active) { m_active = active; }
+    bool grouping() const { return m_grouping; }
+    void setGrouping(bool group) { m_grouping = group; }
+    // framework specific tool tip to be displayed on the general settings page
+    virtual QString groupingToolTip() const { return QString(); }
+
+    void resetRootNode();
 
 protected:
-    virtual ITestParser *createTestParser() const = 0;
-    virtual TestTreeItem *createRootNode() const = 0;
+    virtual ITestParser *createTestParser() = 0;
+    virtual TestTreeItem *createRootNode() = 0;
 
 private:
-    TestTreeItem *m_rootNode = 0;
-    ITestParser *m_testParser = 0;
+    TestTreeItem *m_rootNode = nullptr;
+    ITestParser *m_testParser = nullptr;
     bool m_active = false;
+    bool m_grouping = false;
 };
 
-} // namespace Internal
+using TestFrameworks = QList<ITestFramework *>;
+
 } // namespace Autotest

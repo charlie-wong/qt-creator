@@ -32,12 +32,16 @@
 #include <QAction>
 #include <QObject>
 
+namespace ProjectExplorer { class RunControl; }
+
 namespace QmlProfiler {
 
-class QmlProfilerRunner;
+class QmlProfilerModelManager;
+class QmlProfilerStateManager;
 
 namespace Internal {
 
+class QmlProfilerRunner;
 class QmlProfilerClientManager;
 
 class QMLPROFILER_EXPORT QmlProfilerTool : public QObject
@@ -45,18 +49,15 @@ class QMLPROFILER_EXPORT QmlProfilerTool : public QObject
     Q_OBJECT
 
 public:
-    explicit QmlProfilerTool(QObject *parent);
-    ~QmlProfilerTool();
+    QmlProfilerTool();
+    ~QmlProfilerTool() override;
 
     static QmlProfilerTool *instance();
 
     void finalizeRunControl(QmlProfilerRunner *runWorker);
 
     bool prepareTool();
-    void startRemoteTool();
-
-    QString summary(const QVector<int> &typeIds) const;
-    QStringList details(int typeId) const;
+    ProjectExplorer::RunControl *attachToWaitingApplication();
 
     static QList <QAction *> profilerContextMenuActions();
 
@@ -65,48 +66,49 @@ public:
     static void logError(const QString &msg);
     static void showNonmodalWarning(const QString &warningMsg);
 
-    static QmlProfilerClientManager *clientManager();
+    QmlProfilerClientManager *clientManager();
+    QmlProfilerModelManager *modelManager();
+    QmlProfilerStateManager *stateManager();
 
-public slots:
     void profilerStateChanged();
-    void clientRecordingChanged();
     void serverRecordingChanged();
     void clientsDisconnected();
     void setAvailableFeatures(quint64 features);
     void setRecordedFeatures(quint64 features);
-
     void recordingButtonChanged(bool recording);
-    void setRecording(bool recording);
 
     void gotoSourceLocation(const QString &fileUrl, int lineNumber, int columnNumber);
-    void selectType(int typeId);
 
-private slots:
+    void showSaveDialog();
+    void showLoadDialog();
+
+    void profileStartupProject();
+
+    QAction *startAction() const;
+    QAction *stopAction() const;
+
+private:
+    void clearEvents();
     void clearData();
     void showErrorDialog(const QString &error);
     void profilerDataModelStateChanged();
     void updateTimeDisplay();
     void showTimeLineSearch();
 
-    void showSaveOption();
-    void showLoadOption();
-    void showSaveDialog();
-    void showLoadDialog();
     void onLoadSaveFinished();
 
     void toggleRequestedFeature(QAction *action);
     void toggleVisibleFeature(QAction *action);
 
-private:
     void updateRunActions();
     void clearDisplay();
-    template<ProfileFeature feature>
-    void updateFeatures(quint64 features);
     bool checkForUnsavedNotes();
-    void restoreFeatureVisibility();
     void setButtonsEnabled(bool enable);
-    void createTextMarks();
-    void clearTextMarks();
+    void createInitialTextMarks();
+
+    void initialize();
+    void finalize();
+    void clear();
 
     class QmlProfilerToolPrivate;
     QmlProfilerToolPrivate *d;

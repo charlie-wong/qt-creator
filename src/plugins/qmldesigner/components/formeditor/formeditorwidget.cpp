@@ -34,35 +34,39 @@
 #include <model.h>
 #include <theme.h>
 
-#include <QWheelEvent>
-#include <QVBoxLayout>
-#include <QActionGroup>
-#include <toolbox.h>
-#include <zoomaction.h>
+#include <backgroundaction.h>
 #include <formeditorgraphicsview.h>
 #include <formeditorscene.h>
 #include <formeditorview.h>
 #include <lineeditaction.h>
-#include <backgroundaction.h>
+#include <zoomaction.h>
+#include <toolbox.h>
 
+#include <coreplugin/actionmanager/actionmanager.h>
+#include <coreplugin/actionmanager/command.h>
 #include <coreplugin/icore.h>
 
 #include <utils/fileutils.h>
 #include <utils/utilsicons.h>
 
+#include <QActionGroup>
 #include <QFileDialog>
 #include <QPainter>
+#include <QVBoxLayout>
+#include <QWheelEvent>
 
 namespace QmlDesigner {
 
-FormEditorWidget::FormEditorWidget(FormEditorView *view)
-    : QWidget(),
+FormEditorWidget::FormEditorWidget(FormEditorView *view) :
     m_formEditorView(view)
 {
-    setStyleSheet(Theme::replaceCssColors(QString::fromUtf8(Utils::FileReader::fetchQrc(QLatin1String(":/qmldesigner/formeditorstylesheet.css")))));
+    Core::Context context(Constants::C_QMLFORMEDITOR);
+    m_context = new Core::IContext(this);
+    m_context->setContext(context);
+    m_context->setWidget(this);
 
-    QVBoxLayout *fillLayout = new QVBoxLayout(this);
-    fillLayout->setMargin(0);
+    auto fillLayout = new QVBoxLayout(this);
+    fillLayout->setContentsMargins(0, 0, 0, 0);
     fillLayout->setSpacing(0);
     setLayout(fillLayout);
 
@@ -70,45 +74,42 @@ FormEditorWidget::FormEditorWidget(FormEditorView *view)
 
     m_toolActionGroup = new QActionGroup(this);
 
-    QActionGroup *layoutActionGroup = new QActionGroup(this);
+    auto layoutActionGroup = new QActionGroup(this);
     layoutActionGroup->setExclusive(true);
 
-    m_noSnappingAction = layoutActionGroup->addAction(tr("No snapping (T)."));
-    m_noSnappingAction->setShortcut(Qt::Key_W);
+    m_noSnappingAction = layoutActionGroup->addAction(tr("No snapping."));
     m_noSnappingAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     m_noSnappingAction->setCheckable(true);
     m_noSnappingAction->setChecked(true);
     m_noSnappingAction->setIcon(Icons::NO_SNAPPING.icon());
+    registerActionAsCommand(m_noSnappingAction, Constants::FORMEDITOR_NO_SNAPPING, QKeySequence(Qt::Key_T));
 
-    m_snappingAndAnchoringAction = layoutActionGroup->addAction(tr("Snap to parent or sibling items and generate anchors (W)."));
-    m_snappingAndAnchoringAction->setShortcut(Qt::Key_W);
-    m_snappingAndAnchoringAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    m_snappingAndAnchoringAction = layoutActionGroup->addAction(tr("Snap to parent or sibling items and generate anchors."));
     m_snappingAndAnchoringAction->setCheckable(true);
     m_snappingAndAnchoringAction->setChecked(true);
     m_snappingAndAnchoringAction->setIcon(Icons::NO_SNAPPING_AND_ANCHORING.icon());
+    registerActionAsCommand(m_snappingAndAnchoringAction, Constants::FORMEDITOR_NO_SNAPPING_AND_ANCHORING, QKeySequence(Qt::Key_W));
 
-    m_snappingAction = layoutActionGroup->addAction(tr("Snap to parent or sibling items but do not generate anchors (E)."));
-    m_snappingAction->setShortcut(Qt::Key_E);
-    m_snappingAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    m_snappingAction = layoutActionGroup->addAction(tr("Snap to parent or sibling items but do not generate anchors."));
     m_snappingAction->setCheckable(true);
     m_snappingAction->setChecked(true);
     m_snappingAction->setIcon(Icons::SNAPPING.icon());
-
+    registerActionAsCommand(m_snappingAction, Constants::FORMEDITOR_SNAPPING, QKeySequence(Qt::Key_E));
 
     addActions(layoutActionGroup->actions());
     upperActions.append(layoutActionGroup->actions());
 
-    QAction *separatorAction = new QAction(this);
+    auto separatorAction = new QAction(this);
     separatorAction->setSeparator(true);
     addAction(separatorAction);
     upperActions.append(separatorAction);
 
-    m_showBoundingRectAction = new QAction(tr("Show bounding rectangles and stripes for empty items (A)."), this);
-    m_showBoundingRectAction->setShortcut(Qt::Key_A);
-    m_showBoundingRectAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    m_showBoundingRectAction = new QAction(Utils::Icons::BOUNDING_RECT.icon(),
+                                           tr("Show bounding rectangles and stripes for empty items."),
+                                           this);
     m_showBoundingRectAction->setCheckable(true);
-    m_showBoundingRectAction->setChecked(true);
-    m_showBoundingRectAction->setIcon(Utils::Icons::BOUNDING_RECT.icon());
+    m_showBoundingRectAction->setChecked(false);
+    registerActionAsCommand(m_showBoundingRectAction, Constants::FORMEDITOR_NO_SHOW_BOUNDING_RECTANGLE, QKeySequence(Qt::Key_A));
 
     addAction(m_showBoundingRectAction.data());
     upperActions.append(m_showBoundingRectAction.data());
@@ -132,16 +133,8 @@ FormEditorWidget::FormEditorWidget(FormEditorView *view)
     addAction(m_rootHeightAction.data());
     upperActions.append(m_rootHeightAction.data());
 
-    static const QList<Utils::Icon> icon = {
-        Utils::Icon({{":/baremetal/images/baremetaldevicesmall.png",
-                      Utils::Theme::PanelTextColorDark}}, Utils::Icon::Tint),
-        Utils::Icon({{":/baremetal/images/baremetaldevice.png",
-                      Utils::Theme::IconsBaseColor}})};
-
-
     m_toolBox = new ToolBox(this);
     fillLayout->addWidget(m_toolBox.data());
-
 
     m_toolBox->setLeftSideActions(upperActions);
 
@@ -158,11 +151,9 @@ FormEditorWidget::FormEditorWidget(FormEditorView *view)
     upperActions.append(m_zoomAction.data());
     m_toolBox->addRightSideAction(m_zoomAction.data());
 
-    m_resetAction = new QAction(tr("Reset view (R)."), this);
-    m_resetAction->setShortcut(Qt::Key_R);
-    m_resetAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    m_resetAction->setIcon(Utils::Icons::RESET_TOOLBAR.icon());
-    connect(m_resetAction.data(), &QAction::triggered, this, &FormEditorWidget::resetNodeInstanceView);
+    m_resetAction = new QAction(Utils::Icons::RESET_TOOLBAR.icon(), tr("Reset View"), this);
+    registerActionAsCommand(m_resetAction, Constants::FORMEDITOR_REFRESH, QKeySequence(Qt::Key_R));
+
     addAction(m_resetAction.data());
     upperActions.append(m_resetAction.data());
     m_toolBox->addRightSideAction(m_resetAction.data());
@@ -170,13 +161,15 @@ FormEditorWidget::FormEditorWidget(FormEditorView *view)
     m_graphicsView = new FormEditorGraphicsView(this);
 
     fillLayout->addWidget(m_graphicsView.data());
-    m_graphicsView.data()->setStyleSheet(Theme::replaceCssColors(QString::fromUtf8(Utils::FileReader::fetchQrc(QLatin1String(":/qmldesigner/scrollbar.css")))));
+
+    QByteArray sheet = Utils::FileReader::fetchQrc(":/qmldesigner/stylesheet.css");
+    sheet += Utils::FileReader::fetchQrc(":/qmldesigner/scrollbar.css");
+    setStyleSheet(Theme::replaceCssColors(QString::fromUtf8(sheet)));
 }
 
 void FormEditorWidget::changeTransformTool(bool checked)
 {
     if (checked)
-
         m_formEditorView->changeToTransformTools();
 }
 
@@ -202,22 +195,29 @@ void FormEditorWidget::changeRootItemHeight(const QString &heighText)
 
 void FormEditorWidget::changeBackgound(const QColor &color)
 {
-    if (color.alpha() == 0)
+    if (color.alpha() == 0) {
         m_graphicsView->activateCheckboardBackground();
-    else
+        if (m_formEditorView->rootModelNode().hasAuxiliaryData("formeditorColor"))
+            m_formEditorView->rootModelNode().setAuxiliaryData("formeditorColor", {});
+    } else {
         m_graphicsView->activateColoredBackground(color);
+        m_formEditorView->rootModelNode().setAuxiliaryData("formeditorColor", color);
+    }
 }
 
-void FormEditorWidget::resetNodeInstanceView()
+void FormEditorWidget::registerActionAsCommand(QAction *action, Core::Id id, const QKeySequence &keysequence)
 {
-    m_formEditorView->setCurrentStateNode(m_formEditorView->rootModelNode());
-    m_formEditorView->resetPuppet();
+    Core::Context context(Constants::C_QMLFORMEDITOR);
+
+    Core::Command *command = Core::ActionManager::registerAction(action, id, context);
+    command->setDefaultKeySequence(keysequence);
+    command->augmentActionWithShortcutToolTip(action);
 }
 
 void FormEditorWidget::wheelEvent(QWheelEvent *event)
 {
     if (event->modifiers().testFlag(Qt::ControlModifier)) {
-        if (event->delta() > 0)
+        if (event->angleDelta().y() > 0)
             zoomAction()->zoomOut();
         else
             zoomAction()->zoomIn();
@@ -240,6 +240,17 @@ void FormEditorWidget::updateActions()
             m_rootHeightAction->setLineEditText(m_formEditorView->rootModelNode().auxiliaryData("height").toString());
         else
             m_rootHeightAction->clearLineEditText();
+
+        if (m_formEditorView->rootModelNode().hasAuxiliaryData("formeditorColor"))
+            m_backgroundAction->setColor(m_formEditorView->rootModelNode().auxiliaryData("formeditorColor").value<QColor>());
+        else
+            m_backgroundAction->setColor(Qt::transparent);
+
+        if (m_formEditorView->rootModelNode().hasAuxiliaryData("formeditorZoom"))
+            m_zoomAction->setZoomLevel(m_formEditorView->rootModelNode().auxiliaryData("formeditorZoom").toDouble());
+        else
+            m_zoomAction->setZoomLevel(1.0);
+
     } else {
         m_rootWidthAction->clearLineEditText();
         m_rootHeightAction->clearLineEditText();
@@ -293,6 +304,11 @@ ZoomAction *FormEditorWidget::zoomAction() const
     return m_zoomAction.data();
 }
 
+QAction *FormEditorWidget::resetAction() const
+{
+    return m_resetAction.data();
+}
+
 QAction *FormEditorWidget::showBoundingRectAction() const
 {
     return m_showBoundingRectAction.data();
@@ -313,6 +329,13 @@ void FormEditorWidget::setZoomLevel(double zoomLevel)
     m_graphicsView->resetTransform();
 
     m_graphicsView->scale(zoomLevel, zoomLevel);
+
+    if (zoomLevel == 1.0) {
+        if (m_formEditorView->rootModelNode().hasAuxiliaryData("formeditorZoom"))
+            m_formEditorView->rootModelNode().setAuxiliaryData("formeditorZoom", {});
+    } else {
+        m_formEditorView->rootModelNode().setAuxiliaryData("formeditorZoom", zoomLevel);
+    }
 }
 
 void FormEditorWidget::setScene(FormEditorScene *scene)
@@ -340,13 +363,12 @@ double FormEditorWidget::containerPadding() const
     return DesignerSettings::getValue(DesignerSettingsKey::CONTAINERPADDING).toDouble();
 }
 
-
-QString FormEditorWidget::contextHelpId() const
+void FormEditorWidget::contextHelp(const Core::IContext::HelpCallback &callback) const
 {
     if (m_formEditorView)
-        return m_formEditorView->contextHelpId();
-
-    return QString();
+        m_formEditorView->contextHelp(callback);
+    else
+        callback({});
 }
 
 void FormEditorWidget::setRootItemRect(const QRectF &rect)

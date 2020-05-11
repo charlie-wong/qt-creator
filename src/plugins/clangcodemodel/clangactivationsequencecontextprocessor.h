@@ -49,8 +49,10 @@ public:
 
     const QTextCursor &textCursor_forTestOnly() const;
 
+    enum class NameCategory { Function, NonFunction };
     static int findStartOfName(const TextEditor::AssistInterface *assistInterface,
-                               int startPosition);
+                               int startPosition,
+                               NameCategory category = NameCategory::NonFunction);
     static int skipPrecedingWhitespace(const TextEditor::AssistInterface *assistInterface,
                                        int startPosition);
 
@@ -65,7 +67,7 @@ protected:
     void processComment();
     void processInclude();
     void processSlashOutsideOfAString();
-    void processLeftParen();
+    void processLeftParenOrBrace();
     void processPreprocessorInclude();
     void resetPositionsForEOFCompletionKind();
 

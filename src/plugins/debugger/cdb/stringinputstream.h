@@ -35,13 +35,14 @@ class StringInputStream
     Q_DISABLE_COPY(StringInputStream)
 
 public:
-    typedef void (ModifierFunc)(StringInputStream &s);
+    using ModifierFunc = void (StringInputStream &);
 
     explicit StringInputStream(QString &str);
 
     StringInputStream &operator<<(char a)              { m_target.append(a); return *this; }
     StringInputStream &operator<<(const char *a)       { m_target.append(QString::fromUtf8(a)); return *this; }
     StringInputStream &operator<<(const QString &a)    { m_target.append(a); return *this; }
+    StringInputStream &operator<<(const QStringRef &a) { m_target.append(a); return *this; }
 
     StringInputStream &operator<<(int i) { appendInt(i); return *this; }
     StringInputStream &operator<<(unsigned i) { appendInt(i); return *this; }
@@ -62,9 +63,9 @@ private:
     template <class IntType> void appendInt(IntType i);
 
     QString &m_target;
-    int m_integerBase;
-    bool m_hexPrefix;
-    int m_width;
+    int m_integerBase = 10;
+    bool m_hexPrefix = false;
+    int m_width = 0;
 };
 
 template <class IntType>

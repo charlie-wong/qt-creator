@@ -31,6 +31,7 @@
 #include <projectexplorer/deployablefile.h>
 #include <utils/qtcassert.h>
 
+#include <QDateTime>
 #include <QString>
 
 using namespace ProjectExplorer;
@@ -59,9 +60,8 @@ public:
 
 using namespace Internal;
 
-AbstractUploadAndInstallPackageService::AbstractUploadAndInstallPackageService(QObject *parent)
-    : AbstractRemoteLinuxDeployService(parent),
-      d(new AbstractUploadAndInstallPackageServicePrivate)
+AbstractUploadAndInstallPackageService::AbstractUploadAndInstallPackageService()
+    : d(new AbstractUploadAndInstallPackageServicePrivate)
 {
 }
 
@@ -87,7 +87,7 @@ QString AbstractUploadAndInstallPackageService::uploadDir() const
 
 bool AbstractUploadAndInstallPackageService::isDeploymentNecessary() const
 {
-    return hasChangedSinceLastDeployment(DeployableFile(packageFilePath(), QString()));
+    return hasLocalFileChanged(DeployableFile(packageFilePath(), QString()));
 }
 
 void AbstractUploadAndInstallPackageService::doDeviceSetup()
@@ -109,7 +109,7 @@ void AbstractUploadAndInstallPackageService::doDeploy()
     QTC_ASSERT(d->state == Inactive, return);
 
     d->state = Uploading;
-    const QString fileName = Utils::FileName::fromString(packageFilePath()).fileName();
+    const QString fileName = Utils::FilePath::fromString(packageFilePath()).fileName();
     const QString remoteFilePath = uploadDir() + QLatin1Char('/') + fileName;
     connect(d->uploader, &PackageUploader::progress,
             this, &AbstractUploadAndInstallPackageService::progressMessage);
@@ -147,7 +147,7 @@ void AbstractUploadAndInstallPackageService::handleUploadFinished(const QString 
 
     emit progressMessage(tr("Successfully uploaded package file."));
     const QString remoteFilePath = uploadDir() + QLatin1Char('/')
-        + Utils::FileName::fromString(packageFilePath()).fileName();
+        + Utils::FilePath::fromString(packageFilePath()).fileName();
     d->state = Installing;
     emit progressMessage(tr("Installing package to device..."));
     connect(packageInstaller(), &AbstractRemoteLinuxPackageInstaller::stdoutData,
@@ -164,7 +164,7 @@ void AbstractUploadAndInstallPackageService::handleInstallationFinished(const QS
     QTC_ASSERT(d->state == Installing, return);
 
     if (errorMsg.isEmpty()) {
-        saveDeploymentTimeStamp(DeployableFile(packageFilePath(), QString()));
+        saveDeploymentTimeStamp(DeployableFile(packageFilePath(), QString()), QDateTime());
         emit progressMessage(tr("Package installed."));
     } else {
         emit errorMessage(errorMsg);
@@ -175,8 +175,8 @@ void AbstractUploadAndInstallPackageService::handleInstallationFinished(const QS
 void AbstractUploadAndInstallPackageService::setFinished()
 {
     d->state = Inactive;
-    disconnect(d->uploader, 0, this, 0);
-    disconnect(packageInstaller(), 0, this, 0);
+    disconnect(d->uploader, nullptr, this, nullptr);
+    disconnect(packageInstaller(), nullptr, this, nullptr);
     handleDeploymentDone();
 }
 

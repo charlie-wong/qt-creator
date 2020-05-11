@@ -25,104 +25,61 @@
 
 #pragma once
 
+#include <qtsupport/baseqtversion.h>
+
 #include <projectexplorer/gcctoolchain.h>
-#include <projectexplorer/toolchainconfigwidget.h>
 
 namespace Android {
 namespace Internal {
 
-class AndroidToolChain : public ProjectExplorer::GccToolChain
+using ToolChainList = QList<ProjectExplorer::ToolChain *>;
+
+class AndroidToolChain : public ProjectExplorer::ClangToolChain
 {
+    Q_DECLARE_TR_FUNCTIONS(Android::Internal::AndroidToolChain)
+
 public:
     ~AndroidToolChain() override;
 
-    QString typeDisplayName() const override;
-
     bool isValid() const override;
-
     void addToEnvironment(Utils::Environment &env) const override;
 
-    bool operator ==(const ProjectExplorer::ToolChain &) const override;
-
-    ProjectExplorer::ToolChainConfigWidget *configurationWidget() override;
-    virtual Utils::FileName suggestedDebugger() const override;
-    Utils::FileName suggestedGdbServer() const;
-
-    QVariantMap toMap() const override;
+    QStringList suggestedMkspecList() const override;
+    Utils::FilePath makeCommand(const Utils::Environment &environment) const override;
     bool fromMap(const QVariantMap &data) override;
-    Utils::FileNameList suggestedMkspecList() const override;
-    QString makeCommand(const Utils::Environment &environment) const override;
 
-    QString ndkToolChainVersion() const;
-
-    bool isSecondaryToolChain() const;
-    void setSecondaryToolChain(bool b);
+    void setNdkLocation(const Utils::FilePath &ndkLocation);
+    Utils::FilePath ndkLocation() const;
 
 protected:
     DetectedAbisResult detectSupportedAbis() const override;
 
 private:
-    explicit AndroidToolChain(const ProjectExplorer::Abi &abi, const QString &ndkToolChainVersion,
-                              Core::Id l, Detection d);
-    AndroidToolChain();
-    AndroidToolChain(const AndroidToolChain &);
-
-    QString m_ndkToolChainVersion;
-    bool m_secondaryToolChain;
+    explicit AndroidToolChain();
 
     friend class AndroidToolChainFactory;
+
+    mutable Utils::FilePath m_ndkLocation;
 };
-
-
-class AndroidToolChainConfigWidget : public ProjectExplorer::ToolChainConfigWidget
-{
-    Q_OBJECT
-
-public:
-    AndroidToolChainConfigWidget(AndroidToolChain *);
-
-private:
-    void applyImpl() override {}
-    void discardImpl() override {}
-    bool isDirtyImpl() const override { return false; }
-    void makeReadOnlyImpl() override {}
-};
-
 
 class AndroidToolChainFactory : public ProjectExplorer::ToolChainFactory
 {
-    Q_OBJECT
-
 public:
     AndroidToolChainFactory();
-    QSet<Core::Id> supportedLanguages() const override;
-
-    QList<ProjectExplorer::ToolChain *> autoDetect(const QList<ProjectExplorer::ToolChain *> &alreadyKnown) override;
-    bool canRestore(const QVariantMap &data) override;
-    ProjectExplorer::ToolChain *restore(const QVariantMap &data) override;
 
     class AndroidToolChainInformation
     {
     public:
         Core::Id language;
-        Utils::FileName compilerCommand;
+        Utils::FilePath compilerCommand;
         ProjectExplorer::Abi abi;
         QString version;
     };
 
-    static QList<ProjectExplorer::ToolChain *>
-    autodetectToolChainsForNdk(const Utils::FileName &ndkPath,
-                               const QList<ProjectExplorer::ToolChain *> &alreadyKnown);
-    static QList<AndroidToolChainInformation> toolchainPathsForNdk(const Utils::FileName &ndkPath);
-
-    static QList<int> versionNumberFromString(const QString &version);
-    static bool versionCompareLess(const QList<int> &a, const QList<int> &b);
-    static bool versionCompareLess(QList<AndroidToolChain *> atc,
-                                   QList<AndroidToolChain *> btc);
-    static QList<int> newestToolChainVersionForArch(const ProjectExplorer::Abi &abi);
-private:
-    static QHash<ProjectExplorer::Abi, QList<int> > m_newestVersionForAbi;
-    static Utils::FileName m_ndkLocation;
+    static ToolChainList autodetectToolChains(const ToolChainList &alreadyKnown);
+    static ToolChainList autodetectToolChainsFromNdks(const ToolChainList &alreadyKnown,
+                                                      const QList<Utils::FilePath> &ndkLocations,
+                                                      const bool isCustom = false);
 };
 
 } // namespace Internal

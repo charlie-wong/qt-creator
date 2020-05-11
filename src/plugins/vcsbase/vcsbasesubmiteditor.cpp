@@ -31,30 +31,40 @@
 #include "submiteditorwidget.h"
 #include "submitfieldwidget.h"
 #include "submitfilemodel.h"
+#include "vcsbaseplugin.h"
 #include "vcsoutputwindow.h"
 #include "vcsplugin.h"
-#include "vcsprojectcache.h"
 
 #include <aggregation/aggregate.h>
-#include <cpptools/cppmodelmanager.h>
+
+#include <coreplugin/find/basetextfind.h>
 #include <coreplugin/icore.h>
 #include <coreplugin/editormanager/editormanager.h>
+
+#include <extensionsystem/invoker.h>
+#include <extensionsystem/pluginmanager.h>
+
+#include <utils/algorithm.h>
 #include <utils/checkablemessagebox.h>
 #include <utils/completingtextedit.h>
-#include <utils/synchronousprocess.h>
 #include <utils/fileutils.h>
+#include <utils/icon.h>
 #include <utils/qtcassert.h>
+#include <utils/synchronousprocess.h>
 #include <utils/temporarydirectory.h>
-#include <coreplugin/find/basetextfind.h>
+#include <utils/theme/theme.h>
+
 #include <texteditor/fontsettings.h>
 #include <texteditor/texteditorsettings.h>
 
 #include <projectexplorer/project.h>
+#include <projectexplorer/session.h>
 
 #include <QDir>
 #include <QFileInfo>
 #include <QPointer>
 #include <QProcess>
+#include <QPushButton>
 #include <QSet>
 #include <QStringListModel>
 #include <QStyle>
@@ -70,28 +80,9 @@ enum { debug = 0 };
 enum { wantToolBar = 0 };
 
 // Return true if word is meaningful and can be added to a completion model
-static bool acceptsWordForCompletion(const char *word)
+static bool acceptsWordForCompletion(const QString &word)
 {
-    if (word == 0)
-        return false;
-    static const std::size_t minWordLength = 7;
-    return std::strlen(word) >= minWordLength;
-}
-
-// Return the class name which function belongs to
-static const char *belongingClassName(const CPlusPlus::Function *function)
-{
-    if (function == 0)
-        return 0;
-
-    const CPlusPlus::Name *funcName = function->name();
-    if (funcName != 0 && funcName->asQualifiedNameId() != 0) {
-        const CPlusPlus::Name *funcBaseName = funcName->asQualifiedNameId()->base();
-        if (funcBaseName != 0 && funcBaseName->identifier() != 0)
-            return funcBaseName->identifier()->chars();
-    }
-
-    return 0;
+    return word.size() >= 7;
 }
 
 /*!
@@ -143,31 +134,25 @@ static inline QString submitMessageCheckScript()
 class VcsBaseSubmitEditorPrivate
 {
 public:
-    VcsBaseSubmitEditorPrivate(const VcsBaseSubmitEditorParameters *parameters,
-                               SubmitEditorWidget *editorWidget,
+    VcsBaseSubmitEditorPrivate(SubmitEditorWidget *editorWidget,
                                VcsBaseSubmitEditor *q);
 
     SubmitEditorWidget *m_widget;
-    QToolBar *m_toolWidget;
-    const VcsBaseSubmitEditorParameters *m_parameters;
+    QToolBar *m_toolWidget = nullptr;
+    VcsBaseSubmitEditorParameters m_parameters;
     QString m_displayName;
     QString m_checkScriptWorkingDirectory;
-    SubmitEditorFile *m_file;
+    SubmitEditorFile m_file;
 
     QPointer<QAction> m_diffAction;
     QPointer<QAction> m_submitAction;
 
-    NickNameDialog *m_nickNameDialog;
+    NickNameDialog *m_nickNameDialog = nullptr;
 };
 
-VcsBaseSubmitEditorPrivate::VcsBaseSubmitEditorPrivate(const VcsBaseSubmitEditorParameters *parameters,
-                                                       SubmitEditorWidget *editorWidget,
+VcsBaseSubmitEditorPrivate::VcsBaseSubmitEditorPrivate(SubmitEditorWidget *editorWidget,
                                                        VcsBaseSubmitEditor *q) :
-    m_widget(editorWidget),
-    m_toolWidget(0),
-    m_parameters(parameters),
-    m_file(new SubmitEditorFile(parameters, q)),
-    m_nickNameDialog(0)
+    m_widget(editorWidget), m_file(q)
 {
     auto completer = new QCompleter(q);
     completer->setCaseSensitivity(Qt::CaseSensitive);
@@ -176,15 +161,23 @@ VcsBaseSubmitEditorPrivate::VcsBaseSubmitEditorPrivate(const VcsBaseSubmitEditor
     m_widget->descriptionEdit()->setCompletionLengthThreshold(4);
 }
 
-VcsBaseSubmitEditor::VcsBaseSubmitEditor(const VcsBaseSubmitEditorParameters *parameters,
-                                         SubmitEditorWidget *editorWidget) :
-    d(new VcsBaseSubmitEditorPrivate(parameters, editorWidget, this))
+VcsBaseSubmitEditor::VcsBaseSubmitEditor(SubmitEditorWidget *editorWidget)
 {
+    setWidget(editorWidget);
+    d = new VcsBaseSubmitEditorPrivate(editorWidget, this);
+}
+
+void VcsBaseSubmitEditor::setParameters(const VcsBaseSubmitEditorParameters &parameters)
+{
+    d->m_parameters = parameters;
+    d->m_file.setId(parameters.id);
+    d->m_file.setMimeType(QLatin1String(parameters.mimeType));
+
     setWidget(d->m_widget);
-    document()->setPreferredDisplayName(QCoreApplication::translate("VCS", d->m_parameters->displayName));
+    document()->setPreferredDisplayName(QCoreApplication::translate("VCS", d->m_parameters.displayName));
 
     // Message font according to settings
-    CompletingTextEdit *descriptionEdit = editorWidget->descriptionEdit();
+    CompletingTextEdit *descriptionEdit = d->m_widget->descriptionEdit();
     const TextEditor::FontSettings fs = TextEditor::TextEditorSettings::fontSettings();
     const QTextCharFormat tf = fs.toTextCharFormat(TextEditor::C_TEXT);
     descriptionEdit->setFont(tf.font());
@@ -192,13 +185,13 @@ VcsBaseSubmitEditor::VcsBaseSubmitEditor(const VcsBaseSubmitEditorParameters *pa
     QPalette pal;
     pal.setColor(QPalette::Base, tf.background().color());
     pal.setColor(QPalette::Text, tf.foreground().color());
-    pal.setColor(QPalette::Foreground, tf.foreground().color());
+    pal.setColor(QPalette::WindowText, tf.foreground().color());
     if (selectionFormat.background().style() != Qt::NoBrush)
         pal.setColor(QPalette::Highlight, selectionFormat.background().color());
     pal.setBrush(QPalette::HighlightedText, selectionFormat.foreground());
     descriptionEdit->setPalette(pal);
 
-    d->m_file->setModified(false);
+    d->m_file.setModified(false);
     // We are always clean to prevent the editor manager from asking to save.
 
     connect(d->m_widget, &SubmitEditorWidget::diffSelected,
@@ -307,13 +300,6 @@ void VcsBaseSubmitEditor::registerActions(QAction *editorUndoAction, QAction *ed
     d->m_submitAction = submitAction;
 }
 
-void VcsBaseSubmitEditor::unregisterActions(QAction *editorUndoAction,  QAction *editorRedoAction,
-                           QAction *submitAction, QAction *diffAction)
-{
-    d->m_widget->unregisterActions(editorUndoAction, editorRedoAction, submitAction, diffAction);
-    d->m_diffAction = d->m_submitAction = 0;
-}
-
 QAbstractItemView::SelectionMode VcsBaseSubmitEditor::fileListSelectionMode() const
 {
     return d->m_widget->fileListSelectionMode();
@@ -354,9 +340,9 @@ void VcsBaseSubmitEditor::setLineWrapWidth(int w)
     d->m_widget->setLineWrapWidth(w);
 }
 
-Core::IDocument *VcsBaseSubmitEditor::document()
+Core::IDocument *VcsBaseSubmitEditor::document() const
 {
-    return d->m_file;
+    return &d->m_file;
 }
 
 QString VcsBaseSubmitEditor::checkScriptWorkingDirectory() const
@@ -388,13 +374,13 @@ static QToolBar *createToolBar(const QWidget *someWidget, QAction *submitAction,
 QWidget *VcsBaseSubmitEditor::toolBar()
 {
     if (!wantToolBar)
-        return 0;
+        return nullptr;
 
     if (d->m_toolWidget)
         return d->m_toolWidget;
 
     if (!d->m_diffAction && !d->m_submitAction)
-        return 0;
+        return nullptr;
 
     // Create
     d->m_toolWidget = createToolBar(d->m_widget, d->m_submitAction, d->m_diffAction);
@@ -406,58 +392,46 @@ QStringList VcsBaseSubmitEditor::checkedFiles() const
     return d->m_widget->checkedFiles();
 }
 
+static QSet<FilePath> filesFromModel(SubmitFileModel *model)
+{
+    QSet<FilePath> result;
+    result.reserve(model->rowCount());
+    for (int row = 0; row < model->rowCount(); ++row) {
+        result.insert(FilePath::fromString(
+            QFileInfo(model->repositoryRoot(), model->file(row)).absoluteFilePath()));
+    }
+    return result;
+}
+
 void VcsBaseSubmitEditor::setFileModel(SubmitFileModel *model)
 {
     QTC_ASSERT(model, return);
     SubmitFileModel *oldModel = d->m_widget->fileModel();
-    if (oldModel)
+    QList<int> selected;
+    if (oldModel) {
         model->updateSelections(oldModel);
+        selected = d->m_widget->selectedRows();
+    }
     d->m_widget->setFileModel(model);
     delete oldModel;
+    if (!selected.isEmpty())
+        d->m_widget->setSelectedRows(selected);
 
-    QSet<QString> uniqueSymbols;
-    const CPlusPlus::Snapshot cppSnapShot = CppTools::CppModelManager::instance()->snapshot();
-
-    // Iterate over the files and get interesting symbols
-    for (int row = 0; row < model->rowCount(); ++row) {
-        const QFileInfo fileInfo(model->repositoryRoot(), model->file(row));
-
-        // Add file name
-        uniqueSymbols.insert(fileInfo.fileName());
-
-        const QString filePath = fileInfo.absoluteFilePath();
-        // Add symbols from the C++ code model
-        const CPlusPlus::Document::Ptr doc = cppSnapShot.document(filePath);
-        if (!doc.isNull() && doc->control() != 0) {
-            const CPlusPlus::Control *ctrl = doc->control();
-            CPlusPlus::Symbol **symPtr = ctrl->firstSymbol(); // Read-only
-            while (symPtr != ctrl->lastSymbol()) {
-                const CPlusPlus::Symbol *sym = *symPtr;
-
-                const CPlusPlus::Identifier *symId = sym->identifier();
-                // Add any class, function or namespace identifiers
-                if ((sym->isClass() || sym->isFunction() || sym->isNamespace())
-                        && (symId != 0 && acceptsWordForCompletion(symId->chars())))
-                {
-                    uniqueSymbols.insert(QString::fromUtf8(symId->chars()));
-                }
-
-                // Handle specific case : get "Foo" in "void Foo::function() {}"
-                if (sym->isFunction() && !sym->asFunction()->isDeclaration()) {
-                    const char *className = belongingClassName(sym->asFunction());
-                    if (acceptsWordForCompletion(className))
-                        uniqueSymbols.insert(QString::fromUtf8(className));
-                }
-
-                ++symPtr;
-            }
-        }
+    const QSet<FilePath> files = filesFromModel(model);
+    // add file names to completion
+    QSet<QString> completionItems = Utils::transform(files, &FilePath::fileName);
+    QObject *cppModelManager = ExtensionSystem::PluginManager::getObjectByName("CppModelManager");
+    if (cppModelManager) {
+        const auto symbols = ExtensionSystem::invoke<QSet<QString>>(cppModelManager,
+                                                                    "symbolsInFiles",
+                                                                    files);
+        completionItems += Utils::filtered(symbols, acceptsWordForCompletion);
     }
 
     // Populate completer with symbols
-    if (!uniqueSymbols.isEmpty()) {
+    if (!completionItems.isEmpty()) {
         QCompleter *completer = d->m_widget->descriptionEdit()->completer();
-        QStringList symbolsList = uniqueSymbols.toList();
+        QStringList symbolsList = Utils::toList(completionItems);
         symbolsList.sort();
         completer->setModel(new QStringListModel(symbolsList, completer));
     }
@@ -483,7 +457,7 @@ QStringList VcsBaseSubmitEditor::rowsToFiles(const QList<int> &rows) const
 
 void VcsBaseSubmitEditor::slotDiffSelectedVcsFiles(const QList<int> &rawList)
 {
-    if (d->m_parameters->diffType == VcsBaseSubmitEditorParameters::DiffRows)
+    if (d->m_parameters.diffType == VcsBaseSubmitEditorParameters::DiffRows)
         emit diffSelectedRows(rawList);
     else
         emit diffSelectedFiles(rowsToFiles(rawList));
@@ -522,15 +496,32 @@ void VcsBaseSubmitEditor::setDescriptionMandatory(bool v)
 
 enum { checkDialogMinimumWidth = 500 };
 
+static QString withUnusedMnemonic(QString string, const QList<QPushButton *> &otherButtons)
+{
+    QSet<QChar> mnemonics;
+    for (QPushButton *button : otherButtons) {
+        const QString text = button->text();
+        const int ampersandPos = text.indexOf('&');
+        if (ampersandPos >= 0 && ampersandPos < text.size() - 1)
+            mnemonics.insert(text.at(ampersandPos + 1));
+    }
+    for (int i = 0, total = string.length(); i < total; ++i) {
+        if (!mnemonics.contains(string.at(i)))
+            return string.insert(i, '&');
+    }
+    return string;
+}
+
 VcsBaseSubmitEditor::PromptSubmitResult
-        VcsBaseSubmitEditor::promptSubmit(const QString &title,
-                                          const QString &question,
-                                          const QString &checkFailureQuestion,
+        VcsBaseSubmitEditor::promptSubmit(VcsBasePluginPrivate *plugin,
                                           bool *promptSetting,
                                           bool forcePrompt,
                                           bool canCommitOnFailure)
 {
-    SubmitEditorWidget *submitWidget = static_cast<SubmitEditorWidget *>(this->widget());
+    bool dummySetting = false;
+    if (!promptSetting)
+        promptSetting = &dummySetting;
+    auto submitWidget = static_cast<SubmitEditorWidget *>(this->widget());
 
     Core::EditorManager::activateEditor(this, Core::EditorManager::IgnoreNavigationHistory);
 
@@ -538,67 +529,55 @@ VcsBaseSubmitEditor::PromptSubmitResult
         return SubmitDiscarded;
 
     QString errorMessage;
-    QMessageBox::StandardButton answer = QMessageBox::Yes;
 
     const bool prompt = forcePrompt || *promptSetting;
 
-    QWidget *parent = Core::ICore::mainWindow();
     // Pop up a message depending on whether the check succeeded and the
     // user wants to be prompted
-    bool canCommit = checkSubmitMessage(&errorMessage) && submitWidget->canSubmit();
+    bool canCommit = checkSubmitMessage(&errorMessage) && submitWidget->canSubmit(&errorMessage);
+    if (canCommit && !prompt)
+        return SubmitConfirmed;
+    CheckableMessageBox mb(Core::ICore::dialogParent());
+    const QString commitName = plugin->commitDisplayName();
+    mb.setWindowTitle(tr("Close %1 %2 Editor").arg(plugin->displayName(), commitName));
+    mb.setIcon(QMessageBox::Question);
+    QString message;
     if (canCommit) {
-        // Check ok, do prompt?
-        if (prompt) {
-            // Provide check box to turn off prompt ONLY if it was not forced
-            if (*promptSetting && !forcePrompt) {
-                const QDialogButtonBox::StandardButton danswer =
-                        CheckableMessageBox::question(parent, title, question,
-                                                                   tr("Prompt to submit"), promptSetting,
-                                                                   QDialogButtonBox::Yes|QDialogButtonBox::No|
-                                                                   QDialogButtonBox::Cancel,
-                                                                   QDialogButtonBox::Yes);
-                answer = CheckableMessageBox::dialogButtonBoxToMessageBoxButton(danswer);
-            } else {
-                answer = QMessageBox::question(parent, title, question,
-                                               QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel,
-                                               QMessageBox::Yes);
-            }
-        }
+        message = tr("What do you want to do with these changes?");
     } else {
-        // Check failed.
-        QMessageBox::StandardButtons buttons;
-        if (canCommitOnFailure)
-            buttons = QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel;
-        else
-            buttons = QMessageBox::Yes|QMessageBox::No;
-        QMessageBox msgBox(QMessageBox::Question, title, checkFailureQuestion,
-                           buttons, parent);
-        msgBox.setDefaultButton(QMessageBox::Cancel);
-        msgBox.setInformativeText(errorMessage);
-        msgBox.setMinimumWidth(checkDialogMinimumWidth);
-        answer = static_cast<QMessageBox::StandardButton>(msgBox.exec());
+        message = tr("Cannot %1%2.\nWhat do you want to do?",
+                     "%2 is an optional error message with ': ' prefix. Don't add space in front.")
+                .arg(commitName.toLower(),
+                     errorMessage.isEmpty() ? errorMessage : ": " + errorMessage);
     }
-    if (!canCommit && !canCommitOnFailure) {
-        switch (answer) {
-        case QMessageBox::No:
-            return SubmitDiscarded;
-        case QMessageBox::Yes:
-            return SubmitCanceled;
-        default:
-            break;
-        }
-    } else {
-        switch (answer) {
-        case QMessageBox::No:
-            return SubmitDiscarded;
-        case QMessageBox::Yes:
-            return SubmitConfirmed;
-        default:
-            break;
-        }
+    mb.setText(message);
+    mb.setCheckBoxText(tr("Prompt to %1").arg(commitName.toLower()));
+    mb.setChecked(*promptSetting);
+    // Provide check box to turn off prompt ONLY if it was not forced
+    mb.setCheckBoxVisible(*promptSetting && !forcePrompt);
+    QDialogButtonBox::StandardButtons buttons = QDialogButtonBox::Close | QDialogButtonBox::Cancel;
+    if (canCommit || canCommitOnFailure)
+        buttons |= QDialogButtonBox::Ok;
+    mb.setStandardButtons(buttons);
+    QPushButton *cancelButton = mb.button(QDialogButtonBox::Cancel);
+    // On Windows there is no mnemonic for Close. Set it explicitly.
+    mb.button(QDialogButtonBox::Close)->setText(tr("&Close"));
+    cancelButton->setText(tr("&Keep Editing"));
+    // forcePrompt is true when the editor is closed, and false when triggered by the submit action
+    if (forcePrompt)
+        cancelButton->setDefault(true);
+    if (QPushButton *commitButton = mb.button(QDialogButtonBox::Ok)) {
+        commitButton->setText(withUnusedMnemonic(commitName,
+                              {cancelButton, mb.button(QDialogButtonBox::Close)}));
     }
-
-    return SubmitCanceled;
+    if (mb.exec() == QDialog::Accepted)
+        *promptSetting = mb.isChecked();
+    QAbstractButton *chosen = mb.clickedButton();
+    if (!chosen || chosen == cancelButton)
+        return SubmitCanceled;
+    if (chosen == mb.button(QDialogButtonBox::Close))
+        return SubmitDiscarded;
+    return SubmitConfirmed;
 }
 
 QString VcsBaseSubmitEditor::promptForNickName()
@@ -619,7 +598,7 @@ void VcsBaseSubmitEditor::slotInsertNickName()
 
 void VcsBaseSubmitEditor::slotSetFieldNickName(int i)
 {
-    if (SubmitFieldWidget *sfw = d->m_widget->submitFieldWidgets().front()) {
+    if (SubmitFieldWidget *sfw = d->m_widget->submitFieldWidgets().constFirst()) {
         const QString nick = promptForNickName();
         if (!nick.isEmpty())
             sfw->setFieldValue(i, nick);
@@ -709,12 +688,20 @@ bool VcsBaseSubmitEditor::runSubmitMessageCheckScript(const QString &checkScript
 
 QIcon VcsBaseSubmitEditor::diffIcon()
 {
-    return QIcon(QLatin1String(":/vcsbase/images/diff.png"));
+    using namespace Utils;
+    return Icon({
+        {":/vcsbase/images/diff_documents.png", Theme::PanelTextColorDark},
+        {":/vcsbase/images/diff_arrows.png", Theme::IconsStopColor}
+    }, Icon::Tint).icon();
 }
 
 QIcon VcsBaseSubmitEditor::submitIcon()
 {
-    return QIcon(QLatin1String(":/vcsbase/images/submit.png"));
+    using namespace Utils;
+    return Icon({
+        {":/vcsbase/images/submit_db.png", Theme::PanelTextColorDark},
+        {":/vcsbase/images/submit_arrow.png", Theme::IconsRunColor}
+    }, Icon::Tint | Icon::PunchEdges).icon();
 }
 
 // Reduce a list of untracked files reported by a VCS down to the files
@@ -722,22 +709,10 @@ QIcon VcsBaseSubmitEditor::submitIcon()
 void VcsBaseSubmitEditor::filterUntrackedFilesOfProject(const QString &repositoryDirectory,
                                                         QStringList *untrackedFiles)
 {
-    if (untrackedFiles->empty())
-        return;
-
-    ProjectExplorer::Project *vcsProject = VcsProjectCache::projectFor(repositoryDirectory);
-    if (!vcsProject)
-        return;
-
-    const QSet<QString> projectFiles
-            = QSet<QString>::fromList(vcsProject->files(ProjectExplorer::Project::SourceFiles));
-
-    if (projectFiles.empty())
-        return;
     const QDir repoDir(repositoryDirectory);
     for (QStringList::iterator it = untrackedFiles->begin(); it != untrackedFiles->end(); ) {
         const QString path = repoDir.absoluteFilePath(*it);
-        if (projectFiles.contains(path))
+        if (ProjectExplorer::SessionManager::projectForFile(FilePath::fromString(path)))
             ++it;
         else
             it = untrackedFiles->erase(it);

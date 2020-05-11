@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2017 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of Qt Creator.
@@ -26,32 +26,39 @@
 #pragma once
 
 #include "iosconfigurations.h"
+#include "simulatorcontrol.h"
 
-#include <QList>
-#include <QString>
-#include <QWidget>
-#include <QAbstractTableModel>
+#include <coreplugin/dialogs/ioptionspage.h>
 
 namespace Ios {
 namespace Internal {
 
 namespace Ui { class IosSettingsWidget; }
 
-class IosSettingsWidget : public QWidget
+class IosSettingsWidget final : public Core::IOptionsPageWidget
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(Ios::Internal::IosSettingsWidget)
+
 public:
-    // Todo: This would be so much simpler if it just used Utils::PathChooser!!!
-    IosSettingsWidget(QWidget *parent = 0);
-    ~IosSettingsWidget();
+    IosSettingsWidget();
+    ~IosSettingsWidget() final;
+
+private:
+    void apply() final;
 
     void saveSettings();
 
-private:
-    void initGui();
+    void onStart();
+    void onCreate();
+    void onReset();
+    void onRename();
+    void onDelete();
+    void onScreenshot();
+    void onSelectionChanged();
 
-    Ui::IosSettingsWidget *m_ui;
-    bool m_saveSettingsRequested;
+private:
+    Ui::IosSettingsWidget *m_ui = nullptr;
+    SimulatorControl *m_simControl = nullptr;
 };
 
 } // namespace Internal

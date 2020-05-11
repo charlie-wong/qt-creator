@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <qmldesignercorelib_global.h>
+
 #include <utils/theme/theme.h>
 
 #include <QColor>
@@ -36,13 +38,94 @@ QT_END_NAMESPACE
 
 namespace QmlDesigner {
 
-class Theme : public Utils::Theme
+class QMLDESIGNERCORE_EXPORT Theme : public Utils::Theme
 {
     Q_OBJECT
+
+    Q_ENUMS(Icon)
+
 public:
+    enum Icon {
+        actionIcon,
+        actionIconBinding,
+        addColumnAfter,
+        addColumnBefore,
+        addFile,
+        addRowAfter,
+        addRowBefore,
+        addTable,
+        adsClose,
+        adsDetach,
+        adsDropDown,
+        alignBottom,
+        alignCenterHorizontal,
+        alignCenterVertical,
+        alignLeft,
+        alignRight,
+        alignTo,
+        alignTop,
+        anchorBaseline,
+        anchorBottom,
+        anchorFill,
+        anchorLeft,
+        anchorRight,
+        anchorTop,
+        annotationBubble,
+        annotationDecal,
+        centerHorizontal,
+        centerVertical,
+        closeCross,
+        decisionNode,
+        deleteColumn,
+        deleteRow,
+        deleteTable,
+        detach,
+        distributeBottom,
+        distributeCenterHorizontal,
+        distributeCenterVertical,
+        distributeLeft,
+        distributeOriginBottomRight,
+        distributeOriginCenter,
+        distributeOriginNone,
+        distributeOriginTopLeft,
+        distributeRight,
+        distributeSpacingHorizontal,
+        distributeSpacingVertical,
+        distributeTop,
+        edit,
+        fontStyleBold,
+        fontStyleItalic,
+        fontStyleStrikethrough,
+        fontStyleUnderline,
+        mergeCells,
+        redo,
+        splitColumns,
+        splitRows,
+        startNode,
+        testIcon,
+        textAlignBottom,
+        textAlignCenter,
+        textAlignLeft,
+        textAlignMiddle,
+        textAlignRight,
+        textAlignTop,
+        textBulletList,
+        textFullJustification,
+        textNumberedList,
+        tickIcon,
+        triState,
+        undo,
+        upDownIcon,
+        upDownSquare2,
+        wildcard
+    };
+
     static Theme *instance();
     static QString replaceCssColors(const QString &input);
     static void setupTheme(QQmlEngine *engine);
+    static QColor getColor(Color role);
+    static QPixmap getPixmap(const QString &id);
+    static QString getIconUnicode(Theme::Icon i);
 
     Q_INVOKABLE QColor qmlDesignerBackgroundColorDarker() const;
     Q_INVOKABLE QColor qmlDesignerBackgroundColorDarkAlternate() const;
@@ -51,11 +134,15 @@ public:
     Q_INVOKABLE QColor qmlDesignerButtonColor() const;
     Q_INVOKABLE QColor qmlDesignerBorderColor() const;
 
+    Q_INVOKABLE int smallFontPixelSize() const;
+    Q_INVOKABLE int captionFontPixelSize() const;
+    Q_INVOKABLE bool highPixelDensity() const;
+
 private:
     Theme(Utils::Theme *originTheme, QObject *parent);
     QColor evaluateColorAtThemeInstance(const QString &themeColorName);
 
-    QMap<QString, QColor> m_derivedColors;
+    QObject *m_constants;
 };
 
 } // namespace QmlDesigner

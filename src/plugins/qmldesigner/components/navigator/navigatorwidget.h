@@ -25,11 +25,14 @@
 
 #pragma once
 
+#include <coreplugin/icontext.h>
+
 #include <QFrame>
 #include <QPointer>
 
 #include "navigatortreeview.h"
 
+QT_FORWARD_DECLARE_CLASS(QToolBar)
 QT_FORWARD_DECLARE_CLASS(QToolButton)
 QT_FORWARD_DECLARE_CLASS(QAbstractItemModel)
 
@@ -46,13 +49,18 @@ public:
     void setTreeModel(QAbstractItemModel *model);
     QTreeView *treeView() const;
     QList<QToolButton *> createToolBarWidgets();
-    QString contextHelpId() const;
+    QToolBar *createToolBar();
+    void contextHelp(const Core::IContext::HelpCallback &callback) const;
+
+    void disableNavigator();
+    void enableNavigator();
 
 signals:
     void leftButtonClicked();
     void rightButtonClicked();
     void upButtonClicked();
     void downButtonClicked();
+    void filterToggled(bool);
 
 private: // functions
     NavigatorView *navigatorView() const;

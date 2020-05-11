@@ -24,65 +24,24 @@
 ****************************************************************************/
 
 #include "qmlprojectnodes.h"
-#include "qmlproject.h"
 
-#include <coreplugin/idocument.h>
 #include <coreplugin/fileiconprovider.h>
+
+#include <projectexplorer/project.h>
 #include <projectexplorer/projectexplorer.h>
-
-#include <utils/algorithm.h>
-
-#include <QStyle>
 
 using namespace ProjectExplorer;
 
 namespace QmlProjectManager {
 namespace Internal {
 
-QmlProjectNode::QmlProjectNode(QmlProject *project) : ProjectNode(project->projectDirectory()),
-    m_project(project)
+QmlProjectNode::QmlProjectNode(Project *project)
+    : ProjectNode(project->projectDirectory())
 {
     setDisplayName(project->projectFilePath().toFileInfo().completeBaseName());
-    // make overlay
-    const QSize desiredSize = QSize(16, 16);
-    const QIcon projectBaseIcon(QLatin1String(":/qmlproject/images/qmlfolder.png"));
-    const QPixmap projectPixmap = Core::FileIconProvider::overlayIcon(QStyle::SP_DirIcon,
-                                                                      projectBaseIcon,
-                                                                      desiredSize);
-    setIcon(QIcon(projectPixmap));
-}
 
-bool QmlProjectNode::showInSimpleTree() const
-{
-    return true;
-}
-
-bool QmlProjectNode::supportsAction(ProjectAction action, Node *node) const
-{
-    if (action == AddNewFile || action == EraseFile)
-        return true;
-
-    if (action == Rename && node->nodeType() == NodeType::File) {
-        FileNode *fileNode = static_cast<FileNode *>(node);
-        return fileNode->fileType() != FileType::Project;
-    }
-
-    return false;
-}
-
-bool QmlProjectNode::addFiles(const QStringList &filePaths, QStringList * /*notAdded*/)
-{
-    return m_project->addFiles(filePaths);
-}
-
-bool QmlProjectNode::deleteFiles(const QStringList & /*filePaths*/)
-{
-    return true;
-}
-
-bool QmlProjectNode::renameFile(const QString & /*filePath*/, const QString & /*newFilePath*/)
-{
-    return true;
+    static QIcon qmlProjectIcon = Core::FileIconProvider::directoryIcon(":/projectexplorer/images/fileoverlay_qml.png");
+    setIcon(qmlProjectIcon);
 }
 
 } // namespace Internal

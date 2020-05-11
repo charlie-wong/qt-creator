@@ -30,9 +30,7 @@
 namespace qmt {
 
 UndoCommand::UndoCommand(const QString &text)
-    : QUndoCommand(text),
-      m_canRedo(false),
-      m_doNotMerge(false)
+    : QUndoCommand(text)
 {
 }
 
@@ -60,7 +58,7 @@ bool UndoCommand::mergeWith(const QUndoCommand *other)
 
 bool UndoCommand::mergeWith(const UndoCommand *other)
 {
-    Q_UNUSED(other);
+    Q_UNUSED(other)
 
     return false;
 }

@@ -24,9 +24,10 @@
 ****************************************************************************/
 #pragma once
 
+#include <utils/fileutils.h>
+
 #include <QObject>
 #include <QFuture>
-#include "utils/fileutils.h"
 #include <QDebug>
 #include <memory>
 
@@ -55,9 +56,11 @@ class SimulatorInfo : public SimulatorEntity
     friend QDebug &operator<<(QDebug &, const SimulatorInfo &info);
 
 public:
-    bool isBooted() const { return state.compare(QStringLiteral("Booted")) == 0; }
-    bool isShutdown() const { return state.compare(QStringLiteral("Shutdown")) == 0; }
+    bool isBooted() const { return state == "Booted"; }
     bool isShuttingDown() const { return state == "Shutting Down"; }
+    bool isShutdown() const { return state == "Shutdown"; }
+    bool operator==(const SimulatorInfo &other) const;
+    bool operator!=(const SimulatorInfo &other) const { return !(*this == other); }
     bool available;
     QString state;
     QString runtimeName;
@@ -82,12 +85,12 @@ public:
         QString simUdid;
         bool success = false;
         qint64 pID = -1;
-        QByteArray commandOutput = "";
+        QString commandOutput;
     };
 
 public:
     explicit SimulatorControl(QObject* parent = nullptr);
-    ~SimulatorControl();
+    ~SimulatorControl() override;
 
 public:
     static QList<DeviceTypeInfo> availableDeviceTypes();
@@ -97,12 +100,12 @@ public:
     static QList<SimulatorInfo> availableSimulators();
     static QFuture<QList<SimulatorInfo> > updateAvailableSimulators();
     static bool isSimulatorRunning(const QString &simUdid);
-    static QString bundleIdentifier(const Utils::FileName &bundlePath);
-    static QString bundleExecutable(const Utils::FileName &bundlePath);
+    static QString bundleIdentifier(const Utils::FilePath &bundlePath);
+    static QString bundleExecutable(const Utils::FilePath &bundlePath);
 
 public:
     QFuture<ResponseData> startSimulator(const QString &simUdid) const;
-    QFuture<ResponseData> installApp(const QString &simUdid, const Utils::FileName &bundlePath) const;
+    QFuture<ResponseData> installApp(const QString &simUdid, const Utils::FilePath &bundlePath) const;
     QFuture<ResponseData> launchApp(const QString &simUdid, const QString &bundleIdentifier,
                                     bool waitForDebugger, const QStringList &extraArgs,
                                     const QString& stdoutPath = QString(),

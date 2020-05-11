@@ -27,6 +27,7 @@
 
 #include "helpviewer.h"
 
+#include <QWebEngineUrlRequestInterceptor>
 #include <QWebEngineUrlSchemeHandler>
 #include <QWebEngineView>
 
@@ -38,23 +39,35 @@ class WebEngineHelpViewer;
 class HelpUrlSchemeHandler : public QWebEngineUrlSchemeHandler
 {
 public:
-    explicit HelpUrlSchemeHandler(QObject *parent = 0);
+    explicit HelpUrlSchemeHandler(QObject *parent = nullptr);
     void requestStarted(QWebEngineUrlRequestJob *job) override;
+};
+
+class HelpUrlRequestInterceptor : public QWebEngineUrlRequestInterceptor
+{
+public:
+    explicit HelpUrlRequestInterceptor(QObject *parent = nullptr);
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override;
 };
 
 class WebEngineHelpPage : public QWebEnginePage
 {
 public:
-    explicit WebEngineHelpPage(QObject *parent = 0);
-#if QT_VERSION < QT_VERSION_CHECK(5, 7, 0)
-    QWebEnginePage *createWindow(QWebEnginePage::WebWindowType) override;
-#endif
+    explicit WebEngineHelpPage(QObject *parent = nullptr);
+
+protected:
+    bool acceptNavigationRequest(const QUrl &url,
+                                 QWebEnginePage::NavigationType type,
+                                 bool isMainFrame) override;
 };
 
 class WebView : public QWebEngineView
 {
 public:
     explicit WebView(WebEngineHelpViewer *viewer);
+
+    bool event(QEvent *ev) override;
+    bool eventFilter(QObject *src, QEvent *e) override;
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -67,7 +80,7 @@ class WebEngineHelpViewer : public HelpViewer
 {
     Q_OBJECT
 public:
-    explicit WebEngineHelpViewer(QWidget *parent = 0);
+    explicit WebEngineHelpViewer(QWidget *parent = nullptr);
 
     QFont viewerFont() const override;
     void setViewerFont(const QFont &font) override;
@@ -97,6 +110,7 @@ public:
 
 private:
     WebView *m_widget;
+    QUrl m_previousUrlWithoutFragment;
 };
 
 } // namespace Internal

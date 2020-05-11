@@ -46,18 +46,19 @@ namespace Internal {
 SessionModel::SessionModel(QObject *parent)
     : QAbstractTableModel(parent)
 {
+    m_sortedSessions = SessionManager::sessions();
     connect(SessionManager::instance(), &SessionManager::sessionLoaded,
             this, &SessionModel::resetSessions);
 }
 
 int SessionModel::indexOfSession(const QString &session)
 {
-    return SessionManager::sessions().indexOf(session);
+    return m_sortedSessions.indexOf(session);
 }
 
-QString SessionModel::sessionAt(int row)
+QString SessionModel::sessionAt(int row) const
 {
-    return SessionManager::sessions().value(row, QString());
+    return m_sortedSessions.value(row, QString());
 }
 
 QVariant SessionModel::headerData(int section, Qt::Orientation orientation, int role) const
@@ -92,7 +93,7 @@ int SessionModel::columnCount(const QModelIndex &) const
 
 int SessionModel::rowCount(const QModelIndex &) const
 {
-    return SessionManager::sessions().count();
+    return m_sortedSessions.count();
 }
 
 QStringList pathsToBaseNames(const QStringList &paths)
@@ -113,7 +114,7 @@ QVariant SessionModel::data(const QModelIndex &index, int role) const
 {
     QVariant result;
     if (index.isValid()) {
-        QString sessionName = SessionManager::sessions().at(index.row());
+        QString sessionName = m_sortedSessions.at(index.row());
 
         switch (role) {
         case Qt::DisplayRole:
@@ -164,7 +165,7 @@ QVariant SessionModel::data(const QModelIndex &index, int role) const
 
 QHash<int, QByteArray> SessionModel::roleNames() const
 {
-    static QHash<int, QByteArray> extraRoles{
+    static const QHash<int, QByteArray> extraRoles{
         {Qt::DisplayRole, "sessionName"},
         {DefaultSessionRole, "defaultSession"},
         {ActiveSessionRole, "activeSession"},
@@ -172,7 +173,26 @@ QHash<int, QByteArray> SessionModel::roleNames() const
         {ProjectsPathRole, "projectsPath"},
         {ProjectsDisplayRole, "projectsName"}
     };
-    return QAbstractTableModel::roleNames().unite(extraRoles);
+    QHash<int, QByteArray> roles = QAbstractTableModel::roleNames();
+    Utils::addToHash(&roles, extraRoles);
+    return roles;
+}
+
+void SessionModel::sort(int column, Qt::SortOrder order)
+{
+    beginResetModel();
+    const auto cmp = [column, order](const QString &s1, const QString &s2) {
+        bool isLess;
+        if (column == 0)
+            isLess = s1 < s2;
+        else
+            isLess = SessionManager::sessionDateTime(s1) < SessionManager::sessionDateTime(s2);
+        if (order == Qt::DescendingOrder)
+            isLess = !isLess;
+        return isLess;
+    };
+    Utils::sort(m_sortedSessions, cmp);
+    endResetModel();
 }
 
 bool SessionModel::isDefaultVirgin() const
@@ -183,12 +203,13 @@ bool SessionModel::isDefaultVirgin() const
 void SessionModel::resetSessions()
 {
     beginResetModel();
+    m_sortedSessions = SessionManager::sessions();
     endResetModel();
 }
 
-void SessionModel::newSession()
+void SessionModel::newSession(QWidget *parent)
 {
-    SessionNameInputDialog sessionInputDialog;
+    SessionNameInputDialog sessionInputDialog(parent);
     sessionInputDialog.setWindowTitle(tr("New Session Name"));
     sessionInputDialog.setActionText(tr("&Create"), tr("Create and &Open"));
 
@@ -197,9 +218,9 @@ void SessionModel::newSession()
     });
 }
 
-void SessionModel::cloneSession(const QString &session)
+void SessionModel::cloneSession(QWidget *parent, const QString &session)
 {
-    SessionNameInputDialog sessionInputDialog;
+    SessionNameInputDialog sessionInputDialog(parent);
     sessionInputDialog.setWindowTitle(tr("New Session Name"));
     sessionInputDialog.setActionText(tr("&Clone"), tr("Clone and &Open"));
     sessionInputDialog.setValue(session + " (2)");
@@ -209,18 +230,19 @@ void SessionModel::cloneSession(const QString &session)
     });
 }
 
-void SessionModel::deleteSession(const QString &session)
+void SessionModel::deleteSessions(const QStringList &sessions)
 {
-    if (!SessionManager::confirmSessionDelete(session))
+    if (!SessionManager::confirmSessionDelete(sessions))
         return;
     beginResetModel();
-    SessionManager::deleteSession(session);
+    SessionManager::deleteSessions(sessions);
+    m_sortedSessions = SessionManager::sessions();
     endResetModel();
 }
 
-void SessionModel::renameSession(const QString &session)
+void SessionModel::renameSession(QWidget *parent, const QString &session)
 {
-    SessionNameInputDialog sessionInputDialog;
+    SessionNameInputDialog sessionInputDialog(parent);
     sessionInputDialog.setWindowTitle(tr("Rename Session"));
     sessionInputDialog.setActionText(tr("&Rename"), tr("Rename and &Open"));
     sessionInputDialog.setValue(session);
@@ -244,6 +266,7 @@ void SessionModel::runSessionNameInputDialog(SessionNameInputDialog *sessionInpu
             return;
         beginResetModel();
         createSession(newSession);
+        m_sortedSessions = SessionManager::sessions();
         endResetModel();
 
         if (sessionInputDialog->isSwitchToRequested())

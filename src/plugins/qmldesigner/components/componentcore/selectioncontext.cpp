@@ -29,16 +29,10 @@
 
 namespace QmlDesigner {
 
-
-SelectionContext::SelectionContext() :
-    m_toggled(false)
-{
-
-}
+SelectionContext::SelectionContext() = default;
 
 SelectionContext::SelectionContext(AbstractView *view) :
-    m_view(view),
-    m_toggled(false)
+    m_view(view)
 {
 }
 
@@ -50,6 +44,11 @@ void SelectionContext::setTargetNode(const ModelNode &modelNode)
 ModelNode SelectionContext::targetNode() const
 {
     return m_targetNode;
+}
+
+ModelNode SelectionContext::rootNode() const
+{
+    return view()->rootModelNode();
 }
 
 bool SelectionContext::singleNodeIsSelected() const
@@ -79,7 +78,8 @@ QList<ModelNode> SelectionContext::selectedModelNodes() const
 
 bool SelectionContext::hasSingleSelectedModelNode() const
 {
-    return view()->hasSelectedModelNodes();
+    return view()->hasSingleSelectedModelNode()
+            && firstSelectedModelNode().isValid();
 }
 
 AbstractView *SelectionContext::view() const
@@ -120,6 +120,16 @@ bool SelectionContext::toggled() const
 bool SelectionContext::isValid() const
 {
     return view() && view()->model();
+}
+
+bool SelectionContext::fastUpdate() const
+{
+    return m_updateMode == UpdateMode::Fast;
+}
+
+void SelectionContext::setUpdateMode(UpdateMode mode)
+{
+    m_updateMode = mode;
 }
 
 } //QmlDesigner

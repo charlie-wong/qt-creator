@@ -49,8 +49,8 @@ class EasingGraph: public QWidget
     Q_PROPERTY (QColor zeroColor READ zeroColor WRITE setZeroColor NOTIFY zeroColorChanged)
 
 public:
-    EasingGraph(QWidget *parent=0);
-    ~EasingGraph();
+    EasingGraph(QWidget *parent=nullptr);
+    ~EasingGraph() override;
 
     QEasingCurve::Type easingType() const;
     QEasingCurve easingCurve() const;
@@ -77,7 +77,7 @@ public:
 
     QRectF boundingRect() const;
     //void paint(QPainter *, const QStyleOptionGraphicsItem *, QWidget *);
-    void paintEvent(QPaintEvent *);
+    void paintEvent(QPaintEvent *) override;
 
 signals:
     void easingShapeChanged();

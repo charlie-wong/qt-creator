@@ -25,89 +25,16 @@
 
 #pragma once
 
-#include "qmlprojectmanager_global.h"
-
-#include <projectexplorer/runnables.h>
-
-#include <QPointer>
-
-QT_FORWARD_DECLARE_CLASS(QStringListModel)
-
-namespace Core { class IEditor; }
-
-namespace QtSupport { class BaseQtVersion; }
+#include <projectexplorer/runconfiguration.h>
 
 namespace QmlProjectManager {
-class QmlProject;
-
 namespace Internal {
-    class QmlProjectRunConfigurationFactory;
-    class QmlProjectRunConfigurationWidget;
-}
 
-class QMLPROJECTMANAGER_EXPORT QmlProjectRunConfiguration : public ProjectExplorer::RunConfiguration
+class QmlProjectRunConfigurationFactory final : public ProjectExplorer::FixedRunConfigurationFactory
 {
-    Q_OBJECT
-    friend class Internal::QmlProjectRunConfigurationFactory;
-    friend class Internal::QmlProjectRunConfigurationWidget;
-    friend class QmlProject; // to call updateEnabled()
-
 public:
-    QmlProjectRunConfiguration(ProjectExplorer::Target *parent, Core::Id id);
-
-    ProjectExplorer::Runnable runnable() const override;
-
-    QtSupport::BaseQtVersion *qtVersion() const;
-
-    enum MainScriptSource {
-        FileInEditor,
-        FileInProjectFile,
-        FileInSettings
-    };
-    MainScriptSource mainScriptSource() const;
-    void setScriptSource(MainScriptSource source, const QString &settingsPath = QString());
-
-    QString mainScript() const;
-
-    // RunConfiguration
-    bool isEnabled() const override;
-    QString disabledReason() const override;
-    virtual QWidget *createConfigurationWidget() override;
-    Utils::OutputFormatter *createOutputFormatter() const override;
-    QVariantMap toMap() const override;
-
-    ProjectExplorer::Abi abi() const override;
-signals:
-    void scriptSourceChanged();
-
-protected:
-    QmlProjectRunConfiguration(ProjectExplorer::Target *parent,
-                               QmlProjectRunConfiguration *source);
-    virtual bool fromMap(const QVariantMap &map) override;
-    void setEnabled(bool value);
-
-private:
-    void ctor();
-
-    void changeCurrentFile(Core::IEditor* = 0);
-    void updateEnabled();
-
-    QString executable() const;
-    QString commandLineArguments() const;
-
-    static bool isValidVersion(QtSupport::BaseQtVersion *version);
-
-    static QString canonicalCapsPath(const QString &filePath);
-
-    // absolute path to current file (if being used)
-    QString m_currentFileFilename;
-    // absolute path to selected main script (if being used)
-    QString m_mainScriptFilename;
-
-    QString m_scriptFile;
-    QString m_qmlViewerArgs;
-
-    bool m_isEnabled;
+    QmlProjectRunConfigurationFactory();
 };
 
+} // namespace Internal
 } // namespace QmlProjectManager

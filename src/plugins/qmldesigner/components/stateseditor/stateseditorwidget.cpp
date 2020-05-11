@@ -33,6 +33,7 @@
 
 #include <invalidqmlsourceexception.h>
 
+#include <coreplugin/messagebox.h>
 #include <coreplugin/icore.h>
 
 #include <utils/qtcassert.h>
@@ -55,17 +56,21 @@ enum {
 
 namespace QmlDesigner {
 
+static QString propertyEditorResourcesPath() {
+    return Core::ICore::resourcePath() + QStringLiteral("/qmldesigner/propertyEditorQmlSources");
+}
+
 int StatesEditorWidget::currentStateInternalId() const
 {
-    Q_ASSERT(rootObject());
-    Q_ASSERT(rootObject()->property("currentStateInternalId").isValid());
+    QTC_ASSERT(rootObject(), return -1);
+    QTC_ASSERT(rootObject()->property("currentStateInternalId").isValid(), return -1);
 
     return rootObject()->property("currentStateInternalId").toInt();
 }
 
 void StatesEditorWidget::setCurrentStateInternalId(int internalId)
 {
-    Q_ASSERT(rootObject());
+    QTC_ASSERT(rootObject(), return);
     rootObject()->setProperty("currentStateInternalId", internalId);
 }
 
@@ -80,16 +85,16 @@ void StatesEditorWidget::showAddNewStatesButton(bool showAddNewStatesButton)
 }
 
 StatesEditorWidget::StatesEditorWidget(StatesEditorView *statesEditorView, StatesEditorModel *statesEditorModel)
-    : QQuickWidget(),
-      m_statesEditorView(statesEditorView),
-      m_imageProvider(0),
-      m_qmlSourceUpdateShortcut(0)
+    : m_statesEditorView(statesEditorView),
+    m_imageProvider(nullptr),
+    m_qmlSourceUpdateShortcut(nullptr)
 {
     m_imageProvider = new Internal::StatesEditorImageProvider;
     m_imageProvider->setNodeInstanceView(statesEditorView->nodeInstanceView());
 
     engine()->addImageProvider(QStringLiteral("qmldesigner_stateseditor"), m_imageProvider);
     engine()->addImportPath(qmlSourcesPath());
+    engine()->addImportPath(propertyEditorResourcesPath() + "/imports");
 
     m_qmlSourceUpdateShortcut = new QShortcut(QKeySequence(Qt::CTRL + Qt::Key_F4), this);
     connect(m_qmlSourceUpdateShortcut, &QShortcut::activated, this, &StatesEditorWidget::reloadQmlSource);
@@ -97,9 +102,12 @@ StatesEditorWidget::StatesEditorWidget(StatesEditorView *statesEditorView, State
     setResizeMode(QQuickWidget::SizeRootObjectToView);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    rootContext()->setContextProperty(QStringLiteral("statesEditorModel"), statesEditorModel);
-
-    rootContext()->setContextProperty(QLatin1String("canAddNewStates"), true);
+    rootContext()->setContextProperties(
+        QVector<QQmlContext::PropertyPair>{
+            {{"statesEditorModel"}, QVariant::fromValue(statesEditorModel)},
+            {{"canAddNewStates"}, true}
+        }
+    );
 
     Theme::setupTheme(engine());
 
@@ -109,9 +117,7 @@ StatesEditorWidget::StatesEditorWidget(StatesEditorView *statesEditorView, State
     reloadQmlSource();
 }
 
-StatesEditorWidget::~StatesEditorWidget()
-{
-}
+StatesEditorWidget::~StatesEditorWidget() = default;
 
 QString StatesEditorWidget::qmlSourcesPath() {
     return Core::ICore::resourcePath() + QStringLiteral("/qmldesigner/statesEditorQmlSources");
@@ -119,8 +125,15 @@ QString StatesEditorWidget::qmlSourcesPath() {
 
 void StatesEditorWidget::toggleStatesViewExpanded()
 {
+    QTC_ASSERT(rootObject(), return);
     bool expanded = rootObject()->property("expanded").toBool();
     rootObject()->setProperty("expanded", !expanded);
+}
+
+void StatesEditorWidget::showEvent(QShowEvent *event)
+{
+    Q_UNUSED(event)
+    update();
 }
 
 void StatesEditorWidget::reloadQmlSource()
@@ -130,7 +143,13 @@ void StatesEditorWidget::reloadQmlSource()
     engine()->clearComponentCache();
     setSource(QUrl::fromLocalFile(statesListQmlFilePath));
 
-    QTC_ASSERT(rootObject(), return);
+    if (!rootObject()) {
+        Core::AsynchronousMessageBox::warning(tr("Cannot Create QtQuick View"),
+                                              tr("StatesEditorWidget: %1 cannot be created. "
+                                                 "Most likely QtQuick.Controls 1 are not installed.").arg(qmlSourcesPath()));
+        return;
+    }
+
     connect(rootObject(), SIGNAL(currentStateInternalIdChanged()), m_statesEditorView.data(), SLOT(synchonizeCurrentStateFromWidget()));
     connect(rootObject(), SIGNAL(createNewState()), m_statesEditorView.data(), SLOT(createNewState()));
     connect(rootObject(), SIGNAL(deleteState(int)), m_statesEditorView.data(), SLOT(removeState(int)));
@@ -147,8 +166,9 @@ void StatesEditorWidget::reloadQmlSource()
 
 void StatesEditorWidget::handleExpandedChanged()
 {
-    bool expanded = rootObject()->property("expanded").toBool();
+    QTC_ASSERT(rootObject(), return);
 
+    bool expanded = rootObject()->property("expanded").toBool();
     DesignerSettings::setValue(DesignerSettingsKey::STATESEDITOR_EXPANDED, expanded);
 
     setFixedHeight(rootObject()->height());

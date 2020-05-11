@@ -27,23 +27,14 @@
 
 #include <projectexplorer/abstractprocessstep.h>
 
-#include <QRegExp>
+namespace Utils { class CommandLine; }
 
-QT_BEGIN_NAMESPACE
-class QLineEdit;
-class QListWidget;
-class QListWidgetItem;
-QT_END_NAMESPACE
-
-namespace Utils { class PathChooser; }
-
-namespace ProjectExplorer { class ToolChain; }
+namespace ProjectExplorer { class RunConfiguration; }
 
 namespace CMakeProjectManager {
 namespace Internal {
 
 class CMakeBuildConfiguration;
-class CMakeRunConfiguration;
 class CMakeBuildStepFactory;
 
 class CMakeBuildStep : public ProjectExplorer::AbstractProcessStep
@@ -52,47 +43,36 @@ class CMakeBuildStep : public ProjectExplorer::AbstractProcessStep
     friend class CMakeBuildStepFactory;
 
 public:
-    explicit CMakeBuildStep(ProjectExplorer::BuildStepList *bsl);
+    CMakeBuildStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
 
     CMakeBuildConfiguration *cmakeBuildConfiguration() const;
-    CMakeBuildConfiguration *targetsActiveBuildConfiguration() const;
-
-    bool init(QList<const BuildStep *> &earlierSteps) override;
-    void run(QFutureInterface<bool> &fi) override;
-
-    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
-    bool immutable() const override;
 
     QString buildTarget() const;
     bool buildsBuildTarget(const QString &target) const;
     void setBuildTarget(const QString &target);
-    void clearBuildTargets();
 
     QString toolArguments() const;
     void setToolArguments(const QString &list);
 
-    QString allArguments(const CMakeRunConfiguration *rc) const;
+    Utils::CommandLine cmakeCommand(ProjectExplorer::RunConfiguration *rc) const;
 
-    QString cmakeCommand() const;
+    QStringList knownBuildTargets();
 
     QVariantMap toMap() const override;
 
     static QString cleanTarget();
     static QString allTarget();
     static QString installTarget();
+    static QString testTarget();
     static QStringList specialTargets();
 
 signals:
-    void cmakeCommandChanged();
     void targetToBuildChanged();
     void buildTargetsChanged();
 
 protected:
     void processStarted() override;
     void processFinished(int exitCode, QProcess::ExitStatus status) override;
-
-    CMakeBuildStep(ProjectExplorer::BuildStepList *bsl, CMakeBuildStep *bs);
-    CMakeBuildStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
 
     bool fromMap(const QVariantMap &map) override;
 
@@ -102,13 +82,19 @@ protected:
 private:
     void ctor(ProjectExplorer::BuildStepList *bsl);
 
-    void runImpl(QFutureInterface<bool> &fi);
+    bool init() override;
+    void setupOutputFormatter(Utils::OutputFormatter *formatter) override;
+    void doRun() override;
+    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
 
-    void handleBuildTargetChanges();
-    CMakeRunConfiguration *targetsActiveRunConfiguration() const;
+    QString defaultBuildTarget() const;
+
+    void runImpl();
+    void handleProjectWasParsed(bool success);
+
+    void handleBuildTargetChanges(bool success);
 
     QMetaObject::Connection m_runTrigger;
-    QMetaObject::Connection m_errorTrigger;
 
     QRegExp m_percentProgress;
     QRegExp m_ninjaProgress;
@@ -116,41 +102,13 @@ private:
     QString m_buildTarget;
     QString m_toolArguments;
     bool m_useNinja = false;
+    bool m_waiting = false;
 };
 
-class CMakeBuildStepConfigWidget : public ProjectExplorer::BuildStepConfigWidget
+class CMakeBuildStepFactory : public ProjectExplorer::BuildStepFactory
 {
-    Q_OBJECT
 public:
-    CMakeBuildStepConfigWidget(CMakeBuildStep *buildStep);
-    QString displayName() const override;
-    QString summaryText() const override;
-
-private:
-    void itemChanged(QListWidgetItem*);
-    void toolArgumentsEdited();
-    void updateDetails();
-    void buildTargetsChanged();
-    void selectedBuildTargetsChanged();
-
-    CMakeBuildStep *m_buildStep;
-    QLineEdit *m_toolArguments;
-    QListWidget *m_buildTargetsList;
-    QString m_summaryText;
-};
-
-class CMakeBuildStepFactory : public ProjectExplorer::IBuildStepFactory
-{
-    Q_OBJECT
-
-public:
-    explicit CMakeBuildStepFactory(QObject *parent = 0);
-
-    QList<ProjectExplorer::BuildStepInfo>
-        availableSteps(ProjectExplorer::BuildStepList *parent) const override;
-
-    ProjectExplorer::BuildStep *create(ProjectExplorer::BuildStepList *parent, Core::Id id) override;
-    ProjectExplorer::BuildStep *clone(ProjectExplorer::BuildStepList *parent, ProjectExplorer::BuildStep *source) override;
+    CMakeBuildStepFactory();
 };
 
 } // namespace Internal

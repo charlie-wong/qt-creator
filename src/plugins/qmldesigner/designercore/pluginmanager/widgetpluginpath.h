@@ -40,8 +40,6 @@ namespace QmlDesigner {
 class IWidgetPlugin;
 namespace Internal {
 
-
-
 // Dumb plugin data structure. Note that whereas QObjects can
 // casted to an interface, QPointer does not work with the
 // interface class, so, we need a separate QPointer as a guard
@@ -66,7 +64,7 @@ struct WidgetPluginData {
 // IPlugins.
 
 class WidgetPluginPath {
-    typedef QList<IWidgetPlugin *> IWidgetPluginList;
+    using IWidgetPluginList = QList<IWidgetPlugin *>;
 public:
     explicit WidgetPluginPath(const QDir &path);
 
@@ -80,7 +78,7 @@ public:
     QStandardItem *createModelItem();
 
 private:
-    typedef QList<WidgetPluginData> PluginDataList;
+    using PluginDataList = QList<WidgetPluginData>;
 
     static QStringList libraryFilePaths(const QDir &dir);
     void clear();

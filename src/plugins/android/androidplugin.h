@@ -28,21 +28,22 @@
 #include <extensionsystem/iplugin.h>
 
 namespace Android {
+namespace Internal {
 
-class AndroidPlugin : public ExtensionSystem::IPlugin
+class AndroidPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "Android.json")
 
-public:
-    AndroidPlugin();
+    ~AndroidPlugin() final;
 
-    bool initialize(const QStringList &arguments, QString *errorMessage);
-    void extensionsInitialized() { }
+    bool initialize(const QStringList &arguments, QString *errorMessage) final;
 
-private:
-    void updateDevice();
     void kitsRestored();
+    void askUserAboutAndroidSetup();
+
+    class AndroidPluginPrivate *d = nullptr;
 };
 
+} // namespace Internal
 } // namespace Android

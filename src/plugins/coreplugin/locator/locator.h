@@ -26,24 +26,18 @@
 #pragma once
 
 #include "ilocatorfilter.h"
-#include "directoryfilter.h"
-#include "executefilter.h"
 #include "locatorconstants.h"
 
 #include <coreplugin/actionmanager/command.h>
 
-#include <QFutureWatcher>
+#include <QFuture>
 #include <QObject>
 #include <QTimer>
 
 namespace Core {
 namespace Internal {
 
-class CorePlugin;
-class OpenDocumentsFilter;
-class FileSystemFilter;
-class LocatorSettingsPage;
-class ExternalToolsFilter;
+class LocatorData;
 
 class Locator : public QObject
 {
@@ -51,42 +45,42 @@ class Locator : public QObject
 
 public:
     Locator();
-    ~Locator();
+    ~Locator() override;
 
-    void initialize(CorePlugin *corePlugin, const QStringList &arguments, QString *errorMessage);
+    static Locator *instance();
+
+    void initialize();
     void extensionsInitialized();
     bool delayedInitialize();
 
-    QList<ILocatorFilter *> filters();
+    static QList<ILocatorFilter *> filters();
     QList<ILocatorFilter *> customFilters();
     void setFilters(QList<ILocatorFilter *> f);
     void setCustomFilters(QList<ILocatorFilter *> f);
-    int refreshInterval();
+    int refreshInterval() const;
     void setRefreshInterval(int interval);
 
 signals:
     void filtersChanged();
 
 public slots:
-    void refresh(QList<ILocatorFilter *> filters = QList<ILocatorFilter *>());
-    void saveSettings();
+    void refresh(QList<ILocatorFilter *> filters);
+    void saveSettings() const;
 
 private:
     void loadSettings();
+    void updateFilterActions();
     void updateEditorManagerPlaceholderText();
 
-    LocatorSettingsPage *m_settingsPage;
+    LocatorData *m_locatorData = nullptr;
 
     bool m_settingsInitialized = false;
     QList<ILocatorFilter *> m_filters;
     QList<ILocatorFilter *> m_customFilters;
-    int m_refreshInterval;
+    QMap<Id, QAction *> m_filterActionMap;
     QTimer m_refreshTimer;
-    OpenDocumentsFilter *m_openDocumentsFilter;
-    FileSystemFilter *m_fileSystemFilter;
-    ExecuteFilter *m_executeFilter;
-    CorePlugin *m_corePlugin = nullptr;
-    ExternalToolsFilter *m_externalToolsFilter;
+    QFuture<void> m_refreshTask;
+    QList<ILocatorFilter *> m_refreshingFilters;
 };
 
 } // namespace Internal

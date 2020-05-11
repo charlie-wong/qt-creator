@@ -48,12 +48,12 @@ void ComponentAction::setCurrentIndex(int index)
 
 QWidget *ComponentAction::createWidget(QWidget *parent)
 {
-    QComboBox *comboBox = new QComboBox(parent);
+    auto comboBox = new QComboBox(parent);
     comboBox->setMinimumWidth(120);
     comboBox->setToolTip(tr("Edit sub components defined in this file."));
     comboBox->setModel(m_componentView->standardItemModel());
     comboBox->setCurrentIndex(-1);
-    connect(comboBox, static_cast<void(QComboBox::*)(int)>(&QComboBox::activated),
+    connect(comboBox, QOverload<int>::of(&QComboBox::activated),
             this, &ComponentAction::emitCurrentComponentChanged);
     connect(this, &ComponentAction::currentIndexChanged, comboBox, &QComboBox::setCurrentIndex);
 

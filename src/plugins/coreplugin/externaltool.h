@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "id.h"
+
 #include <utils/fileutils.h>
 #include <utils/environment.h>
 
@@ -52,7 +54,7 @@ public:
 
     ExternalTool();
     explicit ExternalTool(const ExternalTool *other);
-    ~ExternalTool();
+    ~ExternalTool() override;
 
     QString id() const;
     QString description() const;
@@ -67,7 +69,9 @@ public:
     QString arguments() const;
     QString input() const;
     QString workingDirectory() const;
-    QList<Utils::EnvironmentItem> environment() const;
+    Id baseEnvironmentProviderId() const;
+    Utils::Environment baseEnvironment() const;
+    Utils::EnvironmentItems environmentUserChanges() const;
 
     void setFileName(const QString &fileName);
     void setPreset(QSharedPointer<ExternalTool> preset);
@@ -75,11 +79,11 @@ public:
     // all tools that are preset (changed or unchanged) have the original value here:
     QSharedPointer<ExternalTool> preset() const;
 
-    static ExternalTool *createFromXml(const QByteArray &xml, QString *errorMessage = 0, const QString &locale = QString());
-    static ExternalTool *createFromFile(const QString &fileName, QString *errorMessage = 0,
+    static ExternalTool *createFromXml(const QByteArray &xml, QString *errorMessage = nullptr, const QString &locale = QString());
+    static ExternalTool *createFromFile(const QString &fileName, QString *errorMessage = nullptr,
                                         const QString &locale = QString());
 
-    bool save(QString *errorMessage = 0) const;
+    bool save(QString *errorMessage = nullptr) const;
 
     bool operator==(const ExternalTool &other) const;
     bool operator!=(const ExternalTool &other) const { return !((*this) == other); }
@@ -96,22 +100,24 @@ public:
     void setArguments(const QString &arguments);
     void setInput(const QString &input);
     void setWorkingDirectory(const QString &workingDirectory);
-    void setEnvironment(const QList<Utils::EnvironmentItem> &items);
+    void setBaseEnvironmentProviderId(Id id);
+    void setEnvironmentUserChanges(const Utils::EnvironmentItems &items);
 
 private:
     QString m_id;
     QString m_description;
     QString m_displayName;
     QString m_displayCategory;
-    int m_order;
+    int m_order = -1;
     QStringList m_executables;
     QString m_arguments;
     QString m_input;
     QString m_workingDirectory;
-    QList<Utils::EnvironmentItem> m_environment;
-    OutputHandling m_outputHandling;
-    OutputHandling m_errorHandling;
-    bool m_modifiesCurrentDocument;
+    Id m_baseEnvironmentProviderId;
+    Utils::EnvironmentItems m_environment;
+    OutputHandling m_outputHandling = ShowInPane;
+    OutputHandling m_errorHandling = ShowInPane;
+    bool m_modifiesCurrentDocument = false;
 
     QString m_fileName;
     QString m_presetFileName;
@@ -123,7 +129,7 @@ class ExternalToolRunner : public QObject
     Q_OBJECT
 public:
     ExternalToolRunner(const ExternalTool *tool);
-    ~ExternalToolRunner();
+    ~ExternalToolRunner() override;
 
     bool hasError() const;
     QString errorString() const;
@@ -139,7 +145,7 @@ private:
     bool resolve();
 
     const ExternalTool *m_tool; // is a copy of the tool that was passed in
-    Utils::FileName m_resolvedExecutable;
+    Utils::FilePath m_resolvedExecutable;
     QString m_resolvedArguments;
     QString m_resolvedInput;
     QString m_resolvedWorkingDirectory;

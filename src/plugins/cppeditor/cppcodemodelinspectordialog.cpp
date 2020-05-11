@@ -25,7 +25,7 @@
 
 #include "cppcodemodelinspectordialog.h"
 #include "ui_cppcodemodelinspectordialog.h"
-#include "cppeditor.h"
+#include "cppeditorwidget.h"
 #include "cppeditordocument.h"
 
 #include <coreplugin/editormanager/editormanager.h>
@@ -35,12 +35,14 @@
 #include <cpptools/cppmodelmanager.h>
 #include <cpptools/cpptoolsbridge.h>
 #include <cpptools/cppworkingcopy.h>
+#include <projectexplorer/projectmacro.h>
 #include <projectexplorer/project.h>
 
 #include <cplusplus/CppDocument.h>
 #include <cplusplus/Overview.h>
 #include <cplusplus/Token.h>
 #include <utils/qtcassert.h>
+#include <utils/fancylineedit.h>
 
 #include <QAbstractTableModel>
 #include <QLabel>
@@ -49,6 +51,7 @@
 #include <QSortFilterProxyModel>
 
 #include <algorithm>
+#include <numeric>
 
 using namespace CPlusPlus;
 using namespace CppTools;
@@ -74,10 +77,15 @@ QString fileInCurrentEditor()
     return QString();
 }
 
+QSizePolicy sizePolicyWithStretchFactor(int stretchFactor)
+{
+    QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    policy.setHorizontalStretch(stretchFactor);
+    return policy;
+}
+
 class DepthFinder : public SymbolVisitor {
 public:
-    DepthFinder() : m_symbol(0), m_depth(-1), m_foundDepth(-1), m_stop(false) {}
-
     int operator()(const Document::Ptr &document, Symbol *symbol)
     {
         m_symbol = symbol;
@@ -85,7 +93,7 @@ public:
         return m_foundDepth;
     }
 
-    bool preVisit(Symbol *symbol)
+    bool preVisit(Symbol *symbol) override
     {
         if (m_stop)
             return false;
@@ -102,17 +110,17 @@ public:
         return false;
     }
 
-    void postVisit(Symbol *symbol)
+    void postVisit(Symbol *symbol) override
     {
         if (symbol->asScope())
             --m_depth;
     }
 
 private:
-    Symbol *m_symbol;
-    int m_depth;
-    int m_foundDepth;
-    bool m_stop;
+    Symbol *m_symbol = nullptr;
+    int m_depth = -1;
+    int m_foundDepth = -1;
+    bool m_stop = false;
 };
 
 } // anonymous namespace
@@ -139,7 +147,7 @@ signals:
 
 private:
     QTreeView *view;
-    QLineEdit *lineEdit;
+    Utils::FancyLineEdit *lineEdit;
 };
 
 FilterableView::FilterableView(QWidget *parent)
@@ -150,22 +158,19 @@ FilterableView::FilterableView(QWidget *parent)
     view->setTextElideMode(Qt::ElideMiddle);
     view->setSortingEnabled(true);
 
-    lineEdit = new QLineEdit(this);
+    lineEdit = new Utils::FancyLineEdit(this);
+    lineEdit->setFiltering(true);
     lineEdit->setPlaceholderText(QLatin1String("File Path"));
     QObject::connect(lineEdit, &QLineEdit::textChanged, this, &FilterableView::filterChanged);
 
     QLabel *label = new QLabel(QLatin1String("&Filter:"), this);
     label->setBuddy(lineEdit);
 
-    QPushButton *clearButton = new QPushButton(QLatin1String("&Clear"), this);
-    QObject::connect(clearButton, &QAbstractButton::clicked, this, &FilterableView::clearFilter);
-
-    QHBoxLayout *filterBarLayout = new QHBoxLayout();
+    auto filterBarLayout = new QHBoxLayout();
     filterBarLayout->addWidget(label);
     filterBarLayout->addWidget(lineEdit);
-    filterBarLayout->addWidget(clearButton);
 
-    QVBoxLayout *mainLayout = new QVBoxLayout();
+    auto mainLayout = new QVBoxLayout();
     mainLayout->addWidget(view);
     mainLayout->addLayout(filterBarLayout);
 
@@ -213,10 +218,10 @@ public:
 
     enum Columns { FileKindColumn, FilePathColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     ProjectFiles m_files;
@@ -260,6 +265,11 @@ QVariant ProjectFilesModel::data(const QModelIndex &index, int role) const
         } else if (column == FilePathColumn) {
             return m_files.at(row).path;
         }
+    } else if (role == Qt::ForegroundRole) {
+        if (!m_files.at(index.row()).active) {
+            return QApplication::palette().color(QPalette::ColorGroup::Disabled,
+                                                 QPalette::ColorRole::Text);
+        }
     }
     return QVariant();
 }
@@ -286,25 +296,25 @@ class ProjectHeaderPathsModel : public QAbstractListModel
     Q_OBJECT
 public:
     ProjectHeaderPathsModel(QObject *parent);
-    void configure(const ProjectPartHeaderPaths &paths);
+    void configure(const ProjectExplorer::HeaderPaths &paths);
     void clear();
 
     enum Columns { TypeColumn, PathColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
-    ProjectPartHeaderPaths m_paths;
+    ProjectExplorer::HeaderPaths m_paths;
 };
 
 ProjectHeaderPathsModel::ProjectHeaderPathsModel(QObject *parent) : QAbstractListModel(parent)
 {
 }
 
-void ProjectHeaderPathsModel::configure(const ProjectPartHeaderPaths &paths)
+void ProjectHeaderPathsModel::configure(const ProjectExplorer::HeaderPaths &paths)
 {
     emit layoutAboutToBeChanged();
     m_paths = paths;
@@ -363,7 +373,7 @@ class KeyValueModel : public QAbstractListModel
 {
     Q_OBJECT
 public:
-    typedef QList<QPair<QString, QString> > Table;
+    using Table = QList<QPair<QString, QString>>;
 
     KeyValueModel(QObject *parent);
     void configure(const Table &table);
@@ -371,10 +381,10 @@ public:
 
     enum Columns { KeyColumn, ValueColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     Table m_table;
@@ -451,10 +461,10 @@ public:
 
     enum Columns { SymbolCountColumn, SharedColumn, FilePathColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     QList<Document::Ptr> m_documents;
@@ -484,7 +494,7 @@ QModelIndex SnapshotModel::indexForDocument(const QString &filePath)
         if (document->fileName() == filePath)
             return index(i, FilePathColumn);
     }
-    return QModelIndex();
+    return {};
 }
 
 int SnapshotModel::rowCount(const QModelIndex &/*parent*/) const
@@ -551,10 +561,10 @@ public:
 
     enum Columns { ResolvedOrNotColumn, LineNumberColumn, FilePathsColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     QList<Document::Include> m_includes;
@@ -653,10 +663,10 @@ public:
 
     enum Columns { LevelColumn, LineColumnNumberColumn, MessageColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     QList<Document::DiagnosticMessage> m_messages;
@@ -702,8 +712,7 @@ QVariant DiagnosticMessagesModel::data(const QModelIndex &index, int role) const
     static const QBrush darkRedBrushQColor(QColor(139, 0, 0));
 
     const Document::DiagnosticMessage message = m_messages.at(index.row());
-    const Document::DiagnosticMessage::Level level
-        = static_cast<Document::DiagnosticMessage::Level>(message.level());
+    const auto level = static_cast<Document::DiagnosticMessage::Level>(message.level());
 
     if (role == Qt::DisplayRole) {
         const int column = index.column();
@@ -756,25 +765,25 @@ class MacrosModel : public QAbstractListModel
     Q_OBJECT
 public:
     MacrosModel(QObject *parent);
-    void configure(const QList<Macro> &macros);
+    void configure(const QList<CPlusPlus::Macro> &macros);
     void clear();
 
     enum Columns { LineNumberColumn, MacroColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
-    QList<Macro> m_macros;
+    QList<CPlusPlus::Macro> m_macros;
 };
 
 MacrosModel::MacrosModel(QObject *parent) : QAbstractListModel(parent)
 {
 }
 
-void MacrosModel::configure(const QList<Macro> &macros)
+void MacrosModel::configure(const QList<CPlusPlus::Macro> &macros)
 {
     emit layoutAboutToBeChanged();
     m_macros = macros;
@@ -802,7 +811,7 @@ QVariant MacrosModel::data(const QModelIndex &index, int role) const
 {
     const int column = index.column();
     if (role == Qt::DisplayRole || (role == Qt::ToolTipRole && column == MacroColumn)) {
-        const Macro macro = m_macros.at(index.row());
+        const CPlusPlus::Macro macro = m_macros.at(index.row());
         if (column == LineNumberColumn)
             return macro.line();
         else if (column == MacroColumn)
@@ -840,12 +849,12 @@ public:
 
     enum Columns { SymbolColumn, LineNumberColumn, ColumnCount };
 
-    QModelIndex index(int row, int column, const QModelIndex &parent) const;
-    QModelIndex parent(const QModelIndex &child) const;
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    QModelIndex index(int row, int column, const QModelIndex &parent) const override;
+    QModelIndex parent(const QModelIndex &child) const override;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     Document::Ptr m_document;
@@ -872,38 +881,36 @@ void SymbolsModel::clear()
 
 static Symbol *indexToSymbol(const QModelIndex &index)
 {
-    if (Symbol *symbol = static_cast<Symbol*>(index.internalPointer()))
-        return symbol;
-    return 0;
+    return static_cast<Symbol*>(index.internalPointer());
 }
 
 static Scope *indexToScope(const QModelIndex &index)
 {
     if (Symbol *symbol = indexToSymbol(index))
         return symbol->asScope();
-    return 0;
+    return nullptr;
 }
 
 QModelIndex SymbolsModel::index(int row, int column, const QModelIndex &parent) const
 {
-    Scope *scope = 0;
+    Scope *scope = nullptr;
     if (parent.isValid())
         scope = indexToScope(parent);
     else if (m_document)
         scope = m_document->globalNamespace();
 
     if (scope) {
-        if ((unsigned)row < scope->memberCount())
+        if (row < scope->memberCount())
             return createIndex(row, column, scope->memberAt(row));
     }
 
-    return QModelIndex();
+    return {};
 }
 
 QModelIndex SymbolsModel::parent(const QModelIndex &child) const
 {
     if (!child.isValid())
-        return QModelIndex();
+        return {};
 
     if (Symbol *symbol = indexToSymbol(child)) {
         if (Scope *scope = symbol->enclosingScope()) {
@@ -912,7 +919,7 @@ QModelIndex SymbolsModel::parent(const QModelIndex &child) const
         }
     }
 
-    return QModelIndex();
+    return {};
 }
 
 int SymbolsModel::rowCount(const QModelIndex &parent) const
@@ -980,16 +987,16 @@ public:
                    BytesAndCodePointsColumn, GeneratedColumn, ExpandedColumn, WhiteSpaceColumn,
                    NewlineColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     struct TokenInfo {
         Token token;
-        unsigned line;
-        unsigned column;
+        int line;
+        int column;
     };
     QList<TokenInfo> m_tokenInfos;
 };
@@ -1112,10 +1119,10 @@ public:
 
     enum Columns { PartNameColumn, PartFilePathColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     QList<ProjectPart::Ptr> m_projectPartsList;
@@ -1147,7 +1154,7 @@ void ProjectPartsModel::configure(const QList<ProjectInfo> &projectInfos,
 QModelIndex ProjectPartsModel::indexForCurrentEditorsProjectPart() const
 {
     if (m_currentEditorsProjectPartIndex == -1)
-        return QModelIndex();
+        return {};
     return createIndex(m_currentEditorsProjectPartIndex, PartFilePathColumn);
 }
 
@@ -1218,10 +1225,10 @@ public:
 
     enum Columns { RevisionColumn, FilePathColumn, ColumnCount };
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    int columnCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QVariant headerData(int section, Qt::Orientation orientation, int role) const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QVariant headerData(int section, Qt::Orientation orientation, int role) const override;
 
 private:
     struct WorkingCopyEntry {
@@ -1245,9 +1252,8 @@ void WorkingCopyModel::configure(const WorkingCopy &workingCopy)
 {
     emit layoutAboutToBeChanged();
     m_workingCopyList.clear();
-    QHashIterator<Utils::FileName, QPair<QByteArray, unsigned> > it = workingCopy.iterator();
-    while (it.hasNext()) {
-        it.next();
+    const WorkingCopy::Table &elements = workingCopy.elements();
+    for (auto it = elements.cbegin(), end = elements.cend(); it != end; ++it) {
         m_workingCopyList << WorkingCopyEntry(it.key().toString(), it.value().first,
                                               it.value().second);
     }
@@ -1261,7 +1267,7 @@ QModelIndex WorkingCopyModel::indexForFile(const QString &filePath)
         if (entry.filePath == filePath)
             return index(i, FilePathColumn);
     }
-    return QModelIndex();
+    return {};
 }
 
 int WorkingCopyModel::rowCount(const QModelIndex &/*parent*/) const
@@ -1350,6 +1356,9 @@ CppCodeModelInspectorDialog::CppCodeModelInspectorDialog(QWidget *parent)
     setAttribute(Qt::WA_DeleteOnClose);
     connect(Core::ICore::instance(), &Core::ICore::coreAboutToClose, this, &QWidget::close);
 
+    m_ui->partGeneralView->setSizePolicy(sizePolicyWithStretchFactor(2));
+    m_ui->partGeneralCompilerFlagsEdit->setSizePolicy(sizePolicyWithStretchFactor(1));
+
     m_proxySnapshotModel->setSourceModel(m_snapshotModel);
     m_proxySnapshotModel->setFilterKeyColumn(SnapshotModel::FilePathColumn);
     m_snapshotView->setModel(m_proxySnapshotModel);
@@ -1377,7 +1386,7 @@ CppCodeModelInspectorDialog::CppCodeModelInspectorDialog(QWidget *parent)
     connect(m_snapshotView, &FilterableView::filterChanged,
             this, &CppCodeModelInspectorDialog::onSnapshotFilterChanged);
     connect(m_ui->snapshotSelector,
-            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &CppCodeModelInspectorDialog::onSnapshotSelected);
     connect(m_ui->docSymbolsView, &QTreeView::expanded,
             this, &CppCodeModelInspectorDialog::onSymbolsViewExpandedOrCollapsed);
@@ -1525,11 +1534,11 @@ void CppCodeModelInspectorDialog::refresh()
     dumper.dumpSnapshot(globalSnapshot, globalSnapshotTitle, /*isGlobalSnapshot=*/ true);
 
     TextEditor::BaseTextEditor *editor = currentEditor();
-    CppTools::CppEditorDocumentHandle *cppEditorDocument = 0;
+    CppTools::CppEditorDocumentHandle *cppEditorDocument = nullptr;
     if (editor) {
         const QString editorFilePath = editor->document()->filePath().toString();
         cppEditorDocument = cmmi->cppEditorDocument(editorFilePath);
-        if (auto *documentProcessor = CppToolsBridge::baseEditorDocumentProcessor(editorFilePath)) {
+        if (auto documentProcessor = CppToolsBridge::baseEditorDocumentProcessor(editorFilePath)) {
             const Snapshot editorSnapshot = documentProcessor->snapshot();
             m_snapshotInfos->append(SnapshotInfo(editorSnapshot, SnapshotInfo::EditorSnapshot));
             const QString editorSnapshotTitle
@@ -1538,7 +1547,7 @@ void CppCodeModelInspectorDialog::refresh()
             dumper.dumpSnapshot(editorSnapshot, editorSnapshotTitle);
             m_ui->snapshotSelector->addItem(editorSnapshotTitle);
         }
-        CppEditorWidget *cppEditorWidget = qobject_cast<CppEditorWidget *>(editor->editorWidget());
+        auto cppEditorWidget = qobject_cast<CppEditorWidget *>(editor->editorWidget());
         if (cppEditorWidget) {
             SemanticInfo semanticInfo = cppEditorWidget->semanticInfo();
             Snapshot snapshot;
@@ -1614,7 +1623,8 @@ void CppCodeModelInspectorDialog::refresh()
     }
 
     // Merged entities
-    dumper.dumpMergedEntities(cmmi->headerPaths(), cmmi->definedMacros());
+    dumper.dumpMergedEntities(cmmi->headerPaths(),
+                              ProjectExplorer::Macro::toByteArray(cmmi->definedMacros()));
 }
 
 enum DocumentTabs {
@@ -1758,6 +1768,15 @@ void CppCodeModelInspectorDialog::clearProjectPartData()
                                      partTabName(ProjectPartPrecompiledHeadersTab));
 }
 
+static int defineCount(const ProjectExplorer::Macros &macros)
+{
+    using ProjectExplorer::Macro;
+    return int(std::count_if(
+                   macros.begin(),
+                   macros.end(),
+                   [](const Macro &macro) { return macro.type == ProjectExplorer::MacroType::Define; }));
+}
+
 void CppCodeModelInspectorDialog::updateProjectPartData(const ProjectPart::Ptr &part)
 {
     QTC_ASSERT(part, return);
@@ -1775,14 +1794,24 @@ void CppCodeModelInspectorDialog::updateProjectPartData(const ProjectPart::Ptr &
             = part->buildSystemTarget.isEmpty() ? QString::fromLatin1("<None>")
                                                 : part->buildSystemTarget;
 
+    const QString precompiledHeaders = part->precompiledHeaders.isEmpty()
+            ? QString::fromLatin1("<None>")
+            : part->precompiledHeaders.join(',');
+
     KeyValueModel::Table table = {
         {QString::fromLatin1("Project Part Name"), part->displayName},
         {QString::fromLatin1("Project Part File"), part->projectFileLocation()},
         {QString::fromLatin1("Project Name"), projectName},
         {QString::fromLatin1("Project File"), projectFilePath},
-        {QString::fromLatin1("Buildsystem Target"), buildSystemTarget},
         {QString::fromLatin1("Callgroup Id"), callGroupId},
+        {QString::fromLatin1("Precompiled Headers"), precompiledHeaders},
         {QString::fromLatin1("Selected For Building"), CMI::Utils::toString(part->selectedForBuilding)},
+        {QString::fromLatin1("Buildsystem Target"), buildSystemTarget},
+        {QString::fromLatin1("Build Target Type"), CMI::Utils::toString(part->buildTargetType)},
+        {QString::fromLatin1("ToolChain Type"), part->toolchainType.toString()},
+        {QString::fromLatin1("ToolChain Target Triple"), part->toolChainTargetTriple},
+        {QString::fromLatin1("ToolChain Word Width"), CMI::Utils::toString(part->toolChainWordWidth)},
+        {QString::fromLatin1("ToolChain Install Dir"), part->toolChainInstallDir.toString()},
         {QString::fromLatin1("Language Version"), CMI::Utils::toString(part->languageVersion)},
         {QString::fromLatin1("Language Extensions"), CMI::Utils::toString(part->languageExtensions)},
         {QString::fromLatin1("Qt Version"), CMI::Utils::toString(part->qtVersion)}
@@ -1792,21 +1821,18 @@ void CppCodeModelInspectorDialog::updateProjectPartData(const ProjectPart::Ptr &
     m_partGenericInfoModel->configure(table);
     resizeColumns<KeyValueModel>(m_ui->partGeneralView);
 
+    // Compiler Flags
+    m_ui->partGeneralCompilerFlagsEdit->setPlainText(part->compilerFlags.join("\n"));
+
     // Project Files
     m_projectFilesModel->configure(part->files);
     m_ui->projectPartTab->setTabText(ProjectPartFilesTab,
         partTabName(ProjectPartFilesTab, part->files.size()));
 
-    // Defines
-    const QList<QByteArray> defineLines = part->toolchainDefines.split('\n')
-        + part->projectDefines.split('\n');
-    int numberOfDefines = 0;
-    foreach (const QByteArray &line, defineLines) {
-        if (line.startsWith("#define "))
-            ++numberOfDefines;
-    }
-    m_ui->partToolchainDefinesEdit->setPlainText(QString::fromUtf8(part->toolchainDefines));
-    m_ui->partProjectDefinesEdit->setPlainText(QString::fromUtf8(part->projectDefines));
+    int numberOfDefines = defineCount(part->toolChainMacros) + defineCount(part->projectMacros);
+
+    m_ui->partToolchainDefinesEdit->setPlainText(QString::fromUtf8(ProjectExplorer::Macro::toByteArray(part->toolChainMacros)));
+    m_ui->partProjectDefinesEdit->setPlainText(QString::fromUtf8(ProjectExplorer::Macro::toByteArray(part->projectMacros)));
     m_ui->projectPartTab->setTabText(ProjectPartDefinesTab,
         partTabName(ProjectPartDefinesTab, numberOfDefines));
 
@@ -1825,7 +1851,7 @@ void CppCodeModelInspectorDialog::updateProjectPartData(const ProjectPart::Ptr &
 bool CppCodeModelInspectorDialog::event(QEvent *e)
 {
     if (e->type() == QEvent::ShortcutOverride) {
-        QKeyEvent *ke = static_cast<QKeyEvent *>(e);
+        auto ke = static_cast<QKeyEvent *>(e);
         if (ke->key() == Qt::Key_Escape && !ke->modifiers()) {
             ke->accept();
             close();

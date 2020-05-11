@@ -25,29 +25,29 @@
 
 #pragma once
 
-#include "subversionsettings.h"
 #include <vcsbase/vcsbaseclient.h>
-#include <vcsbase/vcscommand.h>
 
 #include <utils/fileutils.h>
+
+namespace VcsBase { class VcsCommand; }
 
 namespace Subversion {
 namespace Internal {
 
+class SubversionDiffEditorController;
 class SubversionSettings;
-class DiffController;
 
 class SubversionClient : public VcsBase::VcsBaseClient
 {
     Q_OBJECT
 
 public:
-    SubversionClient();
+    SubversionClient(SubversionSettings *settings);
 
-    VcsBase::VcsCommand *createCommitCmd(const QString &repositoryRoot,
-                                         const QStringList &files,
-                                         const QString &commitMessageFile,
-                                         const QStringList &extraOptions = QStringList()) const;
+    bool doCommit(const QString &repositoryRoot,
+                  const QStringList &files,
+                  const QString &commitMessageFile,
+                  const QStringList &extraOptions = QStringList()) const;
     void commit(const QString &repositoryRoot,
                 const QStringList &files,
                 const QString &commitMessageFile,
@@ -62,14 +62,11 @@ public:
              bool enableAnnotationContextMenu = false) override;
 
     void describe(const QString &workingDirectory, int changeNumber, const QString &title);
-    QString findTopLevelForFile(const QFileInfo &file) const override;
-    QStringList revisionSpec(const QString &revision) const override;
-    StatusItem parseStatusLine(const QString &line) const override;
 
     // Add authorization options to the command line arguments.
     static QStringList addAuthenticationOptions(const VcsBase::VcsBaseClientSettings &settings);
 
-    QString synchronousTopic(const QString &repository);
+    QString synchronousTopic(const QString &repository) const;
 
     static QString escapeFile(const QString &file);
     static QStringList escapeFiles(const QStringList &files);
@@ -78,10 +75,10 @@ protected:
     Core::Id vcsEditorKind(VcsCommandTag cmd) const override;
 
 private:
-    DiffController *findOrCreateDiffEditor(const QString &documentId, const QString &source,
-                                           const QString &title, const QString &workingDirectory) const;
+    SubversionDiffEditorController *findOrCreateDiffEditor(const QString &documentId, const QString &source,
+                                           const QString &title, const QString &workingDirectory);
 
-    mutable Utils::FileName m_svnVersionBinary;
+    mutable Utils::FilePath m_svnVersionBinary;
     mutable QString m_svnVersion;
 };
 

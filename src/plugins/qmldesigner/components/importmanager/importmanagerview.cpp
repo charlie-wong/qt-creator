@@ -31,17 +31,12 @@
 
 namespace QmlDesigner {
 
-ImportManagerView::ImportManagerView(QObject *parent) :
-    AbstractView(parent),
-    m_importsWidget(0)
-
+ImportManagerView::ImportManagerView(QObject *parent)
+    : AbstractView(parent)
 {
 }
 
-ImportManagerView::~ImportManagerView()
-{
-
-}
+ImportManagerView::~ImportManagerView() = default;
 
 bool ImportManagerView::hasWidget() const
 {
@@ -50,7 +45,7 @@ bool ImportManagerView::hasWidget() const
 
 WidgetInfo ImportManagerView::widgetInfo()
 {
-    if (m_importsWidget == 0) {
+    if (m_importsWidget == nullptr) {
         m_importsWidget = new ImportsWidget;
         connect(m_importsWidget.data(), &ImportsWidget::removeImport, this, &ImportManagerView::removeImport);
         connect(m_importsWidget.data(), &ImportsWidget::addImport, this, &ImportManagerView::addImport);
@@ -59,7 +54,7 @@ WidgetInfo ImportManagerView::widgetInfo()
             m_importsWidget->setImports(model()->imports());
     }
 
-    return createWidgetInfo(m_importsWidget, 0, QLatin1String("ImportManager"), WidgetInfo::LeftPane, 1);
+    return createWidgetInfo(m_importsWidget, nullptr, QLatin1String("ImportManager"), WidgetInfo::LeftPane, 1, tr("Import Manager"));
 }
 
 void ImportManagerView::modelAttached(Model *model)
@@ -84,25 +79,26 @@ void ImportManagerView::modelAboutToBeDetached(Model *model)
     AbstractView::modelAboutToBeDetached(model);
 }
 
-void ImportManagerView::nodeCreated(const ModelNode &/*createdNode*/)
-{
-    if (m_importsWidget)
-        m_importsWidget->setUsedImports(model()->usedImports());
-}
-
-void ImportManagerView::nodeAboutToBeRemoved(const ModelNode &/*removedNode*/)
-{
-    if (m_importsWidget)
-        m_importsWidget->setUsedImports(model()->usedImports());
-}
-
 void ImportManagerView::importsChanged(const QList<Import> &/*addedImports*/, const QList<Import> &/*removedImports*/)
 {
     if (m_importsWidget) {
         m_importsWidget->setImports(model()->imports());
-        m_importsWidget->setPossibleImports(model()->possibleImports());
+        // setImports recreates labels, so we need to update used imports, as it is not guaranteed
+        // usedImportsChanged notification will come after this.
         m_importsWidget->setUsedImports(model()->usedImports());
     }
+}
+
+void ImportManagerView::possibleImportsChanged(const QList<Import> &/*possibleImports*/)
+{
+    if (m_importsWidget)
+        m_importsWidget->setPossibleImports(model()->possibleImports());
+}
+
+void ImportManagerView::usedImportsChanged(const QList<Import> &/*usedImports*/)
+{
+    if (m_importsWidget)
+        m_importsWidget->setUsedImports(model()->usedImports());
 }
 
 void ImportManagerView::removeImport(const Import &import)

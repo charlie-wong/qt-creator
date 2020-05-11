@@ -25,11 +25,15 @@
 
 #pragma once
 
-#include <QVector>
+#include "projectexplorersettings.h"
 
 #include <coreplugin/ioutputpane.h>
+#include <coreplugin/dialogs/ioptionspage.h>
 
 #include <utils/outputformat.h>
+
+#include <QPointer>
+#include <QVector>
 
 QT_BEGIN_NAMESPACE
 class QTabWidget;
@@ -58,11 +62,6 @@ public:
         CloseTabWithPrompt
     };
 
-    enum BehaviorOnOutput {
-        Flash,
-        Popup
-    };
-
     AppOutputPane();
     ~AppOutputPane() override;
 
@@ -84,22 +83,21 @@ public:
 
     void createNewOutputWindow(RunControl *rc);
     void showTabFor(RunControl *rc);
-    void setBehaviorOnOutput(RunControl *rc, BehaviorOnOutput mode);
+    void setBehaviorOnOutput(RunControl *rc, AppOutputPaneMode mode);
 
     bool aboutToClose() const;
-    bool closeTabs(CloseTabMode mode);
+    void closeTabs(CloseTabMode mode);
 
     QList<RunControl *> allRunControls() const;
 
-signals:
-     void allRunControlsFinished();
-
-public:
     // ApplicationOutput specifics
     void projectRemoved();
 
     void appendMessage(ProjectExplorer::RunControl *rc, const QString &out,
                        Utils::OutputFormat format);
+
+    const AppOutputSettings &settings() const { return m_settings; }
+    void setSettings(const AppOutputSettings &settings);
 
 private:
     void reRunRunControl();
@@ -107,7 +105,7 @@ private:
     void attachToRunControl();
     void tabChanged(int);
     void contextMenuRequested(const QPoint &pos, int index);
-    void slotRunControlStarted();
+    void slotRunControlChanged();
     void slotRunControlFinished();
     void slotRunControlFinished2(ProjectExplorer::RunControl *sender);
 
@@ -115,22 +113,22 @@ private:
     void updateFromSettings();
     void enableDefaultButtons();
 
-    void zoomIn();
-    void zoomOut();
+    void zoomIn(int range);
+    void zoomOut(int range);
+    void resetZoom();
 
-    void enableButtons(const RunControl *rc, bool isRunning);
+    void enableButtons(const RunControl *rc);
 
     class RunControlTab {
     public:
         explicit RunControlTab(RunControl *runControl = nullptr,
                                Core::OutputWindow *window = nullptr);
-        RunControl *runControl;
-        Core::OutputWindow *window;
-        BehaviorOnOutput behaviorOnOutput = Flash;
+        QPointer<RunControl> runControl;
+        QPointer<Core::OutputWindow> window;
+        AppOutputPaneMode behaviorOnOutput = AppOutputPaneMode::FlashOnOutput;
     };
 
-    bool isRunning() const;
-    bool closeTab(int index, CloseTabMode cm = CloseTabWithPrompt);
+    void closeTab(int index, CloseTabMode cm = CloseTabWithPrompt);
     bool optionallyPromptToStop(RunControl *runControl);
 
     int indexOf(const RunControl *) const;
@@ -140,13 +138,15 @@ private:
     int tabWidgetIndexOf(int runControlIndex) const;
     void handleOldOutput(Core::OutputWindow *window) const;
     void updateCloseActions();
-    void updateFontSettings();
-    void saveSettings();
-    void updateBehaviorSettings();
+    void updateFilter() override;
+
+    void loadSettings();
+    void storeSettings() const;
 
     QWidget *m_mainWidget;
     TabWidget *m_tabWidget;
     QVector<RunControlTab> m_runControlTabs;
+    int m_runControlCount = 0;
     QAction *m_stopAction;
     QAction *m_closeCurrentTabAction;
     QAction *m_closeAllTabsAction;
@@ -154,10 +154,15 @@ private:
     QToolButton *m_reRunButton;
     QToolButton *m_stopButton;
     QToolButton *m_attachButton;
-    QToolButton *m_zoomInButton;
-    QToolButton *m_zoomOutButton;
+    QToolButton * const m_settingsButton;
     QWidget *m_formatterWidget;
-    float m_zoom;
+    AppOutputSettings m_settings;
+};
+
+class AppOutputSettingsPage final : public Core::IOptionsPage
+{
+public:
+    AppOutputSettingsPage();
 };
 
 } // namespace Internal

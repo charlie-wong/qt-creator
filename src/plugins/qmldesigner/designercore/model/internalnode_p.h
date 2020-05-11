@@ -40,23 +40,20 @@
 
 namespace QmlDesigner {
 
-class Model;
-
 namespace Internal {
 
 class InternalProperty;
 class InternalNode;
 
-typedef QSharedPointer<InternalNode> InternalNodePointer;
-typedef QSharedPointer<InternalProperty> InternalPropertyPointer;
-typedef QWeakPointer<InternalNode> InternalNodeWeakPointer;
+using InternalNodePointer = QSharedPointer<InternalNode>;
+using InternalPropertyPointer = QSharedPointer<InternalProperty>;
 
 class InternalNode
 {
     friend class InternalProperty;
 public:
-    typedef QSharedPointer<InternalNode> Pointer;
-    typedef QWeakPointer<InternalNode> WeakPointer;
+    using Pointer = QSharedPointer<InternalNode>;
+    using WeakPointer = QWeakPointer<InternalNode>;
 
     explicit InternalNode();
 
@@ -150,7 +147,7 @@ private:
     QStringList m_scriptFunctionList;
 
     QString m_nodeSource;
-    int m_nodeSourceType;
+    int m_nodeSourceType = 0;
 };
 
 uint qHash(const InternalNodePointer& node);

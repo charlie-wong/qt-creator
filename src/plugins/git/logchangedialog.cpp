@@ -24,7 +24,6 @@
 ****************************************************************************/
 
 #include "logchangedialog.h"
-#include "gitplugin.h"
 #include "gitclient.h"
 
 #include <vcsbase/vcsoutputwindow.h>
@@ -79,7 +78,7 @@ bool LogChangeWidget::init(const QString &repository, const QString &commit, Log
         return true;
     if (!(flags & Silent)) {
         VcsOutputWindow::appendError(
-                    GitPlugin::client()->msgNoCommits(flags & IncludeRemotes));
+                    GitClient::instance()->msgNoCommits(flags & IncludeRemotes));
     }
     return false;
 }
@@ -159,8 +158,10 @@ bool LogChangeWidget::populateLog(const QString &repository, const QString &comm
         arguments << "--not" << "--remotes";
     arguments << "--";
     QString output;
-    if (!GitPlugin::client()->synchronousLog(repository, arguments, &output, 0, VcsCommand::NoOutput))
+    if (!GitClient::instance()->synchronousLog(
+                repository, arguments, &output, nullptr, VcsCommand::NoOutput)) {
         return false;
+    }
     const QStringList lines = output.split('\n');
     for (const QString &line : lines) {
         const int colonPos = line.indexOf(':');
@@ -193,14 +194,13 @@ const QStandardItem *LogChangeWidget::currentItem(int column) const
     const QModelIndex currentIndex = selectionModel()->currentIndex();
     if (currentIndex.isValid())
         return m_model->item(currentIndex.row(), column);
-    return 0;
+    return nullptr;
 }
 
 LogChangeDialog::LogChangeDialog(bool isReset, QWidget *parent) :
     QDialog(parent)
     , m_widget(new LogChangeWidget)
     , m_dialogButtonBox(new QDialogButtonBox(this))
-    , m_resetTypeComboBox(0)
 {
     auto layout = new QVBoxLayout(this);
     layout->addWidget(new QLabel(isReset ? tr("Reset to:") : tr("Select change:"), this));
@@ -212,8 +212,8 @@ LogChangeDialog::LogChangeDialog(bool isReset, QWidget *parent) :
         m_resetTypeComboBox->addItem(tr("Hard"), "--hard");
         m_resetTypeComboBox->addItem(tr("Mixed"), "--mixed");
         m_resetTypeComboBox->addItem(tr("Soft"), "--soft");
-        m_resetTypeComboBox->setCurrentIndex(GitPlugin::client()->settings().intValue(
-                                                 GitSettings::lastResetIndexKey));
+        m_resetTypeComboBox->setCurrentIndex(
+                    GitClient::instance()->settings().intValue(GitSettings::lastResetIndexKey));
         popUpLayout->addWidget(m_resetTypeComboBox);
         popUpLayout->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Ignored));
     }
@@ -228,7 +228,6 @@ LogChangeDialog::LogChangeDialog(bool isReset, QWidget *parent) :
 
     connect(m_widget, &LogChangeWidget::activated, okButton, [okButton] { okButton->animateClick(); });
 
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     resize(600, 400);
 }
 
@@ -241,8 +240,8 @@ bool LogChangeDialog::runDialog(const QString &repository,
 
     if (QDialog::exec() == QDialog::Accepted) {
         if (m_resetTypeComboBox) {
-            GitPlugin::client()->settings().setValue(GitSettings::lastResetIndexKey,
-                                                     m_resetTypeComboBox->currentIndex());
+            GitClient::instance()->settings().setValue(
+                        GitSettings::lastResetIndexKey, m_resetTypeComboBox->currentIndex());
         }
         return true;
     }

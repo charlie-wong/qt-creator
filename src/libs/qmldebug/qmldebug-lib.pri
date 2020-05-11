@@ -7,8 +7,6 @@ shared {
 HEADERS += \
     $$PWD/qmldebugclient.h \
     $$PWD/baseenginedebugclient.h \
-    $$PWD/declarativeenginedebugclient.h \
-    $$PWD/declarativeenginedebugclientv2.h \
     $$PWD/qmloutputparser.h \
     $$PWD/qmldebug_global.h \
     $$PWD/qpacketprotocol.h \
@@ -16,10 +14,11 @@ HEADERS += \
     $$PWD/qdebugmessageclient.h \
     $$PWD/qmlenginedebugclient.h \
     $$PWD/basetoolsclient.h \
-    $$PWD/declarativetoolsclient.h \
     $$PWD/qmltoolsclient.h \
     $$PWD/qmlenginecontrolclient.h \
-    $$PWD/qmldebugcommandlinearguments.h
+    $$PWD/qmldebugcommandlinearguments.h \
+    $$PWD/qmldebugconnection.h \
+    $$PWD/qmldebugconnectionmanager.h
 
 SOURCES += \
     $$PWD/qmldebugclient.cpp \
@@ -28,8 +27,7 @@ SOURCES += \
     $$PWD/qpacketprotocol.cpp \
     $$PWD/qdebugmessageclient.cpp \
     $$PWD/basetoolsclient.cpp \
-    $$PWD/declarativetoolsclient.cpp \
     $$PWD/qmltoolsclient.cpp \
-    $$PWD/declarativeenginedebugclient.cpp \
-    $$PWD/qmlenginecontrolclient.cpp
-
+    $$PWD/qmlenginecontrolclient.cpp \
+    $$PWD/qmldebugconnection.cpp \
+    $$PWD/qmldebugconnectionmanager.cpp

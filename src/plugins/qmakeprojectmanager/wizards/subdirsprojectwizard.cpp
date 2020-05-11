@@ -68,7 +68,7 @@ Core::BaseFileWizard *SubdirsProjectWizard::create(QWidget *parent,
 Core::GeneratedFiles SubdirsProjectWizard::generateFiles(const QWizard *w,
                                                          QString * /*errorMessage*/) const
 {
-    const SubdirsProjectWizardDialog *wizard = qobject_cast< const SubdirsProjectWizardDialog *>(w);
+    const auto *wizard = qobject_cast< const SubdirsProjectWizardDialog *>(w);
     const QtProjectParameters params = wizard->parameters();
     const QString projectPath = params.projectPath();
     const QString profileName = Core::BaseFileWizardFactory::buildFileName(projectPath, params.fileName, profileSuffix());
@@ -82,14 +82,15 @@ Core::GeneratedFiles SubdirsProjectWizard::generateFiles(const QWizard *w,
 bool SubdirsProjectWizard::postGenerateFiles(const QWizard *w, const Core::GeneratedFiles &files,
                                              QString *errorMessage) const
 {
-    const SubdirsProjectWizardDialog *wizard = qobject_cast< const SubdirsProjectWizardDialog *>(w);
+    const auto *wizard = qobject_cast< const SubdirsProjectWizardDialog *>(w);
     if (QtWizard::qt4ProjectPostGenerateFiles(wizard, files, errorMessage)) {
         const QtProjectParameters params = wizard->parameters();
         const QString projectPath = params.projectPath();
         const QString profileName = Core::BaseFileWizardFactory::buildFileName(projectPath, params.fileName, profileSuffix());
         QVariantMap map;
         map.insert(QLatin1String(ProjectExplorer::Constants::PREFERRED_PROJECT_NODE), profileName);
-        map.insert(QLatin1String(ProjectExplorer::Constants::PROJECT_KIT_IDS), QVariant::fromValue(wizard->selectedKits()));
+        map.insert(QLatin1String(ProjectExplorer::Constants::PROJECT_KIT_IDS),
+                   Utils::transform<QStringList>(wizard->selectedKits(), &Core::Id::toString));
         IWizardFactory::requestNewItemDialog(tr("New Subproject", "Title of dialog"),
                                              Utils::filtered(Core::IWizardFactory::allWizardFactories(),
                                                              [](Core::IWizardFactory *f) {

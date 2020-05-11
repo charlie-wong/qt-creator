@@ -28,40 +28,34 @@
 #include <projectexplorer/buildconfiguration.h>
 #include <projectexplorer/target.h>
 
-#include <QPointer>
-
 namespace Nim {
 
-class NimProject;
 class NimCompilerBuildStep;
 
 class NimBuildConfiguration : public ProjectExplorer::BuildConfiguration
 {
     Q_OBJECT
 
+    friend class ProjectExplorer::BuildConfigurationFactory;
+    NimBuildConfiguration(ProjectExplorer::Target *target, Core::Id id);
+
 public:
-    NimBuildConfiguration(ProjectExplorer::Target *target);
-
-    ProjectExplorer::NamedWidget *createConfigWidget() override;
-
-    ProjectExplorer::BuildConfiguration::BuildType buildType() const override;
-
-    bool fromMap(const QVariantMap &map) override;
-    QVariantMap toMap() const override;
-
-    Utils::FileName cacheDirectory() const;
-    Utils::FileName outFilePath() const;
-
-    static bool canRestore(const QVariantMap &map);
-
-    bool hasNimCompilerBuildStep() const;
-    bool hasNimCompilerCleanStep() const;
+    Utils::FilePath cacheDirectory() const;
+    Utils::FilePath outFilePath() const;
 
 signals:
-    void outFilePathChanged(const Utils::FileName &outFilePath);
+    void outFilePathChanged(const Utils::FilePath &outFilePath);
 
 private:
+    void setupBuild(const ProjectExplorer::BuildInfo *info);
     const NimCompilerBuildStep *nimCompilerBuildStep() const;
 };
 
-}
+
+class NimBuildConfigurationFactory final : public ProjectExplorer::BuildConfigurationFactory
+{
+public:
+    NimBuildConfigurationFactory();
+};
+
+} // Nim

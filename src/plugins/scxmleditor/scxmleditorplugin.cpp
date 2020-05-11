@@ -24,26 +24,25 @@
 ****************************************************************************/
 
 #include "scxmleditorplugin.h"
-#include "scxmleditorconstants.h"
+
 #include "scxmleditorfactory.h"
 
-#include <coreplugin/coreconstants.h>
 #include <coreplugin/designmode.h>
-#include <coreplugin/icontext.h>
-#include <coreplugin/icore.h>
-
-#include <QAction>
-#include <QMainWindow>
-#include <QMenu>
-#include <QMessageBox>
-
-#include <QtPlugin>
 
 using namespace Core;
-using namespace ScxmlEditor::Internal;
 
-ScxmlEditorPlugin::ScxmlEditorPlugin()
+namespace ScxmlEditor {
+namespace Internal {
+
+class ScxmlEditorPluginPrivate
 {
+public:
+    ScxmlEditorFactory editorFactory;
+};
+
+ScxmlEditorPlugin::~ScxmlEditorPlugin()
+{
+    delete d;
 }
 
 bool ScxmlEditorPlugin::initialize(const QStringList &arguments, QString *errorString)
@@ -51,17 +50,15 @@ bool ScxmlEditorPlugin::initialize(const QStringList &arguments, QString *errorS
     Q_UNUSED(arguments)
     Q_UNUSED(errorString)
 
-    addAutoReleasedObject(new ScxmlEditorFactory);
+    d = new ScxmlEditorPluginPrivate;
 
     return true;
 }
 
 void ScxmlEditorPlugin::extensionsInitialized()
 {
-    DesignMode::instance()->setDesignModeIsRequired();
+    DesignMode::setDesignModeIsRequired();
 }
 
-ExtensionSystem::IPlugin::ShutdownFlag ScxmlEditorPlugin::aboutToShutdown()
-{
-    return SynchronousShutdown;
-}
+} // Internal
+} // ScxmlEditor

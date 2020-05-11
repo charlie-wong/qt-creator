@@ -26,153 +26,61 @@
 #include "genericdirectuploadstep.h"
 
 #include "genericdirectuploadservice.h"
+#include "remotelinux_constants.h"
 
 #include <projectexplorer/deploymentdata.h>
 #include <projectexplorer/target.h>
-
-#include <QCheckBox>
-#include <QVBoxLayout>
+#include <projectexplorer/runconfigurationaspects.h>
 
 using namespace ProjectExplorer;
 
 namespace RemoteLinux {
-namespace Internal {
-namespace {
-const char IncrementalKey[] = "RemoteLinux.GenericDirectUploadStep.Incremental";
-const char IgnoreMissingFilesKey[] = "RemoteLinux.GenericDirectUploadStep.IgnoreMissingFiles";
 
-class ConfigWidget : public SimpleBuildStepConfigWidget
-{
-    Q_OBJECT
-public:
-    ConfigWidget(GenericDirectUploadStep *step) : SimpleBuildStepConfigWidget(step)
-    {
-        m_incrementalCheckBox.setText(tr("Incremental deployment"));
-        m_ignoreMissingFilesCheckBox.setText(tr("Ignore missing files"));
-        QVBoxLayout *mainLayout = new QVBoxLayout(this);
-        mainLayout->setMargin(0);
-        mainLayout->addWidget(&m_incrementalCheckBox);
-        mainLayout->addWidget(&m_ignoreMissingFilesCheckBox);
-        m_incrementalCheckBox.setChecked(step->incrementalDeployment());
-        m_ignoreMissingFilesCheckBox.setChecked(step->ignoreMissingFiles());
-        connect(&m_incrementalCheckBox, &QAbstractButton::toggled,
-                this, &ConfigWidget::handleIncrementalChanged);
-        connect(&m_ignoreMissingFilesCheckBox, &QAbstractButton::toggled,
-                this, &ConfigWidget::handleIgnoreMissingFilesChanged);
-    }
-
-    bool showWidget() const { return true; }
-
-private:
-    void handleIncrementalChanged(bool incremental) {
-        GenericDirectUploadStep *step = qobject_cast<GenericDirectUploadStep *>(this->step());
-        step->setIncrementalDeployment(incremental);
-    }
-
-    void handleIgnoreMissingFilesChanged(bool ignoreMissingFiles) {
-        GenericDirectUploadStep *step = qobject_cast<GenericDirectUploadStep *>(this->step());
-        step->setIgnoreMissingFiles(ignoreMissingFiles);
-    }
-
-    QCheckBox m_incrementalCheckBox;
-    QCheckBox m_ignoreMissingFilesCheckBox;
-};
-
-} // anonymous namespace
-
-class GenericDirectUploadStepPrivate
-{
-public:
-    GenericDirectUploadStepPrivate() : incremental(true), ignoreMissingFiles(false) {}
-
-    GenericDirectUploadService deployService;
-    bool incremental;
-    bool ignoreMissingFiles;
-};
-
-} // namespace Internal
-
-GenericDirectUploadStep::GenericDirectUploadStep(BuildStepList *bsl, Core::Id id)
+GenericDirectUploadStep::GenericDirectUploadStep(BuildStepList *bsl, Core::Id id,
+                                                 bool offerIncrementalDeployment)
     : AbstractRemoteLinuxDeployStep(bsl, id)
 {
-    ctor();
-}
+    auto service = createDeployService<GenericDirectUploadService>();
 
-GenericDirectUploadStep::GenericDirectUploadStep(BuildStepList *bsl, GenericDirectUploadStep *other)
-    : AbstractRemoteLinuxDeployStep(bsl, other)
-{
-    ctor();
-}
+    BaseBoolAspect *incremental = nullptr;
+    if (offerIncrementalDeployment) {
+        incremental = addAspect<BaseBoolAspect>();
+        incremental->setSettingsKey("RemoteLinux.GenericDirectUploadStep.Incremental");
+        incremental->setLabel(tr("Incremental deployment"),
+                              BaseBoolAspect::LabelPlacement::AtCheckBox);
+        incremental->setValue(true);
+        incremental->setDefaultValue(true);
+    }
 
-GenericDirectUploadStep::~GenericDirectUploadStep()
-{
-    delete d;
-}
+    auto ignoreMissingFiles = addAspect<BaseBoolAspect>();
+    ignoreMissingFiles->setSettingsKey("RemoteLinux.GenericDirectUploadStep.IgnoreMissingFiles");
+    ignoreMissingFiles->setLabel(tr("Ignore missing files"),
+                                 BaseBoolAspect::LabelPlacement::AtCheckBox);
+    ignoreMissingFiles->setValue(false);
 
-BuildStepConfigWidget *GenericDirectUploadStep::createConfigWidget()
-{
-    return new Internal::ConfigWidget(this);
-}
+    setInternalInitializer([incremental, ignoreMissingFiles, service] {
+        if (incremental) {
+            service->setIncrementalDeployment(incremental->value()
+                ? IncrementalDeployment::Enabled : IncrementalDeployment::Disabled);
+        } else {
+            service->setIncrementalDeployment(IncrementalDeployment::NotSupported);
+        }
+        service->setIgnoreMissingFiles(ignoreMissingFiles->value());
+        return service->isDeploymentPossible();
+    });
 
-bool GenericDirectUploadStep::initInternal(QString *error)
-{
-    deployService()->setDeployableFiles(target()->deploymentData().allFiles());
-    deployService()->setIncrementalDeployment(incrementalDeployment());
-    deployService()->setIgnoreMissingFiles(ignoreMissingFiles());
-    return deployService()->isDeploymentPossible(error);
-}
+    setRunPreparer([this, service] {
+        service->setDeployableFiles(target()->deploymentData().allFiles());
+    });
 
-GenericDirectUploadService *GenericDirectUploadStep::deployService() const
-{
-    return &d->deployService;
-}
-
-bool GenericDirectUploadStep::fromMap(const QVariantMap &map)
-{
-    if (!AbstractRemoteLinuxDeployStep::fromMap(map))
-        return false;
-    setIncrementalDeployment(map.value(QLatin1String(Internal::IncrementalKey), true).toBool());
-    setIgnoreMissingFiles(map.value(QLatin1String(Internal::IgnoreMissingFilesKey), false).toBool());
-    return true;
-}
-
-QVariantMap GenericDirectUploadStep::toMap() const
-{
-    QVariantMap map = AbstractRemoteLinuxDeployStep::toMap();
-    map.insert(QLatin1String(Internal::IncrementalKey), incrementalDeployment());
-    map.insert(QLatin1String(Internal::IgnoreMissingFilesKey), ignoreMissingFiles());
-    return map;
-}
-
-void GenericDirectUploadStep::ctor()
-{
     setDefaultDisplayName(displayName());
-    d = new Internal::GenericDirectUploadStepPrivate;
 }
 
-void GenericDirectUploadStep::setIncrementalDeployment(bool incremental)
-{
-    d->incremental = incremental;
-}
-
-bool GenericDirectUploadStep::incrementalDeployment() const
-{
-    return d->incremental;
-}
-
-void GenericDirectUploadStep::setIgnoreMissingFiles(bool ignoreMissingFiles)
-{
-    d->ignoreMissingFiles = ignoreMissingFiles;
-}
-
-bool GenericDirectUploadStep::ignoreMissingFiles() const
-{
-    return d->ignoreMissingFiles;
-}
+GenericDirectUploadStep::~GenericDirectUploadStep() = default;
 
 Core::Id GenericDirectUploadStep::stepId()
 {
-    return "RemoteLinux.DirectUploadStep";
+    return Constants::DirectUploadStepId;
 }
 
 QString GenericDirectUploadStep::displayName()
@@ -181,5 +89,3 @@ QString GenericDirectUploadStep::displayName()
 }
 
 } //namespace RemoteLinux
-
-#include "genericdirectuploadstep.moc"

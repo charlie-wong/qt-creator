@@ -31,7 +31,9 @@
 
 using namespace AutotoolsProjectManager::Internal;
 
-MakefileParserThread::MakefileParserThread(const QString &makefile) : m_parser(makefile)
+MakefileParserThread::MakefileParserThread(ProjectExplorer::BuildSystem *bs)
+    : m_parser(bs->projectFilePath().toString()),
+      m_guard(bs->guardParsingRun())
 {
     connect(&m_parser, &MakefileParser::status,
             this, &MakefileParserThread::status);
@@ -61,10 +63,10 @@ QStringList MakefileParserThread::includePaths() const
     return m_includePaths;
 }
 
-QByteArray MakefileParserThread::defines() const
+ProjectExplorer::Macros MakefileParserThread::macros() const
 {
     QMutexLocker locker(&m_mutex);
-    return m_defines;
+    return m_macros;
 }
 
 QStringList MakefileParserThread::cflags() const
@@ -82,7 +84,7 @@ QStringList MakefileParserThread::cxxflags() const
 bool MakefileParserThread::hasError() const
 {
     QMutexLocker locker(&m_mutex);
-    return m_hasError;
+    return !m_guard.isSuccess();
 }
 
 bool MakefileParserThread::isCanceled() const
@@ -104,12 +106,13 @@ void MakefileParserThread::run()
     // this prevents long locks if the caller reads a value before the signal
     // finished() has been emitted.
     QMutexLocker locker(&m_mutex);
-    m_hasError = !success;
+    if (success)
+        m_guard.markAsSuccess();
     m_executable = m_parser.executable();
     m_sources = m_parser.sources();
     m_makefiles = m_parser.makefiles();
     m_includePaths = m_parser.includePaths();
-    m_defines = m_parser.defines();
+    m_macros = m_parser.macros();
     m_cflags = m_parser.cflags();
     m_cxxflags = m_parser.cxxflags();
 }

@@ -32,16 +32,12 @@
 
 QT_BEGIN_NAMESPACE
 class QStringList;
-class QAction;
-class QMainWindow;
-class QMenu;
 QT_END_NAMESPACE
 
-namespace Utils { class FileName; }
+namespace Utils { class FilePath; }
 
 namespace Core {
 
-class IContext;
 class IDocument;
 
 namespace Internal {
@@ -53,12 +49,12 @@ class CORE_EXPORT DocumentManager : public QObject
 {
     Q_OBJECT
 public:
-    enum FixMode {
+    enum ResolveMode {
         ResolveLinks,
         KeepLinks
     };
 
-    typedef QPair<QString, Id> RecentFile;
+    using RecentFile = QPair<QString, Id>;
 
     static DocumentManager *instance();
 
@@ -81,40 +77,53 @@ public:
     static void saveSettings();
 
     // helper functions
-    static QString fixFileName(const QString &fileName, FixMode fixmode);
+    static QString cleanAbsoluteFilePath(const QString &filePath, ResolveMode resolveMode);
+    static QString filePathKey(const QString &filePath, ResolveMode resolveMode);
 
-    static bool saveDocument(IDocument *document, const QString &fileName = QString(), bool *isReadOnly = 0);
+    static bool saveDocument(IDocument *document,
+                             const QString &fileName = QString(),
+                             bool *isReadOnly = nullptr);
+
+    static QString allDocumentFactoryFiltersString(QString *allFilesFilter);
 
     static QStringList getOpenFileNames(const QString &filters,
                                         const QString &path = QString(),
-                                        QString *selectedFilter = 0);
-    static QString getSaveFileName(const QString &title, const QString &pathIn,
-                            const QString &filter = QString(), QString *selectedFilter = 0);
+                                        QString *selectedFilter = nullptr);
+    static QString getSaveFileName(const QString &title,
+                                   const QString &pathIn,
+                                   const QString &filter = QString(),
+                                   QString *selectedFilter = nullptr);
     static QString getSaveFileNameWithExtension(const QString &title, const QString &pathIn,
                                          const QString &filter);
     static QString getSaveAsFileName(const IDocument *document);
 
-    static bool saveAllModifiedDocumentsSilently(bool *canceled = 0,
-                                                 QList<IDocument *> *failedToClose = 0);
-    static bool saveModifiedDocumentsSilently(const QList<IDocument *> &documents, bool *canceled = 0,
-                                              QList<IDocument *> *failedToClose = 0);
-    static bool saveModifiedDocumentSilently(IDocument *document, bool *canceled = 0,
-                                             QList<IDocument *> *failedToClose = 0);
+    static bool saveAllModifiedDocumentsSilently(bool *canceled = nullptr,
+                                                 QList<IDocument *> *failedToClose = nullptr);
+    static bool saveModifiedDocumentsSilently(const QList<IDocument *> &documents,
+                                              bool *canceled = nullptr,
+                                              QList<IDocument *> *failedToClose = nullptr);
+    static bool saveModifiedDocumentSilently(IDocument *document,
+                                             bool *canceled = nullptr,
+                                             QList<IDocument *> *failedToClose = nullptr);
 
-    static bool saveAllModifiedDocuments(const QString &message = QString(), bool *canceled = 0,
+    static bool saveAllModifiedDocuments(const QString &message = QString(),
+                                         bool *canceled = nullptr,
                                          const QString &alwaysSaveMessage = QString(),
-                                         bool *alwaysSave = 0,
-                                         QList<IDocument *> *failedToClose = 0);
+                                         bool *alwaysSave = nullptr,
+                                         QList<IDocument *> *failedToClose = nullptr);
     static bool saveModifiedDocuments(const QList<IDocument *> &documents,
-                                      const QString &message = QString(), bool *canceled = 0,
+                                      const QString &message = QString(),
+                                      bool *canceled = nullptr,
                                       const QString &alwaysSaveMessage = QString(),
-                                      bool *alwaysSave = 0,
-                                      QList<IDocument *> *failedToClose = 0);
+                                      bool *alwaysSave = nullptr,
+                                      QList<IDocument *> *failedToClose = nullptr);
     static bool saveModifiedDocument(IDocument *document,
-                                     const QString &message = QString(), bool *canceled = 0,
+                                     const QString &message = QString(),
+                                     bool *canceled = nullptr,
                                      const QString &alwaysSaveMessage = QString(),
-                                     bool *alwaysSave = 0,
-                                     QList<IDocument *> *failedToClose = 0);
+                                     bool *alwaysSave = nullptr,
+                                     QList<IDocument *> *failedToClose = nullptr);
+    static void showFilePropertiesDialog(const Utils::FilePath &filePath);
 
     static QString fileDialogLastVisitedDirectory();
     static void setFileDialogLastVisitedDirectory(const QString &);
@@ -127,11 +136,8 @@ public:
     static bool useProjectsDirectory();
     static void setUseProjectsDirectory(bool);
 
-    static QString projectsDirectory();
-    static void setProjectsDirectory(const QString &);
-
-    static QString buildDirectory();
-    static void setBuildDirectory(const QString &directory);
+    static Utils::FilePath projectsDirectory();
+    static void setProjectsDirectory(const Utils::FilePath &directory);
 
     /* Used to notify e.g. the code model to update the given files. Does *not*
        lead to any editors to reload or any other editor manager actions. */
@@ -145,30 +151,24 @@ signals:
     void allDocumentsRenamed(const QString &from, const QString &to);
     /// emitted if one document changed its name e.g. due to save as
     void documentRenamed(Core::IDocument *document, const QString &from, const QString &to);
-
-protected:
-    bool eventFilter(QObject *obj, QEvent *e);
+    void projectsDirectoryChanged(const Utils::FilePath &directory);
 
 private:
     explicit DocumentManager(QObject *parent);
-    ~DocumentManager();
+    ~DocumentManager() override;
 
     void documentDestroyed(QObject *obj);
     void checkForNewFileName();
     void checkForReload();
     void changedFile(const QString &file);
-    void filePathChanged(const Utils::FileName &oldName, const Utils::FileName &newName);
+    void filePathChanged(const Utils::FilePath &oldName, const Utils::FilePath &newName);
+    void updateSaveAll();
+    static void registerSaveAllAction();
 
     friend class Core::Internal::MainWindow;
     friend class Core::Internal::DocumentManagerPrivate;
 };
 
-/*! The FileChangeBlocker blocks all change notifications to all IDocument * that
-    match the given filename. And unblocks in the destructor.
-
-    To also reload the IDocument in the destructor class set modifiedReload to true
-
-  */
 class CORE_EXPORT FileChangeBlocker
 {
 public:

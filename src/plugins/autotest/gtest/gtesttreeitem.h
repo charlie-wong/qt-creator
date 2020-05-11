@@ -46,9 +46,14 @@ public:
     Q_FLAGS(TestState)
     Q_DECLARE_FLAGS(TestStates, TestState)
 
-    explicit GTestTreeItem(const QString &name = QString(), const QString &filePath = QString(),
-                           Type type = Root) : TestTreeItem(name, filePath, type), m_state(Enabled) {}
+    explicit GTestTreeItem(ITestFramework *framework,
+                           const QString &name = QString(),
+                           const QString &filePath = QString(),
+                           Type type = Root)
+        : TestTreeItem(framework, name, filePath, type), m_state(Enabled)
+    {}
 
+    TestTreeItem *copyWithoutChildren() override;
     QVariant data(int column, int role) const override;
     bool canProvideTestConfiguration() const override { return type() != Root; }
     bool canProvideDebugConfiguration() const override { return type() != Root; }
@@ -56,8 +61,11 @@ public:
     TestConfiguration *debugConfiguration() const override;
     QList<TestConfiguration *> getAllTestConfigurations() const override;
     QList<TestConfiguration *> getSelectedTestConfigurations() const override;
+    QList<TestConfiguration *> getTestConfigurationsForFile(const Utils::FilePath &fileName) const override;
     TestTreeItem *find(const TestParseResult *result) override;
+    TestTreeItem *findChild(const TestTreeItem *other) override;
     bool modify(const TestParseResult *result) override;
+    TestTreeItem *createParentGroupNode() const override;
 
     void setStates(TestStates states) { m_state = states; }
     void setState(TestState state) { m_state |= state; }
@@ -66,9 +74,14 @@ public:
                                               GTestTreeItem::TestStates state,
                                               const QString &proFile) const;
     QString nameSuffix() const;
-
+    QSet<QString> internalTargets() const override;
+    bool isGroupNodeFor(const TestTreeItem *other) const override;
+    bool isGroupable() const override;
+    TestTreeItem *applyFilters() override;
+    bool shouldBeAddedAfterFiltering() const override;
 private:
     bool modifyTestSetContent(const GTestParseResult *result);
+    QList<TestConfiguration *> getTestConfigurations(bool ignoreCheckState) const;
     GTestTreeItem::TestStates m_state;
 };
 

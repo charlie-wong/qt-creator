@@ -183,7 +183,7 @@ void MetaObject::createNewDynamicProperty(const QString &name)
     copyTypeMetaObject();
     setValue(id, QVariant());
     Q_ASSERT(id >= 0);
-    Q_UNUSED(id);
+    Q_UNUSED(id)
 
     //Updating cache
     QQmlPropertyCache *oldParent = m_cache->parent();
@@ -304,9 +304,9 @@ int MetaObject::metaCall(QMetaObject::Call call, int id, void **a)
                      && property(id).name() == QLatin1String("parent"))) {
 
             QObject *contextDummyObject = objectNodeInstance->nodeInstanceServer()->dummyContextObject();
-            int properyIndex = contextDummyObject->metaObject()->indexOfProperty(propertyById.name());
-            if (properyIndex >= 0)
-                metaCallReturnValue = contextDummyObject->qt_metacall(call, properyIndex, a);
+            int propertyIndex = contextDummyObject->metaObject()->indexOfProperty(propertyById.name());
+            if (propertyIndex >= 0)
+                metaCallReturnValue = contextDummyObject->qt_metacall(call, propertyIndex, a);
         }
     }
     */

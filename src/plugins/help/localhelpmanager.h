@@ -31,7 +31,12 @@
 #include <QMutex>
 #include <QObject>
 #include <QUrl>
+#ifndef HELP_NEW_FILTER_ENGINE
 #include <QStandardItemModel>
+#include <functional>
+#else
+QT_FORWARD_DECLARE_CLASS(QHelpFilterEngine)
+#endif
 
 QT_FORWARD_DECLARE_CLASS(QHelpEngine)
 
@@ -39,6 +44,15 @@ class BookmarkManager;
 
 namespace Help {
 namespace Internal {
+
+class HelpViewer;
+
+struct HelpViewerFactory
+{
+    QByteArray id;
+    QString displayName;
+    std::function<HelpViewer *()> create;
+};
 
 class LocalHelpManager : public QObject
 {
@@ -57,8 +71,8 @@ public:
         ShowLastPages = 2,
     };
 
-    LocalHelpManager(QObject *parent = 0);
-    ~LocalHelpManager();
+    LocalHelpManager(QObject *parent = nullptr);
+    ~LocalHelpManager() override;
 
     static LocalHelpManager *instance();
 
@@ -78,6 +92,9 @@ public:
     static bool returnOnClose();
     static void setReturnOnClose(bool returnOnClose);
 
+    static bool isScrollWheelZoomingEnabled();
+    static void setScrollWheelZoomingEnabled(bool enabled);
+
     static QStringList lastShownPages();
     static void setLastShownPages(const QStringList &pages);
 
@@ -87,35 +104,52 @@ public:
     static int lastSelectedTab();
     static void setLastSelectedTab(int index);
 
+    static HelpViewerFactory defaultViewerBackend();
+    static QVector<HelpViewerFactory> viewerBackends();
+    static HelpViewerFactory viewerBackend();
+    static void setViewerBackendId(const QByteArray &id);
+    static QByteArray viewerBackendId();
+
     static void setupGuiHelpEngine();
     static void setEngineNeedsUpdate();
 
     static QHelpEngine& helpEngine();
     static BookmarkManager& bookmarkManager();
 
-    static bool isValidUrl(const QString &link);
-
     static QByteArray loadErrorMessage(const QUrl &url, const QString &errorString);
     Q_INVOKABLE static Help::Internal::LocalHelpManager::HelpData helpData(const QUrl &url);
 
+#ifndef HELP_NEW_FILTER_ENGINE
     static QAbstractItemModel *filterModel();
     static void setFilterIndex(int index);
     static int filterIndex();
 
     static void updateFilterModel();
+#else
+    static QHelpFilterEngine *filterEngine();
+#endif
+
+    static bool canOpenOnlineHelp(const QUrl &url);
+    static bool openOnlineHelp(const QUrl &url);
 
 signals:
+#ifndef HELP_NEW_FILTER_ENGINE
     void filterIndexChanged(int index);
+#endif
     void fallbackFontChanged(const QFont &font);
     void returnOnCloseChanged();
+    void scrollWheelZoomingEnabledChanged(bool enabled);
+    void contextHelpOptionChanged(Core::HelpManager::HelpViewerLocation option);
 
 private:
     static bool m_guiNeedsSetup;
     static bool m_needsCollectionFile;
 
+#ifndef HELP_NEW_FILTER_ENGINE
     static QStandardItemModel *m_filterModel;
     static QString m_currentFilter;
     static int m_currentFilterIndex;
+#endif
 
     static QMutex m_guiMutex;
     static QHelpEngine *m_guiEngine;

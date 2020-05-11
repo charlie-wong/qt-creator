@@ -38,11 +38,11 @@ def main():
     proFile = os.path.join(tempDir, proFileName)
     cleanUpUserFiles(proFile)
 
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
     openQmakeProject(proFile)
-    progressBarWait(20000)
+    waitForProjectParsing()
     selectFromLocator("dummy.cpp")
 
 ##   Waiting for a solution from Froglogic to make the below work.
@@ -82,13 +82,10 @@ def main():
 #    Creator should show the declaration of the function again.
     selectFromLocator("dummy.cpp")
     mainWin = findObject(":Qt Creator_Core::Internal::MainWindow")
-    if not waitFor("'dummy.cpp ' in str(mainWin.windowTitle) and ' @ cplusplus-tools ' in str(mainWin.windowTitle)", 5000):
+    if not waitFor("str(mainWin.windowTitle).startswith('dummy.cpp ') and ' @ cplusplus-tools ' in str(mainWin.windowTitle)", 5000):
         test.warning("Opening dummy.cpp seems to have failed")
     # Reset cursor to the start of the document
-    if platform.system() == 'Darwin':
-        type(cppwindow, "<Home>")
-    else:
-        type(cppwindow, "<Ctrl+Home>")
+    jumpToFirstLine(cppwindow)
 
     type(cppwindow, "<Ctrl+f>")
     clickButton(waitForObject(":*Qt Creator_Utils::IconButton"))

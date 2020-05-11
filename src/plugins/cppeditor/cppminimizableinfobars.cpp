@@ -156,7 +156,7 @@ static InfoBarEntry createMinimizableInfo(const Id &id,
 void MinimizableInfoBars::addNoProjectConfigurationEntry(const Id &id)
 {
     const QString text = tr("<b>Warning</b>: This file is not part of any project. "
-                            "The code model might have issues to parse this file properly.");
+                            "The code model might have issues parsing this file properly.");
 
     m_infoBar.addInfo(createMinimizableInfo(id, text, []() {
         settings()->setShowNoProjectInfoBar(false);
@@ -167,7 +167,7 @@ void MinimizableInfoBars::addHeaderErrorEntry(const Id &id,
         const DiagnosticWidgetCreator &diagnosticWidgetCreator)
 {
     const QString text = tr("<b>Warning</b>: The code model could not parse an included file, "
-                            "which might lead to slow or incorrect code completion and "
+                            "which might lead to incorrect code completion and "
                             "highlighting, for example.");
 
     InfoBarEntry info = createMinimizableInfo(id, text, []() {

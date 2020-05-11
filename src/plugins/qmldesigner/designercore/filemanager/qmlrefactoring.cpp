@@ -66,7 +66,7 @@ bool QmlRefactoring::reparseDocument()
         qDebug() << "*** QML text:" << textModifier->text();
         QString errorMessage = QStringLiteral("Parsing Error");
         if (!tmpDocument->diagnosticMessages().isEmpty())
-            errorMessage = tmpDocument->diagnosticMessages().first().message;
+            errorMessage = tmpDocument->diagnosticMessages().constFirst().message;
 
         qDebug() <<  "*** " << errorMessage;
         return false;
@@ -111,7 +111,7 @@ bool QmlRefactoring::addProperty(int parentLocation,
                                  const TypeName &dynamicTypeName)
 {
     if (parentLocation < 0)
-        return false;
+        return true; /* Node is not in hierarchy, yet and operation can be ignored. */
 
     AddPropertyVisitor visit(*textModifier, parentLocation, name, value, propertyType, m_propertyOrder, dynamicTypeName);
     return visit(qmlDocument->qmlProgram());

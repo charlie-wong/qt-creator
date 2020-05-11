@@ -31,6 +31,7 @@
 #include <QList>
 #include <QGraphicsOpacityEffect>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QPointer>
 #include <QPropertyAnimation>
 #include <QToolButton>
@@ -49,7 +50,7 @@ class ProgressManagerPrivate : public Core::ProgressManager
     Q_OBJECT
 public:
     ProgressManagerPrivate();
-    ~ProgressManagerPrivate();
+    ~ProgressManagerPrivate() override;
     void init();
     void cleanup();
 
@@ -63,7 +64,7 @@ public slots:
     void doCancelTasks(Core::Id type);
 
 protected:
-    bool eventFilter(QObject *obj, QEvent *event);
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     void taskFinished();
@@ -96,27 +97,19 @@ private:
     QPointer<ProgressView> m_progressView;
     QList<FutureProgress *> m_taskList;
     QMap<QFutureWatcher<void> *, Id> m_runningTasks;
-    QFutureWatcher<void> *m_applicationTask;
+    QFutureWatcher<void> *m_applicationTask = nullptr;
     StatusBarWidget *m_statusBarWidgetContainer;
     QWidget *m_statusBarWidget;
     QWidget *m_summaryProgressWidget;
     QHBoxLayout *m_summaryProgressLayout;
-    QWidget *m_currentStatusDetailsWidget;
+    QWidget *m_currentStatusDetailsWidget = nullptr;
     QPointer<FutureProgress> m_currentStatusDetailsProgress;
+    QLabel *m_statusDetailsLabel = nullptr;
     ProgressBar *m_summaryProgressBar;
     QGraphicsOpacityEffect *m_opacityEffect;
     QPointer<QPropertyAnimation> m_opacityAnimation;
-    bool m_progressViewPinned;
-    bool m_hovered;
-};
-
-class ToggleButton : public QToolButton
-{
-    Q_OBJECT
-public:
-    ToggleButton(QWidget *parent);
-    QSize sizeHint() const;
-    void paintEvent(QPaintEvent *event);
+    bool m_progressViewPinned = false;
+    bool m_hovered = false;
 };
 
 } // namespace Internal

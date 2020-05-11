@@ -60,7 +60,7 @@ void AssociationItem::update(const Style *style)
     updateEndLabels(m_association->endA(), m_association->endB(), &m_endAName, &m_endACardinality, style);
     updateEndLabels(m_association->endB(), m_association->endA(), &m_endBName, &m_endBCardinality, style);
 
-    QMT_CHECK(m_arrow);
+    QMT_ASSERT(m_arrow, return);
     QGraphicsItem *endAItem = m_diagramSceneModel->graphicsItem(m_association->endAUid());
     if (!endAItem)
         return;
@@ -75,7 +75,7 @@ void AssociationItem::updateEndLabels(const DAssociationEnd &end, const DAssocia
                                       QGraphicsSimpleTextItem **endName, QGraphicsSimpleTextItem **endCardinality,
                                       const Style *style)
 {
-    Q_UNUSED(end);
+    Q_UNUSED(end)
 
     if (!otherEnd.name().isEmpty()) {
         if (!*endName)
@@ -86,7 +86,7 @@ void AssociationItem::updateEndLabels(const DAssociationEnd &end, const DAssocia
     } else if (*endName) {
         (*endName)->scene()->removeItem(*endName);
         delete *endName;
-        *endName = 0;
+        *endName = nullptr;
     }
 
     if (!otherEnd.cardinality().isEmpty()) {
@@ -98,7 +98,7 @@ void AssociationItem::updateEndLabels(const DAssociationEnd &end, const DAssocia
     } else if (*endCardinality) {
         (*endCardinality)->scene()->removeItem(*endCardinality);
         delete *endCardinality;
-        *endCardinality = 0;
+        *endCardinality = nullptr;
     }
 }
 

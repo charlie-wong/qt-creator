@@ -30,22 +30,18 @@
 namespace Macros {
 namespace Internal {
 
-class MacroManager;
-
-class MacrosPlugin : public ExtensionSystem::IPlugin
+class MacrosPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "Macros.json")
 
 public:
-    MacrosPlugin();
-    ~MacrosPlugin();
+    ~MacrosPlugin() final;
 
-    bool initialize(const QStringList &arguments, QString *errorMessage);
-    void extensionsInitialized();
+    bool initialize(const QStringList &arguments, QString *errorMessage) final;
 
 private:
-    MacroManager *m_macroManager;
+    class MacrosPluginPrivate *d = nullptr;
 };
 
 } // namespace Internal

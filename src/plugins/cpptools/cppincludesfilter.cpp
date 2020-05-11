@@ -26,6 +26,7 @@
 #include "cppincludesfilter.h"
 
 #include "cppmodelmanager.h"
+#include "cpptoolsconstants.h"
 
 #include <cplusplus/CppDocument.h>
 #include <coreplugin/editormanager/documentmodel.h>
@@ -36,9 +37,9 @@
 #include <QTimer>
 
 using namespace Core;
-using namespace CppTools;
-using namespace CppTools::Internal;
 using namespace ProjectExplorer;
+using namespace Utils;
+
 namespace CppTools {
 namespace Internal {
 
@@ -47,11 +48,10 @@ class CppIncludesIterator : public BaseFileFilter::Iterator
 public:
     CppIncludesIterator(CPlusPlus::Snapshot snapshot, const QSet<QString> &seedPaths);
 
-    void toFront();
-    bool hasNext() const;
-    QString next();
-    QString filePath() const;
-    QString fileName() const;
+    void toFront() override;
+    bool hasNext() const override;
+    Utils::FilePath next() override;
+    Utils::FilePath filePath() const override;
 
 private:
     void fetchMore();
@@ -61,12 +61,8 @@ private:
     QSet<QString> m_queuedPaths;
     QSet<QString> m_allResultPaths;
     QStringList m_resultQueue;
-    QString m_currentPath;
+    FilePath m_currentPath;
 };
-
-} // Internal
-} // CppTools
-
 
 CppIncludesIterator::CppIncludesIterator(CPlusPlus::Snapshot snapshot,
                                          const QSet<QString> &seedPaths)
@@ -89,24 +85,19 @@ bool CppIncludesIterator::hasNext() const
     return !m_resultQueue.isEmpty();
 }
 
-QString CppIncludesIterator::next()
+FilePath CppIncludesIterator::next()
 {
     if (m_resultQueue.isEmpty())
-        return QString();
-    m_currentPath = m_resultQueue.takeFirst();
+        return {};
+    m_currentPath = FilePath::fromString(m_resultQueue.takeFirst());
     if (m_resultQueue.isEmpty())
         fetchMore();
     return m_currentPath;
 }
 
-QString CppIncludesIterator::filePath() const
+FilePath CppIncludesIterator::filePath() const
 {
     return m_currentPath;
-}
-
-QString CppIncludesIterator::fileName() const
-{
-    return QFileInfo(m_currentPath).fileName();
 }
 
 void CppIncludesIterator::fetchMore()
@@ -117,7 +108,8 @@ void CppIncludesIterator::fetchMore()
         CPlusPlus::Document::Ptr doc = m_snapshot.document(filePath);
         if (!doc)
             continue;
-        foreach (const QString &includedPath, doc->includedFiles()) {
+        const QStringList includedFiles = doc->includedFiles();
+        for (const QString &includedPath : includedFiles ) {
             if (!m_allResultPaths.contains(includedPath)) {
                 m_allResultPaths.insert(includedPath);
                 m_queuedPaths.insert(includedPath);
@@ -128,11 +120,10 @@ void CppIncludesIterator::fetchMore()
 }
 
 CppIncludesFilter::CppIncludesFilter()
-    : m_needsUpdate(true)
 {
-    setId("All Included C/C++ Files");
-    setDisplayName(tr("All Included C/C++ Files"));
-    setShortcutString(QString(QLatin1Char('a')));
+    setId(Constants::INCLUDES_FILTER_ID);
+    setDisplayName(Constants::INCLUDES_FILTER_DISPLAY_NAME);
+    setShortcutString("ai");
     setIncludedByDefault(true);
     setPriority(ILocatorFilter::Low);
 
@@ -159,10 +150,12 @@ void CppIncludesFilter::prepareSearch(const QString &entry)
         m_needsUpdate = false;
         QSet<QString> seedPaths;
         for (Project *project : SessionManager::projects()) {
-            foreach (const QString &filePath, project->files(Project::AllFiles))
-                seedPaths.insert(filePath);
+            const Utils::FilePaths allFiles = project->files(Project::SourceFiles);
+            for (const Utils::FilePath &filePath : allFiles )
+                seedPaths.insert(filePath.toString());
         }
-        foreach (DocumentModel::Entry *entry, DocumentModel::entries()) {
+        const QList<DocumentModel::Entry *> entries = DocumentModel::entries();
+        for (DocumentModel::Entry *entry : entries) {
             if (entry)
                 seedPaths.insert(entry->fileName().toString());
         }
@@ -181,5 +174,9 @@ void CppIncludesFilter::refresh(QFutureInterface<void> &future)
 void CppIncludesFilter::markOutdated()
 {
     m_needsUpdate = true;
-    setFileIterator(0); // clean up
+    setFileIterator(nullptr); // clean up
 }
+
+} // Internal
+} // CppTools
+

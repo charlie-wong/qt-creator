@@ -6,8 +6,10 @@
     "trDescription": "Creates an empty Nim file using UTF-8 charset.",
     "trDisplayName": "Nim File",
     "trDisplayCategory": "Nim",
-    "icon": "icon.png",
-    "enabled": "%{JS: [ %{Plugins} ].indexOf('Nim') >= 0}",
+    "icon": "../../projects/nim/icon.png",
+    "enabled": "%{JS: value('Plugins').indexOf('Nim') >= 0}",
+
+    "options": { "key": "DefaultSuffix", "value": "nim" },
 
     "pages" :
     [
@@ -29,7 +31,7 @@
             "data":
             {
                 "source": "file.nim",
-                "target": "%{JS: Util.fileName('%{TargetPath}', 'nim')}",
+                "target": "%{JS: Util.fileName(value('TargetPath'), value('DefaultSuffix'))}",
                 "openInEditor": true
             }
         }

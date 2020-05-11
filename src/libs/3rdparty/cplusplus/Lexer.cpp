@@ -64,8 +64,8 @@ Lexer::Lexer(TranslationUnit *unit)
 }
 
 Lexer::Lexer(const char *firstChar, const char *lastChar)
-    : _translationUnit(0),
-      _control(0),
+    : _translationUnit(nullptr),
+      _control(nullptr),
       _state(0),
       _flags(0),
       _currentLine(1)
@@ -211,7 +211,7 @@ void Lexer::scan_helper(Token *tok)
         _state = 0;
         scanCppComment(originalKind);
         return;
-    } else if (isRawStringLiteral(s._tokenKind)) {
+    } else if (!control() && isRawStringLiteral(s._tokenKind)) {
         tok->f.kind = s._tokenKind;
         if (scanUntilRawStringLiteralEndSimple())
             _state = 0;
@@ -747,7 +747,7 @@ void Lexer::scanRawStringLiteral(Token *tok, unsigned char hint)
     const char *yytext = _currentChar;
 
     int delimLength = -1;
-    const char *closingDelimCandidate = 0;
+    const char *closingDelimCandidate = nullptr;
     bool closed = false;
     while (_yychar) {
         if (_yychar == '(' && delimLength == -1) {
@@ -755,13 +755,17 @@ void Lexer::scanRawStringLiteral(Token *tok, unsigned char hint)
             yyinp();
         } else if (_yychar == ')') {
             yyinp();
-            if (delimLength == -1)
-                break;
+            if (delimLength == -1) {
+                tok->f.kind = T_ERROR;
+                return;
+            }
             closingDelimCandidate = _currentChar;
         } else {
             if (delimLength == -1) {
-                if (_yychar == '\\' || std::isspace(_yychar))
-                    break;
+                if (_yychar == '\\' || std::isspace(_yychar)) {
+                    tok->f.kind = T_ERROR;
+                    return;
+                }
                 yyinp();
             } else {
                 if (!closingDelimCandidate) {
@@ -777,7 +781,7 @@ void Lexer::scanRawStringLiteral(Token *tok, unsigned char hint)
 
                     // Make sure this continues to be a valid candidate.
                     if (_yychar != *(yytext + (_currentChar - closingDelimCandidate)))
-                        closingDelimCandidate = 0;
+                        closingDelimCandidate = nullptr;
 
                     yyinp();
                 }
@@ -804,7 +808,7 @@ void Lexer::scanRawStringLiteral(Token *tok, unsigned char hint)
     else
         tok->f.kind = T_RAW_STRING_LITERAL;
 
-    if (!closed)
+    if (!control() && !closed)
         s._tokenKind = tok->f.kind;
 }
 
@@ -950,7 +954,8 @@ void Lexer::scanNumericLiteral(Token *tok)
             yyinp();
             while (std::isdigit(_yychar) ||
                    (_yychar >= 'a' && _yychar <= 'f') ||
-                   (_yychar >= 'A' && _yychar <= 'F')) {
+                   (_yychar >= 'A' && _yychar <= 'F') ||
+                   ((_yychar == '\'') && _languageFeatures.cxx14Enabled)) {
                 yyinp();
             }
             if (!scanOptionalIntegerSuffix())
@@ -958,7 +963,8 @@ void Lexer::scanNumericLiteral(Token *tok)
             goto theEnd;
         } else if (_yychar == 'b' || _yychar == 'B') { // see n3472
             yyinp();
-            while (_yychar == '0' || _yychar == '1')
+            while (_yychar == '0' || _yychar == '1' ||
+                   ((_yychar == '\'') && _languageFeatures.cxx14Enabled))
                 yyinp();
             if (!scanOptionalIntegerSuffix())
                 scanOptionalUserDefinedLiteral(tok);
@@ -966,7 +972,8 @@ void Lexer::scanNumericLiteral(Token *tok)
         } else if (_yychar >= '0' && _yychar <= '7') {
             do {
                 yyinp();
-            } while (_yychar >= '0' && _yychar <= '7');
+            } while ((_yychar >= '0' && _yychar <= '7') ||
+                     ((_yychar == '\'') && _languageFeatures.cxx14Enabled));
             if (!scanOptionalIntegerSuffix())
                 scanOptionalUserDefinedLiteral(tok);
             goto theEnd;
@@ -985,7 +992,8 @@ void Lexer::scanNumericLiteral(Token *tok)
             if (scanExponentPart() && !scanOptionalFloatingSuffix())
                 scanOptionalUserDefinedLiteral(tok);
             break;
-        } else if (std::isdigit(_yychar)) {
+        } else if (std::isdigit(_yychar) ||
+                   ((_yychar == '\'') && _languageFeatures.cxx14Enabled)) {
             yyinp();
         } else {
             if (!scanOptionalIntegerSuffix())

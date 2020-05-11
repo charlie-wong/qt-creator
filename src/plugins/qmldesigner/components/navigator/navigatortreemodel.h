@@ -45,8 +45,8 @@ class NavigatorTreeModel : public QAbstractItemModel, public NavigatorModelInter
 
 public:
 
-    explicit NavigatorTreeModel(QObject *parent = 0);
-    ~NavigatorTreeModel();
+    explicit NavigatorTreeModel(QObject *parent = nullptr);
+    ~NavigatorTreeModel() override;
 
     QVariant data(const QModelIndex &index, int role) const override;
 
@@ -87,6 +87,9 @@ public:
     void notifyModelNodesRemoved(const QList<ModelNode> &modelNodes) override;
     void notifyModelNodesInserted(const QList<ModelNode> &modelNodes) override;
     void notifyModelNodesMoved(const QList<ModelNode> &modelNodes) override;
+    void notifyIconsChanged() override;
+    void setFilter(bool showOnlyVisibleItems) override;
+    void resetModel() override;
 
 private:
     void moveNodesInteractive(NodeAbstractProperty &parentProperty, const QList<ModelNode> &modelNodes, int targetIndex);
@@ -97,6 +100,7 @@ private:
 
     QPointer<NavigatorView> m_view;
     mutable QHash<ModelNode, QModelIndex> m_nodeIndexHash;
+    bool m_showOnlyVisibleItems = true;
 };
 
 } // namespace QmlDesigner

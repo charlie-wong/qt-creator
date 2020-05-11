@@ -43,7 +43,7 @@ namespace Core {
 
 class Context;
 
-enum { UseMacShortcuts = Utils::HostOsInfo::isMacHost() ? 1 : 0 };
+constexpr bool useMacShortcuts = Utils::HostOsInfo::isMacHost();
 
 class CORE_EXPORT Command : public QObject
 {
@@ -58,7 +58,9 @@ public:
     Q_DECLARE_FLAGS(CommandAttributes, CommandAttribute)
 
     virtual void setDefaultKeySequence(const QKeySequence &key) = 0;
-    virtual QKeySequence defaultKeySequence() const = 0;
+    virtual void setDefaultKeySequences(const QList<QKeySequence> &keys) = 0;
+    virtual QList<QKeySequence> defaultKeySequences() const = 0;
+    virtual QList<QKeySequence> keySequences() const = 0;
     virtual QKeySequence keySequence() const = 0;
     // explicitly set the description (used e.g. in shortcut settings)
     // default is to use the action text for actions, or the whatsThis for shortcuts,
@@ -78,13 +80,19 @@ public:
 
     virtual bool isActive() const = 0;
 
-    virtual void setKeySequence(const QKeySequence &key) = 0;
+    virtual void setKeySequences(const QList<QKeySequence> &keys) = 0;
     virtual QString stringWithAppendedShortcut(const QString &str) const = 0;
     void augmentActionWithShortcutToolTip(QAction *action) const;
     static QToolButton *toolButtonWithAppendedShortcut(QAction *action, Command *cmd);
 
     virtual bool isScriptable() const = 0;
     virtual bool isScriptable(const Context &) const = 0;
+
+    virtual void setTouchBarText(const QString &text) = 0;
+    virtual QString touchBarText() const = 0;
+    virtual void setTouchBarIcon(const QIcon &icon) = 0;
+    virtual QIcon touchBarIcon() const = 0;
+    virtual QAction *touchBarAction() const = 0;
 
 signals:
     void keySequenceChanged();

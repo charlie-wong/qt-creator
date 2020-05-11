@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include <utils/environment.h>
+
 #include <QObject>
 #include <QSet>
 #include <QStringList>
@@ -36,7 +38,7 @@ class QmlProjectContentItem : public QObject {
     Q_OBJECT
 
 public:
-    QmlProjectContentItem(QObject *parent = 0) : QObject(parent) {}
+    QmlProjectContentItem(QObject *parent = nullptr) : QObject(parent) {}
 };
 
 class QmlProjectItem : public QObject
@@ -46,27 +48,45 @@ class QmlProjectItem : public QObject
 public:
     QString sourceDirectory() const { return m_sourceDirectory; }
     void setSourceDirectory(const QString &directoryPath);
+    QString targetDirectory() const { return m_targetDirectory; }
+    void setTargetDirectory(const QString &directoryPath);
 
-    QStringList importPaths() const { return m_absoluteImportPaths; }
+    bool qtForMCUs() const { return m_qtForMCUs; }
+    void setQtForMCUs(bool qtForMCUs);
+
+    QStringList importPaths() const { return m_importPaths; }
     void setImportPaths(const QStringList &paths);
+
+    QStringList fileSelectors() const { return m_fileSelectors; }
+    void setFileSelectors(const QStringList &selectors);
 
     QStringList files() const;
     bool matchesFile(const QString &filePath) const;
+
+    bool forceFreeType() const { return m_forceFreeType; };
+    void setForceFreeType(bool);
 
     QString mainFile() const { return m_mainFile; }
     void setMainFile(const QString &mainFilePath) { m_mainFile = mainFilePath; }
 
     void appendContent(QmlProjectContentItem *item) { m_content.append(item); }
 
+    Utils::EnvironmentItems environment() const;
+    void addToEnviroment(const QString &key, const QString &value);
+
 signals:
     void qmlFilesChanged(const QSet<QString> &, const QSet<QString> &);
 
 protected:
     QString m_sourceDirectory;
+    QString m_targetDirectory;
     QStringList m_importPaths;
-    QStringList m_absoluteImportPaths;
+    QStringList m_fileSelectors;
     QString m_mainFile;
-    QList<QmlProjectContentItem *> m_content; // content property
+    Utils::EnvironmentItems m_environment;
+    QVector<QmlProjectContentItem *> m_content; // content property
+    bool m_forceFreeType = false;
+    bool m_qtForMCUs = false;
 };
 
 } // namespace QmlProjectManager

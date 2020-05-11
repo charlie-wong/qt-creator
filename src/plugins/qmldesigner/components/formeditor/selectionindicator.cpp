@@ -25,11 +25,14 @@
 
 #include "selectionindicator.h"
 
+#include "annotation.h"
 #include <designeractionmanager.h>
+#include <formeditorannotationicon.h>
 
 #include <QPen>
 #include <QGraphicsScene>
 #include <QGraphicsTextItem>
+#include <memory>
 
 #include <abstractview.h>
 
@@ -53,12 +56,16 @@ void SelectionIndicator::show()
 {
     foreach (QGraphicsPolygonItem *item, m_indicatorShapeHash)
         item->show();
+    if (m_labelItem)
+        m_labelItem->show();
 }
 
 void SelectionIndicator::hide()
 {
     foreach (QGraphicsPolygonItem *item, m_indicatorShapeHash)
         item->hide();
+    if (m_labelItem)
+        m_labelItem->hide();
 }
 
 void SelectionIndicator::clear()
@@ -70,6 +77,7 @@ void SelectionIndicator::clear()
         }
     }
     m_labelItem.reset(nullptr);
+    m_annotationItem = nullptr;
     m_indicatorShapeHash.clear();
 }
 
@@ -82,11 +90,11 @@ static QPolygonF boundingRectInLayerItemSpaceForItem(FormEditorItem *item, QGrap
 static bool checkSingleSelection(const QList<FormEditorItem*> &itemList)
 {
     return !itemList.isEmpty()
-            && itemList.first()
-            && itemList.first()->qmlItemNode().view()->singleSelectedModelNode().isValid();
+            && itemList.constFirst()
+            && itemList.constFirst()->qmlItemNode().view()->singleSelectedModelNode().isValid();
 }
 
-const int labelHeight = 16;
+const int labelHeight = 18;
 
 void SelectionIndicator::setItems(const QList<FormEditorItem*> &itemList)
 {
@@ -98,7 +106,7 @@ void SelectionIndicator::setItems(const QList<FormEditorItem*> &itemList)
         if (!item->qmlItemNode().isValid())
             continue;
 
-        QGraphicsPolygonItem *newSelectionIndicatorGraphicsItem = new QGraphicsPolygonItem(m_layerItem.data());
+        auto newSelectionIndicatorGraphicsItem = new QGraphicsPolygonItem(m_layerItem.data());
         m_indicatorShapeHash.insert(item, newSelectionIndicatorGraphicsItem);
         newSelectionIndicatorGraphicsItem->setPolygon(boundingRectInLayerItemSpaceForItem(item, m_layerItem.data()));
         newSelectionIndicatorGraphicsItem->setFlag(QGraphicsItem::ItemIsSelectable, false);
@@ -109,12 +117,12 @@ void SelectionIndicator::setItems(const QList<FormEditorItem*> &itemList)
         pen.setJoinStyle(Qt::MiterJoin);
         pen.setColor(selectionColor);
         newSelectionIndicatorGraphicsItem->setPen(pen);
-        newSelectionIndicatorGraphicsItem->setCursor(m_cursor);
     }
 
     if (checkSingleSelection(itemList)) {
-        FormEditorItem *selectedItem = itemList.first();
-        m_labelItem.reset(new QGraphicsPolygonItem(m_layerItem.data()));
+        FormEditorItem *selectedItem = itemList.constFirst();
+        m_labelItem = std::make_unique<QGraphicsPolygonItem>(m_layerItem.data());
+        const qreal scaleFactor = m_layerItem->viewportTransform().m11();
 
         QGraphicsWidget *toolbar = DesignerActionManager::instance().createFormEditorToolBar(m_labelItem.get());
         toolbar->setPos(1, -1);
@@ -124,6 +132,14 @@ void SelectionIndicator::setItems(const QList<FormEditorItem*> &itemList)
 
         if (modelNode.hasId())
             textItem->setPlainText(modelNode.id());
+
+        if (modelNode.hasAnnotation() || modelNode.hasCustomId()) {
+            m_annotationItem = new FormEditorAnnotationIcon(modelNode, m_labelItem.get());
+            m_annotationItem->update();
+        }
+        else {
+            m_annotationItem = nullptr;
+        }
 
         static QColor textColor = Utils::creatorTheme()->color(Utils::Theme::QmlDesigner_FormEditorForegroundColor);
 
@@ -135,16 +151,25 @@ void SelectionIndicator::setItems(const QList<FormEditorItem*> &itemList)
         QPointF pos = labelRect.topLeft();
         labelRect.moveTo(0, 0);
         m_labelItem->setPolygon(labelRect);
-        m_labelItem->setPos(pos + QPointF(0, -labelHeight));
-        int offset = labelHeight + 2 - textItem->boundingRect().height();
+        const int scaledHeight = labelHeight / scaleFactor;
+        m_labelItem->setPos(pos + QPointF(0, -scaledHeight));
+        const int offset = (labelHeight - textItem->boundingRect().height()) / 2;
         textItem->setPos(QPointF(toolbar->size().width(), offset));
         m_labelItem->setFlag(QGraphicsItem::ItemIsSelectable, false);
+        m_labelItem->setFlag(QGraphicsItem::ItemIgnoresTransformations, true);
+
         QPen pen;
         pen.setCosmetic(true);
         pen.setWidth(2);
         pen.setCapStyle(Qt::RoundCap);
         pen.setJoinStyle(Qt::BevelJoin);
         pen.setColor(selectionColor);
+
+        if (m_annotationItem) {
+            m_annotationItem->setFlags(QGraphicsItem::ItemIgnoresTransformations);
+            adjustAnnotationPosition(labelPolygon.boundingRect(), m_labelItem->boundingRect(), scaleFactor);
+        }
+
         m_labelItem->setPen(pen);
         m_labelItem->setBrush(selectionColor);
         m_labelItem->update();
@@ -162,11 +187,18 @@ void SelectionIndicator::updateItems(const QList<FormEditorItem*> &itemList)
 
     if (checkSingleSelection(itemList)
             && m_labelItem) {
-        FormEditorItem *selectedItem = itemList.first();
+        FormEditorItem *selectedItem = itemList.constFirst();
         QPolygonF labelPolygon = boundingRectInLayerItemSpaceForItem(selectedItem, m_layerItem.data());
         QRectF labelRect = labelPolygon.boundingRect();
         QPointF pos = labelRect.topLeft();
-        m_labelItem->setPos(pos + QPointF(0, -labelHeight));
+        const qreal scaleFactor = m_layerItem->viewportTransform().m11();
+        const int scaledHeight = labelHeight / scaleFactor;
+        m_labelItem->setPos(pos + QPointF(0, -scaledHeight));
+
+        if (m_annotationItem) {
+            adjustAnnotationPosition(labelPolygon.boundingRect(), m_labelItem->boundingRect(), scaleFactor);
+        }
+
         m_layerItem->update();
     }
 }
@@ -177,6 +209,26 @@ void SelectionIndicator::setCursor(const QCursor &cursor)
 
     foreach (QGraphicsItem  *item, m_indicatorShapeHash)
         item->setCursor(cursor);
+}
+
+void SelectionIndicator::adjustAnnotationPosition(const QRectF &itemRect, const QRectF &labelRect, qreal scaleFactor)
+{
+    if (!m_annotationItem) return;
+
+    const qreal iconWShift = m_annotationItem->iconWidth() * 0.5;
+    const qreal iconHShift = (m_annotationItem->iconHeight() * 0.45)/scaleFactor;
+    qreal iconX = 0.0;
+    qreal iconY = -(iconHShift);
+
+    if (((labelRect.width() + iconWShift)/scaleFactor) > itemRect.width())
+        iconY -= labelRect.height()/scaleFactor;
+
+    if ((iconWShift/scaleFactor) > itemRect.width())
+        iconX = 0.0;
+    else
+        iconX = (itemRect.width()) - (iconWShift/scaleFactor);
+
+    m_annotationItem->setPos(iconX*scaleFactor, iconY*scaleFactor);
 }
 
 }

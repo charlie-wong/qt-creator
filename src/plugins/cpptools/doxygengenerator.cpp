@@ -25,15 +25,15 @@
 
 #include "doxygengenerator.h"
 
-#include <texteditor/convenience.h>
-
 #include <cplusplus/CppDocument.h>
 #include <cplusplus/SimpleLexer.h>
 
+#include <utils/textutils.h>
 #include <utils/fileutils.h>
 #include <utils/qtcassert.h>
 
 #include <QDebug>
+#include <QRegularExpression>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -43,12 +43,7 @@
 using namespace CppTools;
 using namespace CPlusPlus;
 
-DoxygenGenerator::DoxygenGenerator()
-    : m_addLeadingAsterisks(true)
-    , m_generateBrief(true)
-    , m_startComment(true)
-    , m_style(QtStyle)
-{}
+DoxygenGenerator::DoxygenGenerator() = default;
 
 void DoxygenGenerator::setStyle(DocumentationStyle style)
 {
@@ -73,10 +68,8 @@ void DoxygenGenerator::setAddLeadingAsterisks(bool add)
 static int lineBeforeCursor(const QTextCursor &cursor)
 {
     int line, column;
-    const bool converted = TextEditor::Convenience::convertPosition(cursor.document(),
-                                                                    cursor.position(),
-                                                                    &line,
-                                                                    &column);
+    const bool converted = Utils::Text::convertPosition(cursor.document(), cursor.position(), &line,
+                                                        &column);
     QTC_ASSERT(converted, return std::numeric_limits<int>::max());
 
     return line - 1;
@@ -84,12 +77,12 @@ static int lineBeforeCursor(const QTextCursor &cursor)
 
 QString DoxygenGenerator::generate(QTextCursor cursor,
                                    const CPlusPlus::Snapshot &snapshot,
-                                   const Utils::FileName &documentFilePath)
+                                   const Utils::FilePath &documentFilePath)
 {
     const QTextCursor initialCursor = cursor;
 
     const QChar &c = cursor.document()->characterAt(cursor.position());
-    if (!c.isLetter() && c != QLatin1Char('_'))
+    if (!c.isLetter() && c != QLatin1Char('_') && c != QLatin1Char('['))
         return QString();
 
     // Try to find what would be the declaration we are interested in.
@@ -116,6 +109,14 @@ QString DoxygenGenerator::generate(QTextCursor cursor,
         return QString();
 
     QString declCandidate = cursor.selectedText();
+
+    // remove attributes like [[nodiscard]] because
+    // Document::Ptr::parse(Document::ParseDeclaration) fails on attributes
+    static QRegularExpression attribute("\\[\\s*\\[.*\\]\\s*\\]");
+    declCandidate.replace(attribute, "");
+
+    declCandidate.replace("Q_INVOKABLE", "");
+
     declCandidate.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
 
     // Let's append a closing brace in the case we got content like 'class MyType {'
@@ -139,8 +140,8 @@ QString DoxygenGenerator::generate(QTextCursor cursor,
 
 QString DoxygenGenerator::generate(QTextCursor cursor, DeclarationAST *decl)
 {
-    SpecifierAST *spec = 0;
-    DeclaratorAST *decltr = 0;
+    SpecifierAST *spec = nullptr;
+    DeclaratorAST *decltr = nullptr;
     if (SimpleDeclarationAST *simpleDecl = decl->asSimpleDeclaration()) {
         if (simpleDecl->declarator_list
                 && simpleDecl->declarator_list->value) {

@@ -39,7 +39,7 @@ class QMLEDITORWIDGETS_EXPORT GradientLine : public QWidget {
     Q_PROPERTY(QLinearGradient gradient READ gradient WRITE setGradient NOTIFY gradientChanged)
 
 public:
-    GradientLine(QWidget *parent = 0);
+    GradientLine(QWidget *parent = nullptr);
 
     QString gradientName() const { return m_gradientName; }
     void setGradientName(const QString &newName);
@@ -57,13 +57,13 @@ signals:
     void gradientChanged();
     void openColorDialog(const QPoint &pos);
 protected:
-    bool event(QEvent *event);
-    void keyPressEvent(QKeyEvent * event);
-    void paintEvent(QPaintEvent *event);
-    void mousePressEvent(QMouseEvent *event);
-    void mouseDoubleClickEvent(QMouseEvent *event);
-    void mouseReleaseEvent(QMouseEvent *);
-    void mouseMoveEvent(QMouseEvent *);
+    bool event(QEvent *event) override;
+    void keyPressEvent(QKeyEvent * event) override;
+    void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *) override;
+    void mouseMoveEvent(QMouseEvent *) override;
 
 private:
     void setup();

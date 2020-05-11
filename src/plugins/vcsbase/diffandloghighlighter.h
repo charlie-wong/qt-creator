@@ -30,12 +30,11 @@
 #include <texteditor/syntaxhighlighter.h>
 
 QT_BEGIN_NAMESPACE
-class QRegExp;
+class QRegularExpression;
 class QTextCharFormat;
 QT_END_NAMESPACE
 
 namespace Core { class ICore; }
-namespace TextEditor { class FontSettingsPage; }
 
 namespace VcsBase {
 
@@ -46,12 +45,13 @@ class VCSBASE_EXPORT DiffAndLogHighlighter : public TextEditor::SyntaxHighlighte
     Q_OBJECT
 
 public:
-    explicit DiffAndLogHighlighter(const QRegExp &filePattern, const QRegExp &changePattern);
+    explicit DiffAndLogHighlighter(const QRegularExpression &filePattern,
+                                   const QRegularExpression &changePattern);
     ~DiffAndLogHighlighter() override;
 
     void highlightBlock(const QString &text) override;
 
-    virtual void setFontSettings(const TextEditor::FontSettings &fontSettings) override;
+    void setFontSettings(const TextEditor::FontSettings &fontSettings) override;
 
 private:
     friend class DiffAndLogHighlighterPrivate;

@@ -29,15 +29,14 @@
 
 namespace Nim {
 
-class NimPlugin : public ExtensionSystem::IPlugin
+class NimPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "Nim.json")
 
 public:
-    NimPlugin();
-
-    ~NimPlugin();
+    NimPlugin() = default;
+    ~NimPlugin() final;
 
     bool initialize(const QStringList &arguments, QString *errorMessage) final;
     void extensionsInitialized() final;
@@ -47,6 +46,9 @@ private slots:
     void testNimParser_data();
     void testNimParser();
 #endif
+
+private:
+    class NimPluginPrivate *d = nullptr;
 };
 
-}
+} // Nim

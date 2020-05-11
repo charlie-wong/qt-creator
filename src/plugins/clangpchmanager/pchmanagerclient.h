@@ -25,29 +25,38 @@
 
 #pragma once
 
+#include "clangpchmanager_global.h"
+
 #include <pchmanagerclientinterface.h>
+#include <projectpartid.h>
 
 #include <vector>
 
 namespace ClangPchManager {
 class PchManagerConnectionClient;
-
+class ProgressManagerInterface;
 class PchManagerNotifierInterface;
 
-class PchManagerClient final : public ClangBackEnd::PchManagerClientInterface
+class CLANGPCHMANAGER_EXPORT PchManagerClient final : public ClangBackEnd::PchManagerClientInterface
 {
     friend class PchManagerNotifierInterface;
 public:
+    PchManagerClient(ProgressManagerInterface &pchCreationProgressManager,
+                     ProgressManagerInterface &dependencyCreationProgressManager)
+        : m_pchCreationProgressManager(pchCreationProgressManager)
+        , m_dependencyCreationProgressManager(dependencyCreationProgressManager)
+    {}
+
     void alive() override;
     void precompiledHeadersUpdated(ClangBackEnd::PrecompiledHeadersUpdatedMessage &&message) override;
+    void progress(ClangBackEnd::ProgressMessage &&message) override;
 
-    void precompiledHeaderRemoved(const QString &projectPartId);
+    void precompiledHeaderRemoved(ClangBackEnd::ProjectPartId projectPartId);
 
     void setConnectionClient(PchManagerConnectionClient *connectionClient);
 
-unittest_public:
-    const std::vector<PchManagerNotifierInterface*> &notifiers() const;
-    void precompiledHeaderUpdated(const QString &projectPartId, const QString &pchFilePath);
+    unittest_public : const std::vector<PchManagerNotifierInterface *> &notifiers() const;
+    void precompiledHeaderUpdated(ClangBackEnd::ProjectPartId projectPartId);
 
     void attach(PchManagerNotifierInterface *notifier);
     void detach(PchManagerNotifierInterface *notifier);
@@ -55,6 +64,8 @@ unittest_public:
 private:
     std::vector<PchManagerNotifierInterface*> m_notifiers;
     PchManagerConnectionClient *m_connectionClient=nullptr;
+    ProgressManagerInterface &m_pchCreationProgressManager;
+    ProgressManagerInterface &m_dependencyCreationProgressManager;
 };
 
 } // namespace ClangPchManager

@@ -30,12 +30,10 @@
 
 namespace QmlJS {
 
-
 bool Dialect::isQmlLikeLanguage() const
 {
     switch (m_dialect) {
     case Dialect::Qml:
-    case Dialect::QmlQtQuick1:
     case Dialect::QmlQtQuick2:
     case Dialect::QmlQtQuick2Ui:
     case Dialect::QmlQbs:
@@ -54,7 +52,6 @@ bool Dialect::isFullySupportedLanguage() const
     case Dialect::JavaScript:
     case Dialect::Json:
     case Dialect::Qml:
-    case Dialect::QmlQtQuick1:
     case Dialect::QmlQtQuick2:
     case Dialect::QmlQtQuick2Ui:
         return true;
@@ -72,7 +69,6 @@ bool Dialect::isQmlLikeOrJsLanguage() const
 {
     switch (m_dialect) {
     case Dialect::Qml:
-    case Dialect::QmlQtQuick1:
     case Dialect::QmlQtQuick2:
     case Dialect::QmlQtQuick2Ui:
     case Dialect::QmlQbs:
@@ -95,8 +91,6 @@ QString Dialect::toString() const
         return QLatin1String("Json");
     case Dialect::Qml:
         return QLatin1String("Qml");
-    case Dialect::QmlQtQuick1:
-        return QLatin1String("QmlQtQuick1");
     case Dialect::QmlQtQuick2:
         return QLatin1String("QmlQtQuick2");
     case Dialect::QmlQtQuick2Ui:
@@ -206,11 +200,7 @@ QList<Dialect> Dialect::companionLanguages() const
         langs << Dialect::JavaScript;
         break;
     case Dialect::Qml:
-        langs << Dialect::QmlQtQuick1 << Dialect::QmlQtQuick2 << Dialect::QmlQtQuick2Ui
-              << Dialect::JavaScript;
-        break;
-    case Dialect::QmlQtQuick1:
-        langs << Dialect::Qml << Dialect::JavaScript;
+        langs << Dialect::QmlQtQuick2 << Dialect::QmlQtQuick2Ui << Dialect::JavaScript;
         break;
     case Dialect::QmlQtQuick2:
     case Dialect::QmlQtQuick2Ui:
@@ -220,7 +210,7 @@ QList<Dialect> Dialect::companionLanguages() const
         break;
     case Dialect::AnyLanguage:
         langs << Dialect::JavaScript << Dialect::Json << Dialect::QmlProject << Dialect:: QmlQbs
-              << Dialect::QmlTypeInfo << Dialect::QmlQtQuick1 << Dialect::QmlQtQuick2
+              << Dialect::QmlTypeInfo << Dialect::QmlQtQuick2
               << Dialect::QmlQtQuick2Ui << Dialect::Qml;
         break;
     case Dialect::NoLanguage:
@@ -242,7 +232,7 @@ QDebug operator << (QDebug &dbg, const Dialect &dialect)
     return dbg;
 }
 
-PathAndLanguage::PathAndLanguage(const Utils::FileName &path, Dialect language)
+PathAndLanguage::PathAndLanguage(const Utils::FilePath &path, Dialect language)
     : m_path(path), m_language(language)
 { }
 
@@ -280,11 +270,10 @@ bool PathsAndLanguages::maybeInsert(const PathAndLanguage &pathAndLanguage) {
         if (currentElement.path() == pathAndLanguage.path()) {
             int j = i;
             do {
-                if (pathAndLanguage.language() < currentElement.language()) {
-                    if (currentElement.language() == pathAndLanguage.language())
-                        return false;
+                if (pathAndLanguage.language() < currentElement.language())
                     break;
-                }
+                if (currentElement.language() == pathAndLanguage.language())
+                    return false;
                 ++j;
                 if (j == m_list.length())
                     break;
@@ -304,11 +293,11 @@ void PathsAndLanguages::compact()
         return;
 
     int oldCompactionPlace = 0;
-    Utils::FileName oldPath = m_list.first().path();
+    Utils::FilePath oldPath = m_list.first().path();
     QList<PathAndLanguage> compactedList;
     bool restrictFailed = false;
     for (int i = 1; i < m_list.length(); ++i) {
-        Utils::FileName newPath = m_list.at(i).path();
+        Utils::FilePath newPath = m_list.at(i).path();
         if (newPath == oldPath) {
             int newCompactionPlace = i - 1;
             compactedList << m_list.mid(oldCompactionPlace, newCompactionPlace - oldCompactionPlace);

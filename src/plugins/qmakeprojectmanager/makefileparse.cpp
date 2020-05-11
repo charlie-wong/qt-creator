@@ -38,8 +38,9 @@
 
 using namespace QmakeProjectManager;
 using namespace Internal;
+using namespace ProjectExplorer;
 
-using Utils::FileName;
+using Utils::FilePath;
 using Utils::QtcProcess;
 using QtSupport::QtVersionManager;
 using QtSupport::BaseQtVersion;
@@ -191,14 +192,14 @@ void MakeFileParse::parseAssignments(QList<QMakeAssignment> *assignments)
                         m_config.osType = QMakeStepConfig::NoOsType;
                 } else if (value == QLatin1String("qml_debug")) {
                     if (qa.op == QLatin1String("+="))
-                        m_config.linkQmlDebuggingQQ2 = true;
+                        m_config.linkQmlDebuggingQQ2 = TriState::Enabled;
                     else
-                        m_config.linkQmlDebuggingQQ2 = false;
+                        m_config.linkQmlDebuggingQQ2 = TriState::Disabled;
                 } else if (value == QLatin1String("qtquickcompiler")) {
                     if (qa.op == QLatin1String("+="))
-                        m_config.useQtQuickCompiler = true;
+                        m_config.useQtQuickCompiler = TriState::Enabled;
                     else
-                        m_config.useQtQuickCompiler = false;
+                        m_config.useQtQuickCompiler = TriState::Disabled;
                 } else if (value == QLatin1String("force_debug_info")) {
                     if (qa.op == QLatin1String("+="))
                         foundForceDebugInfo = true;
@@ -224,7 +225,7 @@ void MakeFileParse::parseAssignments(QList<QMakeAssignment> *assignments)
     }
 
     if (foundForceDebugInfo && foundSeparateDebugInfo) {
-        m_config.separateDebugInfo = true;
+        m_config.separateDebugInfo = TriState::Enabled;
     } else if (foundForceDebugInfo) {
         // Found only force_debug_info, so readd it
         QMakeAssignment newQA;
@@ -242,9 +243,8 @@ void MakeFileParse::parseAssignments(QList<QMakeAssignment> *assignments)
     }
 }
 
-static FileName findQMakeBinaryFromMakefile(const QString &makefile)
+static FilePath findQMakeBinaryFromMakefile(const QString &makefile)
 {
-    bool debugAdding = false;
     QFile fi(makefile);
     if (fi.exists() && fi.open(QFile::ReadOnly)) {
         QTextStream ts(&fi);
@@ -252,8 +252,6 @@ static FileName findQMakeBinaryFromMakefile(const QString &makefile)
         while (!ts.atEnd()) {
             QString line = ts.readLine();
             if (r1.exactMatch(line)) {
-                if (debugAdding)
-                    qDebug()<<"#~~ QMAKE is:"<<r1.cap(1).trimmed();
                 QFileInfo qmake(r1.cap(1).trimmed());
                 QString qmakePath = qmake.filePath();
                 if (!QString::fromLatin1(QTC_HOST_EXE_SUFFIX).isEmpty()
@@ -263,11 +261,11 @@ static FileName findQMakeBinaryFromMakefile(const QString &makefile)
                 // Is qmake still installed?
                 QFileInfo fi(qmakePath);
                 if (fi.exists())
-                    return FileName(fi);
+                    return FilePath::fromFileInfo(fi);
             }
         }
     }
-    return FileName();
+    return FilePath();
 }
 
 MakeFileParse::MakeFileParse(const QString &makefile)
@@ -315,7 +313,7 @@ MakeFileParse::MakefileState MakeFileParse::makeFileState() const
     return m_state;
 }
 
-Utils::FileName MakeFileParse::qmakePath() const
+Utils::FilePath MakeFileParse::qmakePath() const
 {
     return m_qmakePath;
 }
@@ -352,7 +350,7 @@ BaseQtVersion::QmakeBuildConfigs MakeFileParse::effectiveBuildConfig(BaseQtVersi
 
 const QLoggingCategory &MakeFileParse::logging()
 {
-    static const QLoggingCategory category("qtc.qmakeprojectmanager.import");
+    static const QLoggingCategory category("qtc.qmakeprojectmanager.import", QtWarningMsg);
     return category;
 }
 
@@ -377,9 +375,12 @@ void MakeFileParse::parseCommandLine(const QString &command, const QString &proj
     qCDebug(logging()) << "  Explicit NoBuildAll" << m_qmakeBuildConfig.explicitNoBuildAll;
     qCDebug(logging()) << "  TargetArch" << m_config.archConfig;
     qCDebug(logging()) << "  OsType" << m_config.osType;
-    qCDebug(logging()) << "  LinkQmlDebuggingQQ2" << m_config.linkQmlDebuggingQQ2;
-    qCDebug(logging()) << "  Qt Quick Compiler" << m_config.useQtQuickCompiler;
-    qCDebug(logging()) << "  Separate Debug Info" << m_config.separateDebugInfo;
+    qCDebug(logging()) << "  LinkQmlDebuggingQQ2"
+                       << (m_config.linkQmlDebuggingQQ2 == TriState::Enabled);
+    qCDebug(logging()) << "  Qt Quick Compiler"
+                       <<  (m_config.useQtQuickCompiler == TriState::Enabled);
+    qCDebug(logging()) << "  Separate Debug Info"
+                       << (m_config.separateDebugInfo == TriState::Enabled);
 
     // Create command line of all unfiltered arguments
     foreach (const QMakeAssignment &qa, assignments)
@@ -519,13 +520,13 @@ void QmakeProjectManagerPlugin::testMakefileParser()
 
     QCOMPARE(Utils::QtcProcess::splitArgs(parser.unparsedArguments()),
              Utils::QtcProcess::splitArgs(unparsedArguments));
-    QCOMPARE(parser.effectiveBuildConfig(0), effectiveBuildConfig);
+    QCOMPARE(parser.effectiveBuildConfig({}), effectiveBuildConfig);
 
     const QMakeStepConfig qmsc = parser.config();
     QCOMPARE(qmsc.archConfig, static_cast<QMakeStepConfig::TargetArchConfig>(archConfig));
     QCOMPARE(qmsc.osType, static_cast<QMakeStepConfig::OsType>(osType));
-    QCOMPARE(qmsc.linkQmlDebuggingQQ2, linkQmlDebuggingQQ2);
-    QCOMPARE(qmsc.useQtQuickCompiler, useQtQuickCompiler);
-    QCOMPARE(qmsc.separateDebugInfo, separateDebugInfo);
+    QCOMPARE(qmsc.linkQmlDebuggingQQ2 == TriState::Enabled, linkQmlDebuggingQQ2);
+    QCOMPARE(qmsc.useQtQuickCompiler == TriState::Enabled, useQtQuickCompiler);
+    QCOMPARE(qmsc.separateDebugInfo == TriState::Enabled, separateDebugInfo);
 }
 #endif

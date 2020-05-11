@@ -34,6 +34,7 @@ QT_FORWARD_DECLARE_CLASS(QMenu)
 namespace DiffEditor {
 
 class DiffEditorController;
+class ChunkSelection;
 
 namespace Internal {
 
@@ -46,7 +47,15 @@ public:
 
     DiffEditorController *controller() const;
 
-    QString makePatch(int fileIndex, int chunkIndex,
+    enum State {
+        LoadOK,
+        Reloading,
+        LoadFailed
+    };
+
+    static ChunkData filterChunk(const ChunkData &data,
+                                 const ChunkSelection &selection, bool revert);
+    QString makePatch(int fileIndex, int chunkIndex, const ChunkSelection &selection,
                       bool revert, bool addPrefix = false,
                       const QString &overriddenFileName = QString()) const;
 
@@ -54,6 +63,7 @@ public:
                       const QString &startupFile = QString());
     QList<FileData> diffFiles() const;
     QString baseDirectory() const;
+    void setBaseDirectory(const QString &directory);
     QString startupFile() const;
 
     void setDescription(const QString &description);
@@ -70,15 +80,14 @@ public:
     QString fallbackSaveAsPath() const override;
     QString fallbackSaveAsFileName() const override;
 
-    bool isSaveAsAllowed() const override { return true; }
+    bool isSaveAsAllowed() const override;
     bool save(QString *errorString, const QString &fileName, bool autoSave) override;
     void reload();
     bool reload(QString *errorString, ReloadFlag flag, ChangeType type) override;
     OpenResult open(QString *errorString, const QString &fileName,
                     const QString &realFileName) override;
-    bool isReloading() const { return m_isReloading; }
-    void beginReload();
-    void endReload(bool success);
+    bool selectEncoding();
+    State state() const { return m_state; }
 
     QString plainText() const;
 
@@ -86,21 +95,21 @@ signals:
     void temporaryStateChanged();
     void documentChanged();
     void descriptionChanged();
-    void chunkActionsRequested(QMenu *menu, int diffFileIndex, int chunkIndex);
-    void requestMoreInformation();
 
 private:
+    void beginReload();
+    void endReload(bool success);
     void setController(DiffEditorController *controller);
 
-    DiffEditorController *m_controller;
+    DiffEditorController *m_controller = nullptr;
     QList<FileData> m_diffFiles;
     QString m_baseDirectory;
     QString m_startupFile;
     QString m_description;
-    int m_contextLineCount;
-    bool m_isContextLineCountForced;
-    bool m_ignoreWhitespace;
-    bool m_isReloading = false;
+    int m_contextLineCount = 3;
+    bool m_isContextLineCountForced = false;
+    bool m_ignoreWhitespace = false;
+    State m_state = LoadOK;
 
     friend class ::DiffEditor::DiffEditorController;
 };

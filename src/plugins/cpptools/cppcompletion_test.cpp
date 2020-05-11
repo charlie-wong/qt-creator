@@ -30,12 +30,12 @@
 #include "cpptoolstestcase.h"
 
 #include <texteditor/codeassist/iassistproposal.h>
-#include <texteditor/convenience.h>
 #include <texteditor/texteditor.h>
 #include <texteditor/textdocument.h>
 #include <coreplugin/editormanager/editormanager.h>
 
 #include <utils/changeset.h>
+#include <utils/textutils.h>
 #include <utils/fileutils.h>
 
 #include <QDebug>
@@ -54,14 +54,13 @@ using namespace Core;
 
 namespace {
 
-typedef QByteArray _;
+using _ = QByteArray;
 
 class CompletionTestCase : public Tests::TestCase
 {
 public:
     CompletionTestCase(const QByteArray &sourceText, const QByteArray &textToInsert = QByteArray(),
                        bool isObjC = false)
-        : m_position(-1), m_editorWidget(0), m_textDocument(0), m_editor(0)
     {
         QVERIFY(succeededSoFar());
         m_succeededSoFar = false;
@@ -82,7 +81,7 @@ public:
         m_editor = EditorManager::openEditor(fileName);
         QVERIFY(m_editor);
         closeEditorAtEndOfTestCase(m_editor);
-        m_editorWidget = qobject_cast<TextEditorWidget *>(m_editor->widget());
+        m_editorWidget = TextEditorWidget::fromEditor(m_editor);
         QVERIFY(m_editorWidget);
 
         m_textDocument = m_editorWidget->document();
@@ -100,7 +99,7 @@ public:
         m_succeededSoFar = true;
     }
 
-    QStringList getCompletions(bool *replaceAccessOperator = 0) const
+    QStringList getCompletions(bool *replaceAccessOperator = nullptr) const
     {
         QStringList completions;
         LanguageFeatures languageFeatures = LanguageFeatures::defaultFeatures();
@@ -109,26 +108,25 @@ public:
             = new CppCompletionAssistInterface(m_editorWidget->textDocument()->filePath().toString(),
                                                m_textDocument, m_position,
                                                ExplicitlyInvoked, m_snapshot,
-                                               ProjectPartHeaderPaths(),
+                                               ProjectExplorer::HeaderPaths(),
                                                languageFeatures);
         ai->prepareForAsyncUse();
         ai->recreateTextDocument();
         InternalCppCompletionAssistProcessor processor;
 
-        const Tests::IAssistProposalScopedPointer proposal(processor.perform(ai));
-        if (!proposal.d)
+        const QScopedPointer<IAssistProposal> proposal(processor.perform(ai));
+        if (!proposal)
             return completions;
-        IAssistProposalModel *model = proposal.d->model();
+        ProposalModelPtr model = proposal->model();
         if (!model)
             return completions;
-        CppAssistProposalModel *listmodel = dynamic_cast<CppAssistProposalModel *>(model);
+        CppAssistProposalModelPtr listmodel = model.staticCast<CppAssistProposalModel>();
         if (!listmodel)
             return completions;
 
-        const int pos = proposal.d->basePosition();
+        const int pos = proposal->basePosition();
         const int length = m_position - pos;
-        const QString prefix = Convenience::textAt(QTextCursor(m_textDocument), pos,
-                                                   length);
+        const QString prefix = Utils::Text::textAt(QTextCursor(m_textDocument), pos, length);
         if (!prefix.isEmpty())
             listmodel->filter(prefix);
         if (listmodel->isSortable(prefix))
@@ -154,12 +152,12 @@ public:
 
 private:
     QByteArray m_source;
-    int m_position;
+    int m_position = -1;
     Snapshot m_snapshot;
     QScopedPointer<Tests::TemporaryDir> m_temporaryDir;
-    TextEditorWidget *m_editorWidget;
-    QTextDocument *m_textDocument;
-    IEditor *m_editor;
+    TextEditorWidget *m_editorWidget = nullptr;
+    QTextDocument *m_textDocument = nullptr;
+    IEditor *m_editor = nullptr;
 };
 
 bool isProbablyGlobalCompletion(const QStringList &list)
@@ -390,7 +388,7 @@ void CppToolsPlugin::test_global_completion()
     QVERIFY(test.succeededSoFar());
     const QStringList completions = test.getCompletions();
     QVERIFY(isProbablyGlobalCompletion(completions));
-    QVERIFY(completions.toSet().contains(requiredCompletionItems.toSet()));
+    QVERIFY(Utils::toSet(completions).contains(Utils::toSet(requiredCompletionItems)));
 }
 
 void CppToolsPlugin::test_doxygen_tag_completion_data()
@@ -2584,6 +2582,169 @@ void CppToolsPlugin::test_completion_data()
             "   @\n"
             "}\n"
     ) << _("t.p->") << QStringList({"Foo", "bar"});
+
+    QTest::newRow("fix_code_completion_for_unique_ptr_operator_arrow") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct unique_ptr\n"
+            "{\n"
+            "   typedef FOO pointer;\n"
+            "   pointer operator->();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::unique_ptr<Foo> ptr;\n"
+            "   @\n"
+            "}\n"
+    ) << _("ptr->") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_unique_ptr_method_get") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct unique_ptr\n"
+            "{\n"
+            "   typedef FOO pointer;\n"
+            "   pointer get();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::unique_ptr<Foo> ptr;\n"
+            "   @\n"
+            "}\n"
+    ) << _("ptr.get()->") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_vector_method_at") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct vector\n"
+            "{\n"
+            "   typedef FOO reference;\n"
+            "   reference at(size_t i);\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::vector<Foo> v;\n"
+            "   @\n"
+            "}\n"
+    ) << _("v.at(0).") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_vector_operator_square_brackets") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct vector\n"
+            "{\n"
+            "   typedef FOO reference;\n"
+            "   reference operator[](size_t i);\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::vector<Foo> v;\n"
+            "   @\n"
+            "}\n"
+    ) << _("v[0].") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_list_method_front") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct list\n"
+            "{\n"
+            "   typedef FOO reference;\n"
+            "   reference front();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::list<Foo> l;\n"
+            "   @\n"
+            "}\n"
+    ) << _("l.front().") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_queue_method_front") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct queue\n"
+            "{\n"
+            "   typedef FOO reference;\n"
+            "   reference front();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::queue<Foo> l;\n"
+            "   @\n"
+            "}\n"
+    ) << _("l.front().") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_set_method_begin") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct set\n"
+            "{\n"
+            "   typedef FOO iterator;\n"
+            "   iterator begin();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::set<Foo> s;\n"
+            "   @\n"
+            "}\n"
+    ) << _("s.begin()->") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_multiset_method_begin") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct multiset\n"
+            "{\n"
+            "   typedef FOO iterator;\n"
+            "   iterator begin();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::multiset<Foo> s;\n"
+            "   @\n"
+            "}\n"
+    ) << _("s.begin()->") << QStringList({"Foo", "bar"});
+    QTest::newRow("fix_code_completion_for_std_unordered_set_method_begin") << _(
+            "namespace std {\n"
+            "template<typename _Tp>\n"
+            "struct unordered_set\n"
+            "{\n"
+            "   typedef FOO iterator;\n"
+            "   iterator begin();\n"
+            "};\n"
+            "}\n"
+            "\n"
+            "struct Foo { int bar; };\n"
+            "\n"
+            "void func()\n"
+            "{\n"
+            "   std::unordered_set<Foo> s;\n"
+            "   @\n"
+            "}\n"
+    ) << _("s.begin()->") << QStringList({"Foo", "bar"});
 }
 
 void CppToolsPlugin::test_completion_member_access_operator()

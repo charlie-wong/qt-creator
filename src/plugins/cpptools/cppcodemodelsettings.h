@@ -55,10 +55,14 @@ public:
 public:
     Core::Id clangDiagnosticConfigId() const;
     void setClangDiagnosticConfigId(const Core::Id &configId);
+    static Core::Id defaultClangDiagnosticConfigId() ;
     const ClangDiagnosticConfig clangDiagnosticConfig() const;
 
     ClangDiagnosticConfigs clangCustomDiagnosticConfigs() const;
     void setClangCustomDiagnosticConfigs(const ClangDiagnosticConfigs &configs);
+
+    bool enableLowerClazyLevels() const;
+    void setEnableLowerClazyLevels(bool yesno);
 
     PCHUsage pchUsage() const;
     void setPCHUsage(PCHUsage pchUsage);
@@ -72,20 +76,18 @@ public:
     int indexerFileSizeLimitInMb() const;
     void setIndexerFileSizeLimitInMb(int sizeInMB);
 
-public: // for tests
-    void emitChanged();
-
 signals:
+    void clangDiagnosticConfigsInvalidated(const QVector<Core::Id> &configId);
     void changed();
-    void clangDiagnosticConfigIdChanged();
 
 private:
-    PCHUsage m_pchUsage = PchUse_None;
+    PCHUsage m_pchUsage = PchUse_BuildSystem;
     bool m_interpretAmbigiousHeadersAsCHeaders = false;
     bool m_skipIndexingBigFiles = true;
     int m_indexerFileSizeLimitInMB = 5;
     ClangDiagnosticConfigs m_clangCustomDiagnosticConfigs;
     Core::Id m_clangDiagnosticConfigId;
+    bool m_enableLowerClazyLevels = true; // For UI behavior only
 };
 
 } // namespace CppTools

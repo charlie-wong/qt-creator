@@ -30,6 +30,7 @@
 #include "internalnode_p.h"
 #include "nodeinstanceview.h"
 #include <qmlstate.h>
+#include <qmltimeline.h>
 
 #ifndef QMLDESIGNER_TEST
 #include <qmldesignerplugin.h>
@@ -38,11 +39,12 @@
 
 #include <coreplugin/helpmanager.h>
 #include <utils/qtcassert.h>
+#include <utils/algorithm.h>
 
 #include <QRegExp>
+#include <QtGui/qimage.h>
 
 namespace QmlDesigner {
-
 
 /*!
 \class QmlDesigner::AbstractView
@@ -67,7 +69,7 @@ AbstractView::~AbstractView()
 */
 void AbstractView::setModel(Model *model)
 {
-    Q_ASSERT(model != 0);
+    Q_ASSERT(model != nullptr);
     if (model == m_model.data())
         return;
 
@@ -343,6 +345,14 @@ void AbstractView::importsChanged(const QList<Import> &/*addedImports*/, const Q
 {
 }
 
+void AbstractView::possibleImportsChanged(const QList<Import> &/*possibleImports*/)
+{
+}
+
+void AbstractView::usedImportsChanged(const QList<Import> &/*usedImports*/)
+{
+}
+
 void AbstractView::auxiliaryDataChanged(const ModelNode &/*node*/, const PropertyName &/*name*/, const QVariant &/*data*/)
 {
 }
@@ -356,6 +366,18 @@ void AbstractView::scriptFunctionsChanged(const ModelNode &/*node*/, const QStri
 }
 
 void AbstractView::documentMessagesChanged(const QList<DocumentMessage> &/*errors*/, const QList<DocumentMessage> &/*warnings*/)
+{
+}
+
+void AbstractView::currentTimelineChanged(const ModelNode & /*node*/)
+{
+}
+
+void AbstractView::renderImage3DChanged(const QImage & /*image*/)
+{
+}
+
+void AbstractView::updateActiveScene3D(const QVariantMap & /*sceneState*/)
 {
 }
 
@@ -431,7 +453,7 @@ QList<ModelNode> AbstractView::selectedModelNodes() const
 ModelNode AbstractView::firstSelectedModelNode() const
 {
     if (hasSelectedModelNodes())
-        return ModelNode(model()->d->selectedNodes().first(), model(), this);
+        return ModelNode(model()->d->selectedNodes().constFirst(), model(), this);
 
     return ModelNode();
 }
@@ -439,7 +461,7 @@ ModelNode AbstractView::firstSelectedModelNode() const
 ModelNode AbstractView::singleSelectedModelNode() const
 {
     if (hasSingleSelectedModelNode())
-        return ModelNode(model()->d->selectedNodes().first(), model(), this);
+        return ModelNode(model()->d->selectedNodes().constFirst(), model(), this);
 
     return ModelNode();
 }
@@ -483,6 +505,10 @@ QString firstCharToLower(const QString &string)
 
 QString AbstractView::generateNewId(const QString &prefixName) const
 {
+    QString fixedPrefix = firstCharToLower(prefixName);
+    fixedPrefix.remove(' ');
+    if (!ModelNode::isValidId(fixedPrefix))
+        return generateNewId("element");
     int counter = 1;
 
     /* First try just the prefixName without number as postfix, then continue with 2 and further as postfix
@@ -519,7 +545,7 @@ NodeInstanceView *AbstractView::nodeInstanceView() const
     if (model())
         return model()->d->nodeInstanceView();
     else
-        return 0;
+        return nullptr;
 }
 
 RewriterView *AbstractView::rewriterView() const
@@ -527,7 +553,7 @@ RewriterView *AbstractView::rewriterView() const
     if (model())
         return model()->d->rewriterView();
     else
-        return 0;
+        return nullptr;
 }
 
 void AbstractView::resetView()
@@ -555,19 +581,82 @@ WidgetInfo AbstractView::widgetInfo()
     return createWidgetInfo();
 }
 
-QString AbstractView::contextHelpId() const
+void AbstractView::disableWidget()
 {
-    QString helpId;
+    if (hasWidget() && widgetInfo().widgetFlags == DesignerWidgetFlags::DisableOnError)
+        widgetInfo().widget->setEnabled(false);
+}
 
+void AbstractView::enableWidget()
+{
+    if (hasWidget() && widgetInfo().widgetFlags == DesignerWidgetFlags::DisableOnError)
+        widgetInfo().widget->setEnabled(true);
+}
+
+void AbstractView::contextHelp(const Core::IContext::HelpCallback &callback) const
+{
 #ifndef QMLDESIGNER_TEST
-    helpId = QmlDesignerPlugin::instance()->viewManager().qmlJSEditorHelpId();
+    QmlDesignerPlugin::instance()->viewManager().qmlJSEditorContextHelp(callback);
+#else
+    callback(QString());
 #endif
-    return helpId;
+}
+
+void AbstractView::activateTimeline(const ModelNode &timeline)
+{
+    if (currentTimeline().isValid())
+        currentTimeline().toogleRecording(false);
+
+    if (model())
+        model()->d->notifyCurrentTimelineChanged(timeline);
+}
+
+void AbstractView::activateTimelineRecording(const ModelNode &timeline)
+{
+    if (currentTimeline().isValid())
+        currentTimeline().toogleRecording(true);
+
+    Internal::WriteLocker locker(m_model.data());
+
+    if (model())
+        model()->d->notifyCurrentTimelineChanged(timeline);
+}
+
+void AbstractView::deactivateTimelineRecording()
+{
+    if (currentTimeline().isValid()) {
+        currentTimeline().toogleRecording(false);
+        currentTimeline().resetGroupRecording();
+    }
+
+    if (model())
+        model()->d->notifyCurrentTimelineChanged(ModelNode());
+}
+
+bool AbstractView::executeInTransaction(const QByteArray &identifier, const AbstractView::OperationBlock &lambda)
+{
+    try {
+        RewriterTransaction transaction = beginRewriterTransaction(identifier);
+        lambda();
+        transaction.commit();
+    } catch (const Exception &e) {
+        e.showException();
+        return false;
+    }
+
+    return true;
 }
 
 QList<ModelNode> AbstractView::allModelNodes() const
 {
     return toModelNodeList(model()->d->allNodes());
+}
+
+QList<ModelNode> AbstractView::allModelNodesOfType(const TypeName &typeName) const
+{
+    return Utils::filtered(allModelNodes(), [typeName](const ModelNode &node){
+        return node.metaInfo().isValid() && node.metaInfo().isSubclassOf(typeName);
+    });
 }
 
 void AbstractView::emitDocumentMessage(const QString &error)
@@ -577,7 +666,8 @@ void AbstractView::emitDocumentMessage(const QString &error)
 
 void AbstractView::emitDocumentMessage(const QList<DocumentMessage> &errors, const QList<DocumentMessage> &warnings)
 {
-    model()->d->setDocumentMessages(errors, warnings);
+    if (model())
+        model()->d->setDocumentMessages(errors, warnings);
 }
 
 void AbstractView::emitCustomNotification(const QString &identifier)
@@ -655,6 +745,18 @@ void AbstractView::emitInstanceToken(const QString &token, int number, const QVe
         model()->d->notifyInstanceToken(token, number, nodeVector);
 }
 
+void AbstractView::emitRenderImage3DChanged(const QImage &image)
+{
+    if (model())
+        model()->d->notifyRenderImage3DChanged(image);
+}
+
+void AbstractView::emitUpdateActiveScene3D(const QVariantMap &sceneState)
+{
+    if (model())
+        model()->d->notifyUpdateActiveScene3D(sceneState);
+}
+
 void AbstractView::emitRewriterEndTransaction()
 {
     if (model())
@@ -688,13 +790,23 @@ QmlModelState AbstractView::currentState() const
     return QmlModelState(currentStateNode());
 }
 
+QmlTimeline AbstractView::currentTimeline() const
+{
+    if (model())
+        return QmlTimeline(ModelNode(m_model.data()->d->currentTimelineNode(),
+                                            m_model.data(),
+                                            const_cast<AbstractView*>(this)));
+
+    return QmlTimeline();
+}
+
 static int getMinorVersionFromImport(const Model *model)
 {
     foreach (const Import &import, model->imports()) {
         if (import.isLibraryImport() && import.url() == "QtQuick") {
             const QString versionString = import.version();
             if (versionString.contains(".")) {
-                const QString minorVersionString = versionString.split(".").last();
+                const QString minorVersionString = versionString.split(".").constLast();
                 return minorVersionString.toInt();
             }
         }
@@ -709,7 +821,7 @@ static int getMajorVersionFromImport(const Model *model)
         if (import.isLibraryImport() && import.url() == QStringLiteral("QtQuick")) {
             const QString versionString = import.version();
             if (versionString.contains(QStringLiteral("."))) {
-                const QString majorVersionString = versionString.split(QStringLiteral(".")).first();
+                const QString majorVersionString = versionString.split(QStringLiteral(".")).constFirst();
                 return majorVersionString.toInt();
             }
         }

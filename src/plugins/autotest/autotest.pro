@@ -6,23 +6,37 @@ include(../../qtcreatorplugin.pri)
 DEFINES += AUTOTEST_LIBRARY
 
 SOURCES += \
-    testtreeview.cpp \
-    testtreemodel.cpp \
-    testtreeitem.cpp \
-    testcodeparser.cpp \
     autotestplugin.cpp \
-    testrunner.cpp \
+    itestframework.cpp \
+    itestparser.cpp \
+    projectsettingswidget.cpp \
+    testcodeparser.cpp \
     testconfiguration.cpp \
-    testresult.cpp \
-    testresultspane.cpp \
-    testresultmodel.cpp \
-    testresultdelegate.cpp \
-    testtreeitemdelegate.cpp \
-    testsettings.cpp \
-    testsettingspage.cpp \
+    testeditormark.cpp \
+    testframeworkmanager.cpp \
     testnavigationwidget.cpp \
     testoutputreader.cpp \
-    itestparser.cpp \
+    testprojectsettings.cpp \
+    testresult.cpp \
+    testresultdelegate.cpp \
+    testresultmodel.cpp \
+    testresultspane.cpp \
+    testrunner.cpp \
+    testsettings.cpp \
+    testsettingspage.cpp \
+    testtreeitem.cpp \
+    testtreeitemdelegate.cpp \
+    testtreemodel.cpp \
+    testtreeview.cpp \
+    catch/catchcodeparser.cpp \
+    catch/catchconfiguration.cpp \
+    catch/catchframework.cpp \
+    catch/catchoutputreader.cpp \
+    catch/catchresult.cpp \
+    catch/catchtestparser.cpp \
+    catch/catchtestsettings.cpp \
+    catch/catchtestsettingspage.cpp \
+    catch/catchtreeitem.cpp \
     gtest/gtestconfiguration.cpp \
     gtest/gtestparser.cpp \
     gtest/gtesttreeitem.cpp \
@@ -49,32 +63,53 @@ SOURCES += \
     quick/quicktestvisitors.cpp \
     quick/quicktestframework.cpp \
     quick/quicktest_utils.cpp \
-    testframeworkmanager.cpp
-
+    boost/boostcodeparser.cpp \
+    boost/boosttestframework.cpp \
+    boost/boosttesttreeitem.cpp \
+    boost/boosttestparser.cpp \
+    boost/boosttestconfiguration.cpp \
+    boost/boosttestoutputreader.cpp \
+    boost/boosttestresult.cpp \
+    boost/boosttestsettings.cpp \
+    boost/boosttestsettingspage.cpp
 
 HEADERS += \
-    testtreeview.h \
-    testtreemodel.h \
-    testtreeitem.h \
-    testcodeparser.h \
-    autotestplugin.h \
     autotest_global.h \
     autotestconstants.h \
-    testrunner.h \
+    autotesticons.h \
+    autotestplugin.h \
+    iframeworksettings.h \
+    itestframework.h \
+    itestparser.h \
+    projectsettingswidget.h \
+    testcodeparser.h \
     testconfiguration.h \
-    testresult.h \
-    testresultspane.h \
-    testresultmodel.h \
-    testresultdelegate.h \
-    testtreeitemdelegate.h \
-    testsettings.h \
-    testsettingspage.h \
+    testeditormark.h \
+    testframeworkmanager.h \
     testnavigationwidget.h \
     testoutputreader.h \
-    autotesticons.h \
-    itestframework.h \
-    iframeworksettings.h \
-    itestparser.h \
+    testprojectsettings.h \
+    testresult.h \
+    testresultdelegate.h \
+    testresultmodel.h \
+    testresultspane.h \
+    testrunconfiguration.h \
+    testrunner.h \
+    testsettings.h \
+    testsettingspage.h \
+    testtreeitem.h \
+    testtreeitemdelegate.h \
+    testtreemodel.h \
+    testtreeview.h \
+    catch/catchcodeparser.h \
+    catch/catchconfiguration.h \
+    catch/catchframework.h \
+    catch/catchoutputreader.h \
+    catch/catchresult.h \
+    catch/catchtestparser.h \
+    catch/catchtestsettings.h \
+    catch/catchtestsettingspage.h \
+    catch/catchtreeitem.h \
     gtest/gtestconfiguration.h \
     gtest/gtestparser.h \
     gtest/gtesttreeitem.h \
@@ -103,15 +138,24 @@ HEADERS += \
     quick/quicktest_utils.h \
     quick/quicktestvisitors.h \
     quick/quicktestframework.h \
-    testframeworkmanager.h \
-    testrunconfiguration.h \
-    itestsettingspage.h
+    boost/boostcodeparser.h \
+    boost/boosttestframework.h \
+    boost/boosttestconstants.h \
+    boost/boosttesttreeitem.h \
+    boost/boosttestparser.h \
+    boost/boosttestconfiguration.h \
+    boost/boosttestoutputreader.h \
+    boost/boosttestresult.h \
+    boost/boosttestsettingspage.h \
+    boost/boosttestsettings.h
 
 RESOURCES += \
     autotest.qrc
 
 FORMS += \
     testsettingspage.ui \
+    boost/boosttestsettingspage.ui \
+    catch/catchtestsettingspage.ui \
     qtest/qttestsettingspage.ui \
     gtest/gtestsettingspage.ui
 

@@ -36,9 +36,7 @@ namespace DesignerSettingsGroupKey {
     const char QML_DESIGNER_SETTINGS_GROUP[] = "Designer";
 }
 
-DesignerSettings::DesignerSettings()
-{
-}
+DesignerSettings::DesignerSettings() = default;
 
 void DesignerSettings::restoreValue(QSettings *settings, const QByteArray &key, const QVariant &defaultValue)
 {
@@ -62,18 +60,31 @@ void DesignerSettings::fromSettings(QSettings *settings)
     restoreValue(settings, DesignerSettingsKey::SHOW_DEBUGVIEW, false);
     restoreValue(settings, DesignerSettingsKey::ENABLE_DEBUGVIEW, false);
     restoreValue(settings, DesignerSettingsKey::ALWAYS_SAFE_IN_CRUMBLEBAR, false);
-    restoreValue(settings, DesignerSettingsKey::USE_ONLY_FALLBACK_PUPPET, true);
+    restoreValue(settings, DesignerSettingsKey::USE_DEFAULT_PUPPET, true);
     restoreValue(settings, DesignerSettingsKey::TYPE_OF_QSTR_FUNCTION, 0);
-    restoreValue(settings, DesignerSettingsKey::PUPPET_FALLBACK_DIRECTORY);
+    restoreValue(settings, DesignerSettingsKey::PUPPET_DEFAULT_DIRECTORY);
     restoreValue(settings, DesignerSettingsKey::PUPPET_TOPLEVEL_BUILD_DIRECTORY);
     restoreValue(settings, DesignerSettingsKey::CONTROLS_STYLE);
     restoreValue(settings, DesignerSettingsKey::SHOW_PROPERTYEDITOR_WARNINGS, false);
     restoreValue(settings, DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT, false);
-    restoreValue(settings, DesignerSettingsKey::PUPPET_KILL_TIMEOUT, 3000); // this has no ui at the moment
+    restoreValue(settings, DesignerSettingsKey::PUPPET_KILL_TIMEOUT, 30000); // this has no ui at the moment
     restoreValue(settings, DesignerSettingsKey::DEBUG_PUPPET, QString());
     restoreValue(settings, DesignerSettingsKey::FORWARD_PUPPET_OUTPUT, QString());
     restoreValue(settings, DesignerSettingsKey::REFORMAT_UI_QML_FILES, true);
     restoreValue(settings, DesignerSettingsKey::IGNORE_DEVICE_PIXEL_RATIO, false);
+    restoreValue(settings, DesignerSettingsKey::STATESEDITOR_EXPANDED, true);
+    restoreValue(settings, DesignerSettingsKey::NAVIGATOR_SHOW_ONLY_VISIBLE_ITEMS, true);
+    restoreValue(settings, DesignerSettingsKey::STANDALONE_MODE, false);
+    restoreValue(settings, DesignerSettingsKey::ENABLE_TIMELINEVIEW,
+#if (QT_VERSION < QT_VERSION_CHECK(5, 14, 0))
+                 false
+#else
+                 true
+#endif
+                 );
+    restoreValue(settings, DesignerSettingsKey::SIMPLE_COLOR_PALETTE_CONTENT, QStringList());
+    restoreValue(settings, DesignerSettingsKey::ALWAYS_DESIGN_MODE, true);
+    restoreValue(settings, DesignerSettingsKey::DISABLE_ITEM_LIBRARY_UPDATE_TIMER, true);
 
     settings->endGroup();
     settings->endGroup();

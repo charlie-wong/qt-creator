@@ -31,10 +31,7 @@
 #include <writemessageblock.h>
 #include <refactoringclientproxy.h>
 #include <refactoringserverproxy.h>
-#include <sourcelocationsforrenamingmessage.h>
-#include <sourcerangesanddiagnosticsforquerymessage.h>
-#include <requestsourcelocationforrenamingmessage.h>
-#include <requestsourcerangesanddiagnosticsforquerymessage.h>
+#include <clangrefactoringmessages.h>
 
 #include <QBuffer>
 #include <QString>
@@ -49,6 +46,13 @@ namespace {
 using ::testing::Args;
 using ::testing::Property;
 using ::testing::Eq;
+
+using ClangBackEnd::RemoveGeneratedFilesMessage;
+using ClangBackEnd::RemoveProjectPartsMessage;
+using ClangBackEnd::UpdateProjectPartsMessage;
+using ClangBackEnd::UpdateGeneratedFilesMessage;
+using ClangBackEnd::V2::FileContainer;
+using ClangBackEnd::ProjectPartContainer;
 
 class RefactoringClientServerInProcess : public ::testing::Test
 {
@@ -72,8 +76,7 @@ protected:
 
 TEST_F(RefactoringClientServerInProcess, SendEndMessage)
 {
-    EXPECT_CALL(mockRefactoringServer, end())
-        .Times(1);
+    EXPECT_CALL(mockRefactoringServer, end());
 
     serverProxy.end();
     scheduleServerMessages();
@@ -81,40 +84,10 @@ TEST_F(RefactoringClientServerInProcess, SendEndMessage)
 
 TEST_F(RefactoringClientServerInProcess, SendAliveMessage)
 {
-
-    EXPECT_CALL(mockRefactoringClient, alive())
-        .Times(1);
+    EXPECT_CALL(mockRefactoringClient, alive());
 
     clientProxy.alive();
     scheduleClientMessages();
-}
-
-TEST_F(RefactoringClientServerInProcess, SendSourceLocationsForRenamingMessage)
-{
-    ClangBackEnd::SourceLocationsContainer container;
-    ClangBackEnd::SourceLocationsForRenamingMessage message("symbolName", std::move(container), 1);
-
-    EXPECT_CALL(mockRefactoringClient, sourceLocationsForRenamingMessage(message))
-        .Times(1);
-
-    clientProxy.sourceLocationsForRenamingMessage(message.clone());
-    scheduleClientMessages();
-}
-
-TEST_F(RefactoringClientServerInProcess, SendRequestSourceLocationsForRenamingMessage)
-{
-    RequestSourceLocationsForRenamingMessage message{{TESTDATA_DIR, "renamevariable.cpp"},
-                                                     1,
-                                                     5,
-                                                     "int v;\n\nint x = v + 3;\n",
-                                                     {"cc", "renamevariable.cpp"},
-                                                     1};
-
-    EXPECT_CALL(mockRefactoringServer, requestSourceLocationsForRenamingMessage(message))
-        .Times(1);
-
-    serverProxy.requestSourceLocationsForRenamingMessage(message.clone());
-    scheduleServerMessages();
 }
 
 TEST_F(RefactoringClientServerInProcess, SourceRangesAndDiagnosticsForQueryMessage)
@@ -124,36 +97,124 @@ TEST_F(RefactoringClientServerInProcess, SourceRangesAndDiagnosticsForQueryMessa
     ClangBackEnd::SourceRangesAndDiagnosticsForQueryMessage message(std::move(sourceRangesContainer),
                                                                     std::move(diagnosticContainers));
 
-    EXPECT_CALL(mockRefactoringClient, sourceRangesAndDiagnosticsForQueryMessage(message))
-        .Times(1);
+    EXPECT_CALL(mockRefactoringClient, sourceRangesAndDiagnosticsForQueryMessage(message));
 
     clientProxy.sourceRangesAndDiagnosticsForQueryMessage(message.clone());
     scheduleClientMessages();
 }
 
+TEST_F(RefactoringClientServerInProcess, SourceRangesForQueryMessage)
+{
+    ClangBackEnd::SourceRangesContainer sourceRangesContainer;
+    ClangBackEnd::SourceRangesForQueryMessage message(std::move(sourceRangesContainer));
+
+    EXPECT_CALL(mockRefactoringClient, sourceRangesForQueryMessage(message));
+
+    clientProxy.sourceRangesForQueryMessage(message.clone());
+    scheduleClientMessages();
+}
+
+TEST_F(RefactoringClientServerInProcess, SendProgressMessage)
+{
+    ClangBackEnd::ProgressMessage message{ClangBackEnd::ProgressType::PrecompiledHeader, 10, 50};
+
+
+    EXPECT_CALL(mockRefactoringClient, progress(message));
+
+    clientProxy.progress(message.clone());
+    scheduleClientMessages();
+}
+
 TEST_F(RefactoringClientServerInProcess, RequestSourceRangesAndDiagnosticsForQueryMessage)
 {
-    RequestSourceRangesAndDiagnosticsForQueryMessage message{"functionDecl()",
-                                                             {{{TESTDATA_DIR, "query_simplefunction.cpp"},
-                                                                "void f();",
-                                                               {"cc", "query_simplefunction.cpp"},
-                                                               1}},
-                                                             {{{TESTDATA_DIR, "query_simplefunction.h"},
-                                                                "void f();",
-                                                               {},
-                                                               1}}};
+    RequestSourceRangesForQueryMessage message{
+        "functionDecl()",
+        {{{TESTDATA_DIR, "query_simplefunction.cpp"}, 1, "void f();", {"cc"}, 1}},
+        {{{TESTDATA_DIR, "query_simplefunction.h"}, 2, "void f();", {}, 1}}};
 
-    EXPECT_CALL(mockRefactoringServer, requestSourceRangesAndDiagnosticsForQueryMessage(message))
-        .Times(1);
+    EXPECT_CALL(mockRefactoringServer, requestSourceRangesForQueryMessage(message));
 
-    serverProxy.requestSourceRangesAndDiagnosticsForQueryMessage(message.clone());
+    serverProxy.requestSourceRangesForQueryMessage(message.clone());
+    scheduleServerMessages();
+}
+
+TEST_F(RefactoringClientServerInProcess, RequestSourceRangesForQueryMessage)
+{
+    RequestSourceRangesForQueryMessage message{
+        "functionDecl()",
+        {{{TESTDATA_DIR, "query_simplefunction.cpp"},
+          1,
+          "void f();",
+          {
+              "cc",
+          },
+          1}},
+        {{{TESTDATA_DIR, "query_simplefunction.h"}, 2, "void f();", {}, 1}}};
+
+    EXPECT_CALL(mockRefactoringServer, requestSourceRangesForQueryMessage(message));
+
+    serverProxy.requestSourceRangesForQueryMessage(message.clone());
+    scheduleServerMessages();
+}
+
+TEST_F(RefactoringClientServerInProcess, SendUpdateProjectPartsMessage)
+{
+    ProjectPartContainer projectPart2{
+        1,
+        {"-x", "c++-header", "-Wno-pragma-once-outside-header"},
+        {{"DEFINE", "1", 1}},
+        {IncludeSearchPath{"/system/path", 2, IncludeSearchPathType::System},
+         IncludeSearchPath{"/builtin/path", 3, IncludeSearchPathType::BuiltIn},
+         IncludeSearchPath{"/framework/path", 1, IncludeSearchPathType::System}},
+        {IncludeSearchPath{"/to/path1", 1, IncludeSearchPathType::User},
+         IncludeSearchPath{"/to/path2", 2, IncludeSearchPathType::User}},
+        {{1, 1}},
+        {{1, 2}},
+        Utils::Language::C,
+        Utils::LanguageVersion::C11,
+        Utils::LanguageExtension::All};
+    UpdateProjectPartsMessage message{{projectPart2}, {"toolChainArgument"}};
+
+    EXPECT_CALL(mockRefactoringServer, updateProjectParts(message));
+
+    serverProxy.updateProjectParts(message.clone());
+    scheduleServerMessages();
+}
+
+TEST_F(RefactoringClientServerInProcess, SendUpdateGeneratedFilesMessage)
+{
+    FileContainer fileContainer{{"/path/to/", "file"}, 1, "content", {}};
+    UpdateGeneratedFilesMessage message{{fileContainer}};
+
+    EXPECT_CALL(mockRefactoringServer, updateGeneratedFiles(message));
+
+    serverProxy.updateGeneratedFiles(message.clone());
+    scheduleServerMessages();
+}
+
+TEST_F(RefactoringClientServerInProcess, SendRemoveProjectPartsMessage)
+{
+    RemoveProjectPartsMessage message{{1, 2}};
+
+    EXPECT_CALL(mockRefactoringServer, removeProjectParts(message));
+
+    serverProxy.removeProjectParts(message.clone());
+    scheduleServerMessages();
+}
+
+TEST_F(RefactoringClientServerInProcess, SendRemoveGeneratedFilesMessage)
+{
+    RemoveGeneratedFilesMessage message{{{"/path/to/", "file"}}};
+
+    EXPECT_CALL(mockRefactoringServer, removeGeneratedFiles(message));
+
+    serverProxy.removeGeneratedFiles(message.clone());
     scheduleServerMessages();
 }
 
 TEST_F(RefactoringClientServerInProcess, CancelMessage)
 {
-    EXPECT_CALL(mockRefactoringServer, cancel())
-        .Times(1);
+    EXPECT_CALL(mockRefactoringServer, cancel());
 
     serverProxy.cancel();
     scheduleServerMessages();

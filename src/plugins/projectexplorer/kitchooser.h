@@ -54,12 +54,14 @@ public:
     Core::Id currentKitId() const;
 
     void setKitPredicate(const Kit::Predicate &predicate);
+    void setShowIcons(bool showIcons);
 
     Kit *currentKit() const;
+    bool hasStartupKit() const { return m_hasStartupKit; }
 
 signals:
-    void currentIndexChanged(int);
-    void activated(int);
+    void currentIndexChanged();
+    void activated();
 
 public slots:
     void populate();
@@ -69,13 +71,15 @@ protected:
     virtual QString kitToolTip(Kit *k) const;
 
 private:
-    void onCurrentIndexChanged(int index);
+    void onActivated();
+    void onCurrentIndexChanged();
     void onManageButtonClicked();
-    Kit *kitAt(int index) const;
 
     Kit::Predicate m_kitPredicate;
     QComboBox *m_chooser;
     QPushButton *m_manageButton;
+    bool m_hasStartupKit = false;
+    bool m_showIcons = false;
 };
 
 } // namespace ProjectExplorer

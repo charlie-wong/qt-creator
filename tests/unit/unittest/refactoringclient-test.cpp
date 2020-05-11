@@ -24,126 +24,100 @@
 ****************************************************************************/
 
 #include "googletest.h"
-#include "mockrefactoringclientcallback.h"
 #include "mocksearchhandle.h"
+#include "mockfilepathcaching.h"
+#include "mockprogressmanager.h"
+#include "mocksymbolquery.h"
 
 #include <clangqueryprojectsfindfilter.h>
 #include <refactoringclient.h>
 #include <refactoringengine.h>
 #include <refactoringconnectionclient.h>
 
-#include <sourcelocationsforrenamingmessage.h>
-#include <sourcerangesanddiagnosticsforquerymessage.h>
+#include <clangrefactoringclientmessages.h>
 
-#include <cpptools/clangcompileroptionsbuilder.h>
+#include <cpptools/compileroptionsbuilder.h>
 #include <cpptools/projectpart.h>
+#include <projectexplorer/project.h>
 
 #include <utils/smallstringvector.h>
 
+#include <QBuffer>
 #include <QTextCursor>
 #include <QTextDocument>
 
 namespace {
 
-using CppTools::ClangCompilerOptionsBuilder;
+using CppTools::CompilerOptionsBuilder;
 
 using ClangRefactoring::RefactoringEngine;
 
+using ClangBackEnd::FilePath;
+using ClangBackEnd::FilePathId;
 using ClangBackEnd::SourceLocationsForRenamingMessage;
 using ClangBackEnd::SourceRangesAndDiagnosticsForQueryMessage;
+using ClangBackEnd::SourceRangesForQueryMessage;
 
-using testing::_;
-using testing::Pair;
-using testing::Contains;
-using testing::NiceMock;
-
+using Utils::PathString;
 using Utils::SmallString;
 using Utils::SmallStringVector;
 
 class RefactoringClient : public ::testing::Test
 {
-    void SetUp();
+    void SetUp()
+    {
+        using Filter = ClangRefactoring::ClangQueryProjectsFindFilter;
+
+        client.setRefactoringEngine(&engine);
+
+        projectPart = CppTools::ProjectPart::Ptr(new CppTools::ProjectPart);
+        projectPart->project = &project;
+        projectPart->files.push_back(projectFile);
+
+        commandLine = Filter::compilerArguments(projectPart.data(), projectFile.kind);
+
+        client.setSearchHandle(&mockSearchHandle);
+        client.setExpectedResultCount(1);
+
+        ON_CALL(mockFilePathCaching, filePath(Eq(FilePathId{1})))
+            .WillByDefault(Return(FilePath(PathString("/path/to/file"))));
+        ON_CALL(mockFilePathCaching, filePath(Eq(FilePathId{42})))
+            .WillByDefault(Return(clangBackEndFilePath));
+    }
 
 protected:
+    NiceMock<MockFilePathCaching> mockFilePathCaching;
     NiceMock<MockSearchHandle> mockSearchHandle;
-    MockRefactoringClientCallBack callbackMock;
-    ClangRefactoring::RefactoringClient client;
-    ClangBackEnd::RefactoringConnectionClient connectionClient{&client};
-    RefactoringEngine engine{connectionClient.serverProxy(), client};
+    NiceMock<MockSymbolQuery> mockSymbolQuery;
+    QBuffer ioDevice;
+    MockFunction<void(const QString &,
+                     const ClangBackEnd::SourceLocationsContainer &,
+                     int)> mockLocalRenaming;
+    NiceMock<MockProgressManager> mockProgressManager;
+    ClangRefactoring::RefactoringClient client{mockProgressManager};
+    ClangBackEnd::RefactoringServerProxy serverProxy{&client, &ioDevice};
+    RefactoringEngine engine{serverProxy, client, mockFilePathCaching, mockSymbolQuery};
     QString fileContent{QStringLiteral("int x;\nint y;")};
     QTextDocument textDocument{fileContent};
     QTextCursor cursor{&textDocument};
     QString qStringFilePath{QStringLiteral("/home/user/file.cpp")};
-    Utils::FileName filePath{Utils::FileName::fromString(qStringFilePath)};
+    Utils::FilePath filePath{Utils::FilePath::fromString(qStringFilePath)};
     ClangBackEnd::FilePath clangBackEndFilePath{qStringFilePath};
     SmallStringVector commandLine;
+    ProjectExplorer::Project project;
     CppTools::ProjectPart::Ptr projectPart;
     CppTools::ProjectFile projectFile{qStringFilePath, CppTools::ProjectFile::CXXSource};
-    SourceLocationsForRenamingMessage renameMessage{"symbol",
-                                                    {{{42u, clangBackEndFilePath.clone()}},
-                                                     {{42u, 1, 1, 0}, {42u, 2, 5, 10}}},
-                                                    1};
-    SourceRangesAndDiagnosticsForQueryMessage queryResultMessage{{{{42u, clangBackEndFilePath.clone()}},
-                                                                  {{42u, 1, 1, 0, 1, 5, 4, ""},
-                                                                   {42u, 2, 1, 5, 2, 5, 10, ""}}},
-                                                                 {}};
-    SourceRangesAndDiagnosticsForQueryMessage emptyQueryResultMessage{{{},{}},
-                                                                      {}};
+    SourceRangesForQueryMessage queryResultMessage{{{{42, 1, 1, 0, 1, 5, 4, ""},
+                                                     {42, 2, 1, 5, 2, 5, 10, ""}}}};
+    SourceRangesForQueryMessage emptyQueryResultMessage;
 };
-
-TEST_F(RefactoringClient, SourceLocationsForRenaming)
-{
-    client.setLocalRenamingCallback([&] (const QString &symbolName,
-                                         const ClangBackEnd::SourceLocationsContainer &sourceLocations,
-                                         int textDocumentRevision) {
-        callbackMock.localRenaming(symbolName,
-                                   sourceLocations,
-                                   textDocumentRevision);
-    });
-
-    EXPECT_CALL(callbackMock, localRenaming(renameMessage.symbolName().toQString(),
-                                            renameMessage.sourceLocations(),
-                                            renameMessage.textDocumentRevision()))
-        .Times(1);
-
-    client.sourceLocationsForRenamingMessage(std::move(renameMessage));
-}
-
-TEST_F(RefactoringClient, AfterSourceLocationsForRenamingEngineIsUsableAgain)
-{
-    client.setLocalRenamingCallback([&] (const QString &symbolName,
-                                         const ClangBackEnd::SourceLocationsContainer &sourceLocations,
-                                         int textDocumentRevision) {
-        callbackMock.localRenaming(symbolName,
-                                   sourceLocations,
-                                   textDocumentRevision);
-    });
-    EXPECT_CALL(callbackMock, localRenaming(_,_,_));
-
-    client.sourceLocationsForRenamingMessage(std::move(renameMessage));
-
-    ASSERT_TRUE(engine.isUsable());
-}
-
-TEST_F(RefactoringClient, AfterStartLocalRenameHasValidCallback)
-{
-    engine.startLocalRenaming(cursor,
-                              filePath,
-                              textDocument.revision(),
-                              projectPart.data(),
-                              [&] (const QString &,
-                                   const ClangBackEnd::SourceLocationsContainer &,
-                                   int) {});
-
-    ASSERT_TRUE(client.hasValidLocalRenamingCallback());
-}
 
 TEST_F(RefactoringClient, CallAddResultsForEmptyQueryMessage)
 {
     EXPECT_CALL(mockSearchHandle, addResult(_ ,_ ,_))
         .Times(0);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(emptyQueryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(emptyQueryResultMessage));
 }
 
 TEST_F(RefactoringClient, CallAddResultsForQueryMessage)
@@ -151,7 +125,7 @@ TEST_F(RefactoringClient, CallAddResultsForQueryMessage)
     EXPECT_CALL(mockSearchHandle, addResult(_ ,_ ,_))
         .Times(2);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 }
 
 TEST_F(RefactoringClient, CallFinishSearchForEmptyQueryMessage)
@@ -159,7 +133,7 @@ TEST_F(RefactoringClient, CallFinishSearchForEmptyQueryMessage)
     EXPECT_CALL(mockSearchHandle, finishSearch())
         .Times(1);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(emptyQueryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(emptyQueryResultMessage));
 }
 
 TEST_F(RefactoringClient, CallFinishSearchQueryMessage)
@@ -167,7 +141,7 @@ TEST_F(RefactoringClient, CallFinishSearchQueryMessage)
     EXPECT_CALL(mockSearchHandle, finishSearch())
         .Times(1);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 }
 
 TEST_F(RefactoringClient, CallFinishSearchForTwoQueryMessages)
@@ -177,8 +151,8 @@ TEST_F(RefactoringClient, CallFinishSearchForTwoQueryMessages)
     EXPECT_CALL(mockSearchHandle, finishSearch())
         .Times(1);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 }
 
 TEST_F(RefactoringClient, CallSetExpectedResultCountInSearchHandle)
@@ -191,7 +165,7 @@ TEST_F(RefactoringClient, CallSetExpectedResultCountInSearchHandle)
 
 TEST_F(RefactoringClient, ResultCounterIsOneAfterQueryMessage)
 {
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 
     ASSERT_THAT(client.resultCounter(), 1);
 }
@@ -201,64 +175,43 @@ TEST_F(RefactoringClient, ResultCounterIsSetInSearchHandleToOne)
     EXPECT_CALL(mockSearchHandle, setResultCounter(1))
         .Times(1);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 }
 
 TEST_F(RefactoringClient, ResultCounterIsSetInSearchHandleToTwo)
 {
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 
     EXPECT_CALL(mockSearchHandle, setResultCounter(2))
         .Times(1);
 
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 }
-
 
 TEST_F(RefactoringClient, ResultCounterIsZeroAfterSettingExpectedResultCount)
 {
-    client.sourceRangesAndDiagnosticsForQueryMessage(std::move(queryResultMessage));
+    client.sourceRangesForQueryMessage(std::move(queryResultMessage));
 
     client.setExpectedResultCount(3);
 
     ASSERT_THAT(client.resultCounter(), 0);
 }
 
-
-TEST_F(RefactoringClient, ConvertFilePaths)
-{
-    std::unordered_map<uint, ClangBackEnd::FilePath> filePaths{{42u, clangBackEndFilePath.clone()}};
-
-    auto qstringFilePaths = ClangRefactoring::RefactoringClient::convertFilePaths(filePaths);
-
-    ASSERT_THAT(qstringFilePaths, Contains(Pair(42u, qStringFilePath)));
-}
-
 TEST_F(RefactoringClient, XXX)
 {
     const Core::Search::TextRange textRange{{1,0,1},{1,0,1}};
     const ClangBackEnd::SourceRangeWithTextContainer sourceRange{1, 1, 1, 1, 1, 1, 1, "function"};
-    std::unordered_map<uint, QString> filePaths = {{1, "/path/to/file"}};
 
     EXPECT_CALL(mockSearchHandle, addResult(QString("/path/to/file"), QString("function"), textRange))
         .Times(1);
 
-    client.addSearchResult(sourceRange, filePaths);
+    client.addSearchResult(sourceRange);
 }
 
-void RefactoringClient::SetUp()
+TEST_F(RefactoringClient, SetProgress)
 {
-    using Filter = ClangRefactoring::ClangQueryProjectsFindFilter;
+    EXPECT_CALL(mockProgressManager, setProgress(10, 20));
 
-    client.setRefactoringEngine(&engine);
-
-    projectPart = CppTools::ProjectPart::Ptr(new CppTools::ProjectPart);
-    projectPart->files.push_back(projectFile);
-
-    commandLine = Filter::compilerArguments(projectPart.data(), projectFile.kind);
-
-    client.setSearchHandle(&mockSearchHandle);
-    client.setExpectedResultCount(1);
+    client.progress({ClangBackEnd::ProgressType::Indexing, 10, 20});
 }
-
 }

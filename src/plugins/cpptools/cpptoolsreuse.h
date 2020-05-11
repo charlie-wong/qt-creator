@@ -29,6 +29,7 @@
 
 #include <texteditor/texteditor.h>
 
+#include <cpptools/clangdiagnosticconfig.h>
 #include <cpptools/compileroptionsbuilder.h>
 
 #include <cplusplus/CppDocument.h>
@@ -58,8 +59,7 @@ bool CPPTOOLS_EXPORT isValidFirstIdentifierChar(const QChar &ch);
 bool CPPTOOLS_EXPORT isValidIdentifierChar(const QChar &ch);
 bool CPPTOOLS_EXPORT isValidIdentifier(const QString &s);
 
-TextEditor::TextEditorWidget::Link CPPTOOLS_EXPORT linkToSymbol(CPlusPlus::Symbol *symbol);
-
+QStringList CPPTOOLS_EXPORT identifierWordsUnderCursor(const QTextCursor &tc);
 QString CPPTOOLS_EXPORT identifierUnderCursor(QTextCursor *cursor);
 
 bool CPPTOOLS_EXPORT isOwnershipRAIIType(CPlusPlus::Symbol *symbol,
@@ -68,15 +68,23 @@ bool CPPTOOLS_EXPORT isOwnershipRAIIType(CPlusPlus::Symbol *symbol,
 const CPlusPlus::Macro CPPTOOLS_EXPORT *findCanonicalMacro(const QTextCursor &cursor,
                                                            CPlusPlus::Document::Ptr document);
 
-QString CPPTOOLS_EXPORT correspondingHeaderOrSource(const QString &fileName, bool *wasHeader = 0);
+enum class CacheUsage { ReadWrite, ReadOnly };
+
+QString CPPTOOLS_EXPORT correspondingHeaderOrSource(const QString &fileName, bool *wasHeader = nullptr,
+                                                    CacheUsage cacheUsage = CacheUsage::ReadWrite);
 void CPPTOOLS_EXPORT switchHeaderSource();
 
 class CppCodeModelSettings;
-QSharedPointer<CppCodeModelSettings> CPPTOOLS_EXPORT codeModelSettings();
+CppCodeModelSettings CPPTOOLS_EXPORT *codeModelSettings();
 
-CompilerOptionsBuilder::PchUsage CPPTOOLS_EXPORT getPchUsage();
+UsePrecompiledHeaders CPPTOOLS_EXPORT getPchUsage();
 
 int indexerFileSizeLimitInMb();
 bool fileSizeExceedsLimit(const QFileInfo &fileInfo, int sizeLimitInMb);
+
+class ClangDiagnosticConfigsModel;
+ClangDiagnosticConfigsModel CPPTOOLS_EXPORT diagnosticConfigsModel();
+ClangDiagnosticConfigsModel CPPTOOLS_EXPORT
+diagnosticConfigsModel(const CppTools::ClangDiagnosticConfigs &customConfigs);
 
 } // CppTools

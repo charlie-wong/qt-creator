@@ -6,8 +6,10 @@
     "trDescription": "Creates an empty Nim script file using UTF-8 charset.",
     "trDisplayName": "Nim Script File",
     "trDisplayCategory": "Nim",
-    "icon": "icon.png",
-    "enabled": "%{JS: [ %{Plugins} ].indexOf('Nim') >= 0}",
+    "icon": "../../projects/nim/icon.png",
+    "enabled": "%{JS: value('Plugins').indexOf('Nim') >= 0}",
+
+    "options": { "key": "DefaultSuffix", "value": "nims" },
 
     "pages" :
     [
@@ -29,7 +31,7 @@
             "data":
             {
                 "source": "file.nims",
-                "target": "%{JS: Util.fileName('%{TargetPath}', 'nims')}",
+                "target": "%{JS: Util.fileName(value('TargetPath'), value('DefaultSuffix'))}",
                 "openInEditor": true
             }
         }

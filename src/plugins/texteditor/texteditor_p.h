@@ -29,21 +29,18 @@
 #include "texteditor_global.h"
 
 #include <QList>
+#include <QTextCursor>
 
 namespace TextEditor {
 
 class TextDocument;
 
 namespace Internal {
-class TextEditorOverlay;
-class ClipboardAssistProvider;
 
 class TEXTEDITOR_EXPORT TextBlockSelection
 {
 public:
-    TextBlockSelection()
-        : positionBlock(0), positionColumn(0)
-        , anchorBlock(0) , anchorColumn(0){}
+    TextBlockSelection() = default;
     TextBlockSelection(const TextBlockSelection &other);
 
     void clear();
@@ -62,10 +59,10 @@ public:
     inline int lastVisualColumn() const { return qMax(positionColumn, anchorColumn); }
 
 public:
-    int positionBlock;
-    int positionColumn;
-    int anchorBlock;
-    int anchorColumn;
+    int positionBlock = 0;
+    int positionColumn = 0;
+    int anchorBlock = 0;
+    int anchorColumn = 0;
 
 private:
     QTextCursor cursor(const TextDocument *baseTextDocument, bool fullSelection) const;

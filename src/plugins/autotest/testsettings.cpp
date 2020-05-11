@@ -39,10 +39,15 @@ static const char omitInternalKey[]         = "OmitInternal";
 static const char omitRunConfigWarnKey[]    = "OmitRCWarnings";
 static const char limitResultOutputKey[]    = "LimitResultOutput";
 static const char autoScrollKey[]           = "AutoScrollResults";
-static const char filterScanKey[]           = "FilterScan";
-static const char filtersKey[]              = "WhiteListFilters";
+static const char processArgsKey[]          = "ProcessArgs";
+static const char displayApplicationKey[]   = "DisplayApp";
+static const char popupOnStartKey[]         = "PopupOnStart";
+static const char popupOnFinishKey[]        = "PopupOnFinish";
+static const char popupOnFailKey[]          = "PopupOnFail";
+static const char runAfterBuildKey[]        = "RunAfterBuild";
+static const char groupSuffix[]             = ".group";
 
-static const int defaultTimeout = 60000;
+constexpr int defaultTimeout = 60000;
 
 TestSettings::TestSettings()
     : timeout(defaultTimeout)
@@ -57,11 +62,17 @@ void TestSettings::toSettings(QSettings *s) const
     s->setValue(omitRunConfigWarnKey, omitRunConfigWarn);
     s->setValue(limitResultOutputKey, limitResultOutput);
     s->setValue(autoScrollKey, autoScroll);
-    s->setValue(filterScanKey, filterScan);
-    s->setValue(filtersKey, whiteListFilters);
-    // store frameworks and their current active state
-    for (const Core::Id &id : frameworks.keys())
-        s->setValue(QLatin1String(id.name()), frameworks.value(id));
+    s->setValue(processArgsKey, processArgs);
+    s->setValue(displayApplicationKey, displayApplication);
+    s->setValue(popupOnStartKey, popupOnStart);
+    s->setValue(popupOnFinishKey, popupOnFinish);
+    s->setValue(popupOnFailKey, popupOnFail);
+    s->setValue(runAfterBuildKey, int(runAfterBuild));
+    // store frameworks and their current active and grouping state
+    for (const Core::Id &id : frameworks.keys()) {
+        s->setValue(id.toString(), frameworks.value(id));
+        s->setValue(id.toString() + groupSuffix, frameworksGrouping.value(id));
+    }
     s->endGroup();
 }
 
@@ -73,15 +84,24 @@ void TestSettings::fromSettings(QSettings *s)
     omitRunConfigWarn = s->value(omitRunConfigWarnKey, false).toBool();
     limitResultOutput = s->value(limitResultOutputKey, true).toBool();
     autoScroll = s->value(autoScrollKey, true).toBool();
-    filterScan = s->value(filterScanKey, false).toBool();
-    whiteListFilters = s->value(filtersKey, QStringList()).toStringList();
+    processArgs = s->value(processArgsKey, false).toBool();
+    displayApplication = s->value(displayApplicationKey, false).toBool();
+    popupOnStart = s->value(popupOnStartKey, true).toBool();
+    popupOnFinish = s->value(popupOnFinishKey, true).toBool();
+    popupOnFail = s->value(popupOnFailKey, false).toBool();
+    runAfterBuild = RunAfterBuildMode(s->value(runAfterBuildKey,
+                                               int(RunAfterBuildMode::None)).toInt());
     // try to get settings for registered frameworks
-    TestFrameworkManager *frameworkManager = TestFrameworkManager::instance();
-    const QList<Core::Id> &registered = frameworkManager->registeredFrameworkIds();
+    const TestFrameworks &registered = TestFrameworkManager::registeredFrameworks();
     frameworks.clear();
-    for (const Core::Id &id : registered) {
-        frameworks.insert(id, s->value(QLatin1String(id.name()),
-                                       frameworkManager->isActive(id)).toBool());
+    frameworksGrouping.clear();
+    for (const ITestFramework *framework : registered) {
+        // get their active state
+        const Core::Id id = framework->id();
+        const QString key = id.toString();
+        frameworks.insert(id, s->value(key, framework->active()).toBool());
+        // and whether grouping is enabled
+        frameworksGrouping.insert(id, s->value(key + groupSuffix, framework->grouping()).toBool());
     }
     s->endGroup();
 }

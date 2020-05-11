@@ -36,9 +36,9 @@ namespace Internal {
 
 TestTreeItem *GTestParseResult::createTestTreeItem() const
 {
-    if (itemType != TestTreeItem::TestCase && itemType != TestTreeItem::TestFunctionOrSet)
+    if (itemType != TestTreeItem::TestSuite && itemType != TestTreeItem::TestCase)
         return nullptr;
-    GTestTreeItem *item = new GTestTreeItem(name, fileName, itemType);
+    GTestTreeItem *item = new GTestTreeItem(framework, name, fileName, itemType);
     item->setProFile(proFile);
     item->setLine(line);
     item->setColumn(column);
@@ -89,7 +89,7 @@ static bool hasGTestNames(const CPlusPlus::Document::Ptr &document)
 static bool handleGTest(QFutureInterface<TestParseResultPtr> futureInterface,
                         const CPlusPlus::Document::Ptr &doc,
                         const CPlusPlus::Snapshot &snapshot,
-                        const Core::Id &id)
+                        ITestFramework *framework)
 {
     const CppTools::CppModelManager *modelManager = CppTools::CppModelManager::instance();
     const QString &filePath = doc->fileName();
@@ -103,14 +103,14 @@ static bool handleGTest(QFutureInterface<TestParseResultPtr> futureInterface,
     QMap<GTestCaseSpec, GTestCodeLocationList> result = visitor.gtestFunctions();
     QString proFile;
     const QList<CppTools::ProjectPart::Ptr> &ppList = modelManager->projectPart(filePath);
-    if (ppList.size())
+    if (!ppList.isEmpty())
         proFile = ppList.first()->projectFile;
     else
         return false; // happens if shutting down while parsing
 
     for (const GTestCaseSpec &testSpec : result.keys()) {
-        GTestParseResult *parseResult = new GTestParseResult(id);
-        parseResult->itemType = TestTreeItem::TestCase;
+        GTestParseResult *parseResult = new GTestParseResult(framework);
+        parseResult->itemType = TestTreeItem::TestSuite;
         parseResult->fileName = filePath;
         parseResult->name = testSpec.testCaseName;
         parseResult->parameterized = testSpec.parameterized;
@@ -119,7 +119,7 @@ static bool handleGTest(QFutureInterface<TestParseResultPtr> futureInterface,
         parseResult->proFile = proFile;
 
         for (const GTestCodeLocationAndType &location : result.value(testSpec)) {
-            GTestParseResult *testSet = new GTestParseResult(id);
+            GTestParseResult *testSet = new GTestParseResult(framework);
             testSet->name = location.m_name;
             testSet->fileName = filePath;
             testSet->line = location.m_line;
@@ -139,12 +139,10 @@ static bool handleGTest(QFutureInterface<TestParseResultPtr> futureInterface,
 bool GTestParser::processDocument(QFutureInterface<TestParseResultPtr> futureInterface,
                                   const QString &fileName)
 {
-    if (!m_cppSnapshot.contains(fileName) || !selectedForBuilding(fileName))
+    CPlusPlus::Document::Ptr doc = document(fileName);
+    if (doc.isNull() || !includesGTest(doc, m_cppSnapshot) || !hasGTestNames(doc))
         return false;
-    CPlusPlus::Document::Ptr document = m_cppSnapshot.find(fileName).value();
-    if (!includesGTest(document, m_cppSnapshot) || !hasGTestNames(document))
-        return false;
-    return handleGTest(futureInterface, document, m_cppSnapshot, id());
+    return handleGTest(futureInterface, doc, m_cppSnapshot, framework());
 }
 
 } // namespace Internal

@@ -71,19 +71,21 @@ public:
     FutureProgress *m_q;
     bool m_fadeStarting;
     bool m_isFading;
+    bool m_isSubtitleVisibleInStatusBar = false;
 };
 
 FutureProgressPrivate::FutureProgressPrivate(FutureProgress *q) :
-    m_progress(new Internal::ProgressBar), m_widget(0), m_widgetLayout(new QHBoxLayout),
-    m_statusBarWidget(0),
+    m_progress(new Internal::ProgressBar), m_widget(nullptr), m_widgetLayout(new QHBoxLayout),
+    m_statusBarWidget(nullptr),
     m_keep(FutureProgress::HideOnFinish), m_waitingForUserInteraction(false),
     m_q(q), m_fadeStarting(false), m_isFading(false)
 {
 }
 
 /*!
-    \mainclass
+    \ingroup mainclasses
     \class Core::FutureProgress
+    \inmodule QtCreator
     \brief The FutureProgress class is used to adapt the appearance of
     progress indicators that were created through the ProgressManager class.
 
@@ -97,37 +99,36 @@ FutureProgressPrivate::FutureProgressPrivate(FutureProgress *q) :
 */
 
 /*!
-    \fn void FutureProgress::clicked()
+    \fn void Core::FutureProgress::clicked()
     Connect to this signal to get informed when the user clicks on the
     progress indicator.
 */
 
 /*!
-    \fn void FutureProgress::canceled()
+    \fn void Core::FutureProgress::canceled()
     Connect to this signal to get informed when the operation is canceled.
 */
 
 /*!
-    \fn void FutureProgress::finished()
+    \fn void Core::FutureProgress::finished()
     Another way to get informed when the task has finished.
 */
 
 /*!
-    \fn QWidget FutureProgress::widget() const
+    \fn QWidget Core::FutureProgress::widget() const
     Returns the custom widget that is shown below the progress indicator.
 */
 
 /*!
-    \fn FutureProgress::FutureProgress(QWidget *parent)
     \internal
 */
 FutureProgress::FutureProgress(QWidget *parent) :
     QWidget(parent), d(new FutureProgressPrivate(this))
 {
-    QVBoxLayout *layout = new QVBoxLayout;
+    auto layout = new QVBoxLayout;
     setLayout(layout);
     layout->addWidget(d->m_progress);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addLayout(d->m_widgetLayout);
     d->m_widgetLayout->setContentsMargins(7, 0, 7, 2);
@@ -186,6 +187,33 @@ void FutureProgress::setTitle(const QString &title)
 QString FutureProgress::title() const
 {
     return d->m_progress->title();
+}
+
+void FutureProgress::setSubtitle(const QString &subtitle)
+{
+    if (subtitle != d->m_progress->subtitle()) {
+        d->m_progress->setSubtitle(subtitle);
+        if (d->m_isSubtitleVisibleInStatusBar)
+            emit subtitleInStatusBarChanged();
+    }
+}
+
+QString FutureProgress::subtitle() const
+{
+    return d->m_progress->subtitle();
+}
+
+void FutureProgress::setSubtitleVisibleInStatusBar(bool visible)
+{
+    if (visible != d->m_isSubtitleVisibleInStatusBar) {
+        d->m_isSubtitleVisibleInStatusBar = visible;
+        emit subtitleInStatusBarChanged();
+    }
+}
+
+bool FutureProgress::isSubtitleVisibleInStatusBar() const
+{
+    return d->m_isSubtitleVisibleInStatusBar;
 }
 
 void FutureProgress::cancel()
@@ -370,11 +398,11 @@ void FutureProgressPrivate::fadeAway()
 {
     m_isFading = true;
 
-    QGraphicsOpacityEffect *opacityEffect = new QGraphicsOpacityEffect;
-    opacityEffect->setOpacity(1.);
+    auto opacityEffect = new QGraphicsOpacityEffect;
+    opacityEffect->setOpacity(.999);
     m_q->setGraphicsEffect(opacityEffect);
 
-    QSequentialAnimationGroup *group = new QSequentialAnimationGroup(this);
+    auto group = new QSequentialAnimationGroup(this);
     QPropertyAnimation *animation = new QPropertyAnimation(opacityEffect, "opacity");
     animation->setDuration(StyleHelper::progressFadeAnimationDuration);
     animation->setEndValue(0.);

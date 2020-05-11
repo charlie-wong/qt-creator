@@ -27,6 +27,7 @@
 #include <debugger/debuggeractions.h>
 #include <debugger/debuggercore.h>
 #include <debugger/debuggerinternalconstants.h>
+#include <debugger/debuggerconstants.h>
 
 #include <coreplugin/dialogs/ioptionspage.h>
 #include <coreplugin/icore.h>
@@ -34,11 +35,13 @@
 
 #include <utils/fancylineedit.h>
 #include <utils/pathchooser.h>
+#include <utils/savedaction.h>
 
 #include <QCheckBox>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPointer>
@@ -46,6 +49,7 @@
 #include <QTextEdit>
 
 using namespace Core;
+using namespace Utils;
 
 namespace Debugger {
 namespace Internal {
@@ -56,26 +60,23 @@ namespace Internal {
 //
 /////////////////////////////////////////////////////////////////////////
 
-class GdbOptionsPageWidget : public QWidget
-{
-    Q_OBJECT
-public:
-    GdbOptionsPageWidget();
-    Utils::SavedActionSet group;
-};
-
 class GdbOptionsPage : public Core::IOptionsPage
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(Debugger::Internal::GdbOptionsPage)
+
 public:
     GdbOptionsPage();
+};
 
-    QWidget *widget();
-    void apply();
-    void finish();
+class GdbOptionsPageWidget : public IOptionsPageWidget
+{
+public:
+    GdbOptionsPageWidget();
 
-private:
-    QPointer<GdbOptionsPageWidget> m_widget;
+    void apply() final { group.apply(ICore::settings()); }
+    void finish() final { group.finish(); }
+
+    SavedActionSet group;
 };
 
 GdbOptionsPageWidget::GdbOptionsPageWidget()
@@ -86,11 +87,11 @@ GdbOptionsPageWidget::GdbOptionsPageWidget()
     auto labelGdbWatchdogTimeout = new QLabel(groupBoxGeneral);
     labelGdbWatchdogTimeout->setText(GdbOptionsPage::tr("GDB timeout:"));
     labelGdbWatchdogTimeout->setToolTip(GdbOptionsPage::tr(
-        "The number of seconds Qt Creator will wait before it terminates\n"
-        "a non-responsive GDB process. The default value of 20 seconds should\n"
-        "be sufficient for most applications, but there are situations when\n"
-        "loading big libraries or listing source files takes much longer than\n"
-        "that on slow machines. In this case, the value should be increased."));
+        "The number of seconds before a non-responsive GDB process is terminated.\n"
+        "The default value of 20 seconds should be sufficient for most\n"
+        "applications, but there are situations when loading big libraries or\n"
+        "listing source files takes much longer than that on slow machines.\n"
+        "In this case, the value should be increased."));
 
     auto spinBoxGdbWatchdogTimeout = new QSpinBox(groupBoxGeneral);
     spinBoxGdbWatchdogTimeout->setToolTip(labelGdbWatchdogTimeout->toolTip());
@@ -151,14 +152,6 @@ GdbOptionsPageWidget::GdbOptionsPageWidget()
     checkBoxIntelFlavor->setToolTip(GdbOptionsPage::tr(
         "<html><head/><body>GDB shows by default AT&&T style disassembly."
         "</body></html>"));
-
-    auto checkBoxIdentifyDebugInfoPackages = new QCheckBox(groupBoxGeneral);
-    checkBoxIdentifyDebugInfoPackages->setText(GdbOptionsPage::tr("Create tasks from missing packages"));
-    checkBoxIdentifyDebugInfoPackages->setToolTip(GdbOptionsPage::tr(
-        "<html><head/><body><p>Attempts to identify missing debug info packages "
-        "and lists them in the Issues output pane.</p><p>"
-        "<b>Note:</b> This feature needs special support from the Linux "
-        "distribution and GDB build and is not available everywhere.</p></body></html>"));
 
     QString howToUsePython = GdbOptionsPage::tr(
         "<p>To execute simple Python commands, prefix them with \"python\".</p>"
@@ -232,7 +225,6 @@ GdbOptionsPageWidget::GdbOptionsPageWidget()
     formLayout->addRow(checkBoxLoadGdbInit);
     formLayout->addRow(checkBoxLoadGdbDumpers);
     formLayout->addRow(checkBoxIntelFlavor);
-    formLayout->addRow(checkBoxIdentifyDebugInfoPackages);
 
     auto startLayout = new QGridLayout(groupBoxStartupCommands);
     startLayout->addWidget(textEditStartupCommands, 0, 0, 1, 1);
@@ -254,7 +246,6 @@ GdbOptionsPageWidget::GdbOptionsPageWidget()
     group.insert(action(AdjustBreakpointLocations), checkBoxAdjustBreakpointLocations);
     group.insert(action(GdbWatchdogTimeout), spinBoxGdbWatchdogTimeout);
     group.insert(action(IntelFlavor), checkBoxIntelFlavor);
-    group.insert(action(IdentifyDebugInfoPackages), checkBoxIdentifyDebugInfoPackages);
     group.insert(action(UseMessageBoxForSignals), checkBoxUseMessageBoxForSignals);
     group.insert(action(SkipKnownFrames), checkBoxSkipKnownFrames);
 
@@ -269,29 +260,7 @@ GdbOptionsPage::GdbOptionsPage()
     setId("M.Gdb");
     setDisplayName(tr("GDB"));
     setCategory(Constants::DEBUGGER_SETTINGS_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("Debugger", Constants::DEBUGGER_SETTINGS_TR_CATEGORY));
-    setCategoryIcon(Utils::Icon(Constants::DEBUGGER_COMMON_SETTINGS_CATEGORY_ICON));
-}
-
-QWidget *GdbOptionsPage::widget()
-{
-    if (!m_widget)
-        m_widget = new GdbOptionsPageWidget;
-    return m_widget;
-}
-
-void GdbOptionsPage::apply()
-{
-    if (m_widget)
-        m_widget->group.apply(ICore::settings());
-}
-
-void GdbOptionsPage::finish()
-{
-    if (m_widget) {
-        m_widget->group.finish();
-        delete m_widget;
-    }
+    setWidgetCreator([] { return new GdbOptionsPageWidget; });
 }
 
 /////////////////////////////////////////////////////////////////////////
@@ -300,11 +269,13 @@ void GdbOptionsPage::finish()
 //
 /////////////////////////////////////////////////////////////////////////
 
-class GdbOptionsPageWidget2 : public QWidget
+class GdbOptionsPageWidget2 : public IOptionsPageWidget
 {
-    Q_OBJECT
 public:
     GdbOptionsPageWidget2();
+
+    void apply() final { group.apply(ICore::settings()); }
+    void finish() final { group.finish(); }
 
     Utils::SavedActionSet group;
 };
@@ -349,19 +320,16 @@ GdbOptionsPageWidget2::GdbOptionsPageWidget2()
     checkBoxBreakOnAbort->setText(CommonOptionsPage::msgSetBreakpointAtFunction("abort"));
     checkBoxBreakOnAbort->setToolTip(CommonOptionsPage::msgSetBreakpointAtFunctionToolTip("abort"));
 
-    QCheckBox *checkBoxEnableReverseDebugging = 0;
-    if (isReverseDebuggingEnabled()) {
-        checkBoxEnableReverseDebugging = new QCheckBox(groupBoxDangerous);
-        checkBoxEnableReverseDebugging->setText(GdbOptionsPage::tr("Enable reverse debugging"));
-        checkBoxEnableReverseDebugging->setToolTip(GdbOptionsPage::tr(
-           "<html><head/><body><p>Enables stepping backwards.</p><p>"
-           "<b>Note:</b> This feature is very slow and unstable on the GDB side. "
-           "It exhibits unpredictable behavior when going backwards over system "
-           "calls and is very likely to destroy your debugging session.</p></body></html>"));
-    }
+    auto checkBoxEnableReverseDebugging = new QCheckBox(groupBoxDangerous);
+    checkBoxEnableReverseDebugging->setText(GdbOptionsPage::tr("Enable reverse debugging"));
+    checkBoxEnableReverseDebugging->setToolTip(GdbOptionsPage::tr(
+       "<html><head/><body><p>Enables stepping backwards.</p><p>"
+       "<b>Note:</b> This feature is very slow and unstable on the GDB side. "
+       "It exhibits unpredictable behavior when going backwards over system "
+       "calls and is very likely to destroy your debugging session.</p></body></html>"));
 
     auto checkBoxMultiInferior = new QCheckBox(groupBoxDangerous);
-    checkBoxMultiInferior->setText(GdbOptionsPage::tr("Debug all children"));
+    checkBoxMultiInferior->setText(GdbOptionsPage::tr("Debug all child processes"));
     checkBoxMultiInferior->setToolTip(GdbOptionsPage::tr(
         "<html><head/><body>Keeps debugging all children after a fork."
         "</body></html>"));
@@ -394,47 +362,15 @@ GdbOptionsPageWidget2::GdbOptionsPageWidget2()
 // The "Dangerous" options.
 class GdbOptionsPage2 : public Core::IOptionsPage
 {
-    Q_OBJECT
 public:
-    GdbOptionsPage2();
-
-    QWidget *widget();
-    void apply();
-    void finish();
-
-private:
-    QPointer<GdbOptionsPageWidget2> m_widget;
-};
-
-GdbOptionsPage2::GdbOptionsPage2()
-{
-    setId("M.Gdb2");
-    setDisplayName(tr("GDB Extended"));
-    setCategory(Constants::DEBUGGER_SETTINGS_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("Debugger", Constants::DEBUGGER_SETTINGS_TR_CATEGORY));
-    setCategoryIcon(Utils::Icon(Constants::DEBUGGER_COMMON_SETTINGS_CATEGORY_ICON));
-}
-
-QWidget *GdbOptionsPage2::widget()
-{
-    if (!m_widget)
-        m_widget = new GdbOptionsPageWidget2;
-    return m_widget;
-}
-
-void GdbOptionsPage2::apply()
-{
-    if (m_widget)
-        m_widget->group.apply(ICore::settings());
-}
-
-void GdbOptionsPage2::finish()
-{
-    if (m_widget) {
-        m_widget->group.finish();
-        delete m_widget;
+    GdbOptionsPage2()
+    {
+        setId("M.Gdb2");
+        setDisplayName(GdbOptionsPage::tr("GDB Extended"));
+        setCategory(Constants::DEBUGGER_SETTINGS_CATEGORY);
+        setWidgetCreator([] { return new GdbOptionsPageWidget2; });
     }
-}
+};
 
 // Registration
 
@@ -446,5 +382,3 @@ void addGdbOptionPages(QList<IOptionsPage *> *opts)
 
 } // namespace Internal
 } // namespace Debugger
-
-#include "gdboptionspage.moc"

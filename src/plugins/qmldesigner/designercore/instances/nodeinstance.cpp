@@ -43,18 +43,9 @@ class ProxyNodeInstanceData
 {
 public:
     ProxyNodeInstanceData()
-        : parentInstanceId(-1),
-          penWidth(1),
-          isAnchoredBySibling(false),
-          isAnchoredByChildren(false),
-          hasContent(false),
-          isMovable(false),
-          isResizable(false),
-          isInLayoutable(false),
-          directUpdates(false)
     {}
 
-    qint32 parentInstanceId;
+    qint32 parentInstanceId{-1};
     ModelNode modelNode;
     QRectF boundingRect;
     QRectF contentItemBoundingRect;
@@ -64,14 +55,14 @@ public:
     QTransform contentTransform;
     QTransform contentItemTransform;
     QTransform sceneTransform;
-    int penWidth;
-    bool isAnchoredBySibling;
-    bool isAnchoredByChildren;
-    bool hasContent;
-    bool isMovable;
-    bool isResizable;
-    bool isInLayoutable;
-    bool directUpdates;
+    int penWidth{1};
+    bool isAnchoredBySibling{false};
+    bool isAnchoredByChildren{false};
+    bool hasContent{false};
+    bool isMovable{false};
+    bool isResizable{false};
+    bool isInLayoutable{false};
+    bool directUpdates{false};
 
 
     QHash<PropertyName, QVariant> propertyValues;
@@ -85,11 +76,10 @@ public:
     QString errorMessage;
 
     QHash<PropertyName, QPair<PropertyName, qint32> > anchors;
+    QStringList allStates;
 };
 
-NodeInstance::NodeInstance()
-{
-}
+NodeInstance::NodeInstance() = default;
 
 NodeInstance::NodeInstance(ProxyNodeInstanceData *dPointer)
     : d(dPointer)
@@ -98,27 +88,18 @@ NodeInstance::NodeInstance(ProxyNodeInstanceData *dPointer)
 
 NodeInstance NodeInstance::create(const ModelNode &node)
 {
-    ProxyNodeInstanceData *d = new ProxyNodeInstanceData;
+    auto d = new ProxyNodeInstanceData;
 
     d->modelNode = node;
 
     return NodeInstance(d);
 }
 
-NodeInstance::~NodeInstance()
-{
-}
+NodeInstance::~NodeInstance() = default;
 
-NodeInstance::NodeInstance(const NodeInstance &other)
-  : d(other.d)
-{
-}
+NodeInstance::NodeInstance(const NodeInstance &other) = default;
 
-NodeInstance &NodeInstance::operator=(const NodeInstance &other)
-{
-    d = other.d;
-    return *this;
-}
+NodeInstance &NodeInstance::operator=(const NodeInstance &other) = default;
 
 ModelNode NodeInstance::modelNode() const
 {
@@ -189,6 +170,10 @@ bool NodeInstance::hasError() const
     return !d->errorMessage.isEmpty();
 }
 
+QStringList NodeInstance::allStateNames() const
+{
+    return d->allStates;
+}
 
 bool NodeInstance::isValid() const
 {
@@ -612,6 +597,16 @@ InformationName NodeInstance::setInformationHasBindingForProperty(const Property
     return NoInformationChange;
 }
 
+InformationName NodeInstance::setAllStates(const QStringList &states)
+{
+    if (d->allStates != states) {
+        d->allStates = states;
+        return AllStates;
+    }
+
+    return NoInformationChange;
+}
+
 InformationName NodeInstance::setInformation(InformationName name, const QVariant &information, const QVariant &secondInformation, const QVariant &thirdInformation)
 {
     switch (name) {
@@ -634,6 +629,7 @@ InformationName NodeInstance::setInformation(InformationName name, const QVarian
     case Anchor: return setInformationAnchor(information.toByteArray(), secondInformation.toByteArray(), thirdInformation.value<qint32>());
     case InstanceTypeForProperty: return setInformationInstanceTypeForProperty(information.toByteArray(), secondInformation.toByteArray());
     case HasBindingForProperty: return setInformationHasBindingForProperty(information.toByteArray(), secondInformation.toBool());
+    case AllStates: return setAllStates(information.toStringList());
     case NoName:
     default: break;
     }

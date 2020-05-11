@@ -29,53 +29,39 @@
 #include "debuggerconstants.h"
 
 #include <projectexplorer/runconfiguration.h>
+#include <projectexplorer/runconfigurationaspects.h>
 
 namespace Debugger {
 
-namespace Internal { class DebuggerRunConfigWidget;  }
-
-enum DebuggerLanguageStatus {
-    DisabledLanguage = 0,
-    EnabledLanguage,
-    AutoEnabledLanguage
-};
-
-class DEBUGGER_EXPORT DebuggerRunConfigurationAspectData
-{
-public:
-    DebuggerLanguageStatus useCppDebugger = AutoEnabledLanguage;
-    DebuggerLanguageStatus useQmlDebugger = AutoEnabledLanguage;
-    uint qmlDebugServerPort = Constants::QML_DEFAULT_DEBUG_SERVER_PORT;
-    bool useMultiProcess = false;
-};
+namespace Internal { class DebuggerLanguageAspect; }
 
 class DEBUGGER_EXPORT DebuggerRunConfigurationAspect
-    : public ProjectExplorer::IRunConfigurationAspect
+    : public ProjectExplorer::GlobalOrProjectAspect
 {
     Q_OBJECT
 
 public:
-    DebuggerRunConfigurationAspect(ProjectExplorer::RunConfiguration *runConfiguration);
-    DebuggerRunConfigurationAspect *create(ProjectExplorer::RunConfiguration *runConfiguration) const;
+    DebuggerRunConfigurationAspect(ProjectExplorer::Target *target);
+    ~DebuggerRunConfigurationAspect();
 
-    void fromMap(const QVariantMap &map);
-    void toMap(QVariantMap &map) const;
+    void fromMap(const QVariantMap &map) override;
+    void toMap(QVariantMap &map) const override;
 
     bool useCppDebugger() const;
-    void setUseCppDebugger(bool value);
     bool useQmlDebugger() const;
     void setUseQmlDebugger(bool value);
-    uint qmlDebugServerPort() const;
-    void setQmllDebugServerPort(uint port);
     bool useMultiProcess() const;
     void setUseMultiProcess(bool on);
-    bool isQmlDebuggingSpinboxSuppressed() const;
+    QString overrideStartup() const;
 
     int portsUsedByDebugger() const;
 
 private:
-    friend class Internal::DebuggerRunConfigWidget;
-    DebuggerRunConfigurationAspectData d;
+    Internal::DebuggerLanguageAspect *m_cppAspect;
+    Internal::DebuggerLanguageAspect *m_qmlAspect;
+    ProjectExplorer::BaseBoolAspect *m_multiProcessAspect;
+    ProjectExplorer::BaseStringAspect *m_overrideStartupAspect;
+    ProjectExplorer::Target *m_target;
 };
 
 } // namespace Debugger

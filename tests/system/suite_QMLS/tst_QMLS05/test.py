@@ -26,19 +26,19 @@
 source("../shared/qmls.py")
 
 def main():
-    editorArea = startQtCreatorWithNewAppAtQMLEditor(tempDir(), "SampleApp", "TextEdit {")
+    editorArea = startQtCreatorWithNewAppAtQMLEditor(tempDir(), "SampleApp", "}")
     if not editorArea:
         return
     homeKey = "<Home>"
     if platform.system() == "Darwin":
         homeKey = "<Ctrl+Left>"
-    for i in range(2):
+    for _ in range(2):
         type(editorArea, homeKey)
     type(editorArea, "<Return>")
     type(editorArea, "<Up>")
     type(editorArea, "<Tab>")
     type(editorArea, "Item { x: 10; y: 20; width: 10 }")
-    for i in range(30):
+    for _ in range(30):
         type(editorArea, "<Left>")
     invokeMenuItem("File", "Save All")
     # activate menu and apply 'Refactoring - Split initializer'

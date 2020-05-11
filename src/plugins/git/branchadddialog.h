@@ -26,19 +26,39 @@
 #pragma once
 
 #include <QDialog>
+#include <QItemDelegate>
 
 namespace Git {
 namespace Internal {
 
+class BranchModel;
 
 namespace Ui { class BranchAddDialog; }
+
+class BranchValidationDelegate : public QItemDelegate
+{
+public:
+    BranchValidationDelegate(QWidget *parent, BranchModel *model);
+    QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
+                          const QModelIndex &index) const override;
+
+private:
+    BranchModel *m_model;
+};
 
 class BranchAddDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    BranchAddDialog(const QStringList &localBranches, bool addBranch, QWidget *parent);
+    enum Type {
+        AddBranch,
+        RenameBranch,
+        AddTag,
+        RenameTag
+    };
+
+    BranchAddDialog(const QStringList &localBranches, Type type, QWidget *parent);
     ~BranchAddDialog() override;
 
     void setBranchName(const QString &);
@@ -47,6 +67,9 @@ public:
     void setTrackedBranchName(const QString &name, bool remote);
 
     bool track() const;
+
+    void setCheckoutVisible(bool visible);
+    bool checkout() const;
 
 private:
     void updateButtonStatus();

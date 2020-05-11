@@ -29,10 +29,9 @@
 
 #include <utils/pathchooser.h>
 
-#include <QVBoxLayout>
+#include <QDir>
 #include <QFormLayout>
 #include <QLabel>
-#include <QDir>
 
 using namespace AutotoolsProjectManager;
 using namespace AutotoolsProjectManager::Internal;
@@ -75,19 +74,19 @@ void AutotoolsOpenProjectWizard::setBuildDirectory(const QString &directory)
 BuildPathPage::BuildPathPage(AutotoolsOpenProjectWizard *w) : QWizardPage(w),
     m_pc(new Utils::PathChooser)
 {
-    QFormLayout *fl = new QFormLayout;
+    auto fl = new QFormLayout;
     this->setLayout(fl);
 
     QLabel *label = new QLabel(this);
     label->setWordWrap(true);
     label->setText(tr("Please enter the directory in which you want to build your project. "
-                      "Qt Creator recommends to not use the source directory for building. "
+                      "It is not recommended to use the source directory for building. "
                       "This ensures that the source directory remains clean and enables multiple builds "
                       "with different settings."));
     fl->addWidget(label);
     m_pc->setHistoryCompleter(QLatin1String("AutoTools.BuildDir.History"));
-    AutotoolsOpenProjectWizard *wiz = static_cast<AutotoolsOpenProjectWizard *>(wizard());
-    m_pc->setBaseDirectory(wiz->sourceDirectory());
+    auto wiz = static_cast<AutotoolsOpenProjectWizard *>(wizard());
+    m_pc->setBaseDirectory(Utils::FilePath::fromString(wiz->sourceDirectory()));
     m_pc->setPath(wiz->buildDirectory());
     connect(m_pc, &Utils::PathChooser::rawPathChanged, this, &BuildPathPage::buildDirectoryChanged);
     fl->addRow(tr("Build directory:"), m_pc);
@@ -96,5 +95,5 @@ BuildPathPage::BuildPathPage(AutotoolsOpenProjectWizard *w) : QWizardPage(w),
 
 void BuildPathPage::buildDirectoryChanged()
 {
-    static_cast<AutotoolsOpenProjectWizard *>(wizard())->setBuildDirectory(m_pc->path());
+    static_cast<AutotoolsOpenProjectWizard *>(wizard())->setBuildDirectory(m_pc->filePath().toString());
 }

@@ -11,10 +11,11 @@ QtcPlugin {
     Depends { name: "Core" }
     Depends { name: "TextEditor" }
     Depends { name: "ProjectExplorer" }
-    Depends { name: "CppTools" }
+    Depends { name: "DiffEditor" }
 
     pluginRecommends: [
-        "CodePaster"
+        "CodePaster",
+        "CppTools"
     ]
 
     files: [
@@ -53,27 +54,24 @@ QtcPlugin {
         "vcsbaseclientsettings.cpp",
         "vcsbaseclientsettings.h",
         "vcsbaseconstants.h",
+        "vcsbasediffeditorcontroller.cpp",
+        "vcsbasediffeditorcontroller.h",
         "vcsbaseeditor.cpp",
         "vcsbaseeditor.h",
         "vcsbaseeditorconfig.cpp",
         "vcsbaseeditorconfig.h",
-        "vcsbaseoptionspage.cpp",
-        "vcsbaseoptionspage.h",
         "vcsbaseplugin.cpp",
         "vcsbaseplugin.h",
         "vcsbasesubmiteditor.cpp",
         "vcsbasesubmiteditor.h",
         "vcscommand.cpp",
         "vcscommand.h",
+        "vcsoutputformatter.cpp",
+        "vcsoutputformatter.h",
         "vcsoutputwindow.cpp",
         "vcsoutputwindow.h",
         "vcsplugin.cpp",
         "vcsplugin.h",
-        "vcsprojectcache.cpp",
-        "vcsprojectcache.h",
-        "images/diff.png",
-        "images/removesubmitfield.png",
-        "images/submit.png",
         "wizard/vcsconfigurationpage.cpp",
         "wizard/vcsconfigurationpage.h",
         "wizard/vcscommandpage.cpp",

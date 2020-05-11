@@ -29,12 +29,12 @@
 
 #include <QRegExp>
 
-QT_BEGIN_NAMESPACE
-class QVariant;
-QT_END_NAMESPACE
+namespace Utils { class FancyLineEdit; }
 
 namespace Git {
 namespace Internal {
+
+class GitLogFilterWidget;
 
 class GitEditorWidget : public VcsBase::VcsBaseEditorWidget
 {
@@ -44,19 +44,22 @@ public:
     GitEditorWidget();
 
     void setPlainText(const QString &text) override;
+    QWidget *addFilterWidget();
+    void setPickaxeLineEdit(Utils::FancyLineEdit *lineEdit);
+    QString grepValue() const;
+    QString pickaxeValue() const;
+    bool caseSensitive() const;
+    void refresh();
+
+signals:
+    void toggleFilters(bool value);
 
 private:
-    void checkoutChange();
-    void cherryPickChange();
-    void revertChange();
-    void logChange();
     void applyDiffChunk(const VcsBase::DiffChunk& chunk, bool revert);
 
     void init() override;
-    void resetChange(const QByteArray &resetType);
     void addDiffActions(QMenu *menu, const VcsBase::DiffChunk &chunk) override;
     void aboutToOpen(const QString &fileName, const QString &realFileName) override;
-    QSet<QString> annotationChanges() const override;
     QString changeUnderCursor(const QTextCursor &) const override;
     VcsBase::BaseAnnotationHighlighter *createAnnotationHighlighter(const QSet<QString> &changes) const override;
     QString decorateVersion(const QString &revision) const override;
@@ -69,7 +72,7 @@ private:
     QString sourceWorkingDirectory() const;
 
     mutable QRegExp m_changeNumberPattern;
-    QString m_currentChange;
+    GitLogFilterWidget *m_logFilterWidget = nullptr;
 };
 
 } // namespace Git

@@ -40,7 +40,7 @@ class SettingsController :
     Q_OBJECT
 
 public:
-    explicit SettingsController(QObject *parent = 0);
+    SettingsController();
 
 signals:
     void resetSettings();

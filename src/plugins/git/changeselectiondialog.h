@@ -33,10 +33,6 @@
 #include <QProcessEnvironment>
 
 QT_BEGIN_NAMESPACE
-class QPushButton;
-class QLabel;
-class QLineEdit;
-class QPlainTextEdit;
 class QProcess;
 class QStringListModel;
 QT_END_NAMESPACE
@@ -46,6 +42,7 @@ namespace Internal {
 
 enum ChangeCommand {
     NoCommand,
+    Archive,
     Checkout,
     CherryPick,
     Revert,
@@ -72,10 +69,7 @@ private:
     void recalculateCompletion();
     void recalculateDetails();
     void changeTextChanged(const QString &text);
-    void acceptCheckout();
-    void acceptCherryPick();
-    void acceptRevert();
-    void acceptShow();
+    void acceptCommand(ChangeCommand command);
 
     void enableButtons(bool b);
     void terminateProcess();
@@ -83,7 +77,7 @@ private:
     Ui::ChangeSelectionDialog *m_ui;
 
     QProcess *m_process = nullptr;
-    Utils::FileName m_gitExecutable;
+    Utils::FilePath m_gitExecutable;
     QProcessEnvironment m_gitEnvironment;
     ChangeCommand m_command = NoCommand;
     QStringListModel *m_changeModel = nullptr;

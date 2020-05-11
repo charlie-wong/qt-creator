@@ -25,44 +25,52 @@
 
 #pragma once
 
-#include <projectexplorer/headerpath.h>
 #include <projectexplorer/abi.h>
+#include <projectexplorer/headerpath.h>
+#include <projectexplorer/projectmacro.h>
 #include <coreplugin/id.h>
+#include <utils/cpplanguage_details.h>
 
 #include <functional>
+
+namespace Utils { class Environment; }
 
 namespace ProjectExplorer {
 
 class ToolChain
 {
 public:
+    ToolChain() = default;
     Core::Id typeId() const { return Core::Id(); }
-
-    enum CompilerFlag {
-        NoFlags = 0,
-        StandardCxx11 = 0x1,
-        StandardC99 = 0x2,
-        StandardC11 = 0x4,
-        GnuExtensions = 0x8,
-        MicrosoftExtensions = 0x10,
-        BorlandExtensions = 0x20,
-        OpenMP = 0x40,
-        ObjectiveC = 0x80,
-        StandardCxx14 = 0x100,
-        StandardCxx17 = 0x200,
-        StandardCxx98 = 0x400,
-    };
-    Q_DECLARE_FLAGS(CompilerFlags, CompilerFlag)
 
     Abi targetAbi() const { return Abi(); }
 
-    using SystemHeaderPathsRunner = std::function<QList<HeaderPath>(const QStringList &cxxflags, const QString &sysRoot)>;
-    virtual SystemHeaderPathsRunner createSystemHeaderPathsRunner() const { return SystemHeaderPathsRunner(); }
+    using BuiltInHeaderPathsRunner = std::function<HeaderPaths(
+        const QStringList &cxxflags, const QString &sysRoot, const QString &originalTargetTriple)>;
+    virtual BuiltInHeaderPathsRunner createBuiltInHeaderPathsRunner(const Utils::Environment &env) const {
+        return BuiltInHeaderPathsRunner();
+    }
 
-    using PredefinedMacrosRunner = std::function<QByteArray(const QStringList &cxxflags)>;
-    virtual PredefinedMacrosRunner createPredefinedMacrosRunner() const { return PredefinedMacrosRunner(); }
+    class MacroInspectionReport
+    {
+    public:
+        Macros macros;
+        Utils::LanguageVersion languageVersion; // Derived from macros.
+    };
+    using MacroInspectionRunner = std::function<MacroInspectionReport(const QStringList &cxxflags)>;
+    virtual MacroInspectionRunner createMacroInspectionRunner() const = 0;
 
     virtual QString originalTargetTriple() const { return QString(); }
+    virtual QStringList extraCodeModelFlags() const { return QStringList(); }
+};
+
+class ConcreteToolChain : public ToolChain
+{
+public:
+    MacroInspectionRunner createMacroInspectionRunner() const override
+    {
+        return MacroInspectionRunner();
+    }
 };
 
 } // namespace ProjectExplorer

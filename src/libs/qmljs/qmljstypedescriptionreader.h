@@ -39,13 +39,13 @@ class QBuffer;
 QT_END_NAMESPACE
 
 namespace QmlJS {
+class SourceLocation;
 
 class ModuleApiInfo;
 namespace AST {
 class UiProgram;
 class UiObjectDefinition;
 class UiScriptBinding;
-class SourceLocation;
 }
 
 class QMLJS_EXPORT TypeDescriptionReader
@@ -83,16 +83,16 @@ private:
     void readMetaObjectRevisions(AST::UiScriptBinding *ast, LanguageUtils::FakeMetaObject::Ptr fmo);
     void readEnumValues(AST::UiScriptBinding *ast, LanguageUtils::FakeMetaEnum *fme);
 
-    void addError(const AST::SourceLocation &loc, const QString &message);
-    void addWarning(const AST::SourceLocation &loc, const QString &message);
+    void addError(const SourceLocation &loc, const QString &message);
+    void addWarning(const SourceLocation &loc, const QString &message);
 
     QString _fileName;
     QString _source;
     QString _errorMessage;
     QString _warningMessage;
     QHash<QString, LanguageUtils::FakeMetaObject::ConstPtr> *_objects;
-    QList<ModuleApiInfo> *_moduleApis;
-    QStringList *_dependencies;
+    QList<ModuleApiInfo> *_moduleApis = nullptr;
+    QStringList *_dependencies = nullptr;
 };
 
 } // namespace QmlJS

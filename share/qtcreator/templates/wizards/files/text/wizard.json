@@ -6,8 +6,9 @@
     "trDescription": "Creates an empty file.",
     "trDisplayName": "Empty File",
     "trDisplayCategory": "General",
+    "iconText": "txt",
     "platformIndependent": true,
-    "enabled": "%{JS: [ %{Plugins} ].indexOf('TextEditor') >= 0}",
+    "enabled": "%{JS: value('Plugins').indexOf('TextEditor') >= 0}",
 
     "pages" :
     [

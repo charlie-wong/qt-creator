@@ -29,10 +29,12 @@
 
 #include <projectexplorer/projectexplorerconstants.h>
 
-using namespace CMakeProjectManager;
 using namespace ProjectExplorer;
+using namespace Utils;
 
-const char COMMON_ERROR_PATTERN[] = "^CMake Error at (.*):([0-9]*) \\((.*)\\):";
+namespace CMakeProjectManager {
+
+const char COMMON_ERROR_PATTERN[] = "^CMake Error at (.*):([0-9]*)( \\((.*)\\))?:";
 const char NEXT_SUBERROR_PATTERN[] = "^CMake Error in (.*):";
 const char LOCATION_LINE_PATTERN[] = ":(\\d+):(?:(\\d+))?$";
 
@@ -50,88 +52,120 @@ CMakeParser::CMakeParser()
     QTC_CHECK(m_locationLine.isValid());
 }
 
-void CMakeParser::stdError(const QString &line)
+void CMakeParser::setSourceDirectory(const QString &sourceDir)
 {
-    QString trimmedLine = rightTrimmed(line);
+    if (m_sourceDirectory)
+        emit searchDirExpired(FilePath::fromString(m_sourceDirectory.value().path()));
+    m_sourceDirectory = QDir(sourceDir);
+    emit addSearchDir(FilePath::fromString(sourceDir));
+}
 
+OutputLineParser::Result CMakeParser::handleLine(const QString &line, OutputFormat type)
+{
+    if (type != StdErrFormat)
+        return Status::NotHandled;
+
+    QString trimmedLine = rightTrimmed(line);
     switch (m_expectTripleLineErrorData) {
     case NONE:
         if (trimmedLine.isEmpty() && !m_lastTask.isNull()) {
-            if (m_skippedFirstEmptyLine)
-                doFlush();
-            else
-                m_skippedFirstEmptyLine = true;
-            return;
+            if (m_skippedFirstEmptyLine) {
+                flush();
+                return Status::InProgress;
+            }
+            m_skippedFirstEmptyLine = true;
+            return Status::InProgress;
         }
         if (m_skippedFirstEmptyLine)
             m_skippedFirstEmptyLine = false;
 
         if (m_commonError.indexIn(trimmedLine) != -1) {
-            m_lastTask = Task(Task::Error, QString(), Utils::FileName::fromUserInput(m_commonError.cap(1)),
-                              m_commonError.cap(2).toInt(), Constants::TASK_CATEGORY_BUILDSYSTEM);
+            QString path = m_sourceDirectory ? m_sourceDirectory->absoluteFilePath(
+                               QDir::fromNativeSeparators(m_commonError.cap(1)))
+                                             : QDir::fromNativeSeparators(m_commonError.cap(1));
+            m_lastTask = BuildSystemTask(Task::Error,
+                                         QString(),
+                                         absoluteFilePath(FilePath::fromUserInput(path)),
+                                         m_commonError.cap(2).toInt());
             m_lines = 1;
-            return;
+            LinkSpecs linkSpecs;
+            addLinkSpecForAbsoluteFilePath(linkSpecs, m_lastTask.file, m_lastTask.line,
+                                           m_commonError, 1);
+            return {Status::InProgress, linkSpecs};
         } else if (m_nextSubError.indexIn(trimmedLine) != -1) {
-            m_lastTask = Task(Task::Error, QString(), Utils::FileName::fromUserInput(m_nextSubError.cap(1)), -1,
-                              Constants::TASK_CATEGORY_BUILDSYSTEM);
+            m_lastTask = BuildSystemTask(Task::Error, QString(),
+                                         absoluteFilePath(FilePath::fromUserInput(m_nextSubError.cap(1))));
+            LinkSpecs linkSpecs;
+            addLinkSpecForAbsoluteFilePath(linkSpecs, m_lastTask.file, m_lastTask.line,
+                                           m_nextSubError, 1);
             m_lines = 1;
-            return;
+            return {Status::InProgress, linkSpecs};
         } else if (trimmedLine.startsWith(QLatin1String("  ")) && !m_lastTask.isNull()) {
             if (!m_lastTask.description.isEmpty())
                 m_lastTask.description.append(QLatin1Char(' '));
             m_lastTask.description.append(trimmedLine.trimmed());
             ++m_lines;
-            return;
+            return Status::InProgress;
         } else if (trimmedLine.endsWith(QLatin1String("in cmake code at"))) {
             m_expectTripleLineErrorData = LINE_LOCATION;
-            doFlush();
-            m_lastTask = Task(trimmedLine.contains(QLatin1String("Error")) ? Task::Error : Task::Warning,
-                              QString(), Utils::FileName(), -1, Constants::TASK_CATEGORY_BUILDSYSTEM);
-            return;
+            flush();
+            const Task::TaskType type =
+                    trimmedLine.contains(QLatin1String("Error")) ? Task::Error : Task::Warning;
+            m_lastTask = BuildSystemTask(type, QString());
+            return Status::InProgress;
         } else if (trimmedLine.startsWith("CMake Error: ")) {
-            m_lastTask = Task(Task::Error, trimmedLine.mid(13),
-                              Utils::FileName(), -1, Constants::TASK_CATEGORY_BUILDSYSTEM);
+            m_lastTask = BuildSystemTask(Task::Error, trimmedLine.mid(13));
             m_lines = 1;
-            return;
+            return Status::InProgress;
+        } else if (trimmedLine.startsWith("-- ") || trimmedLine.startsWith(" * ")) {
+            // Do not pass on lines starting with "-- " or "* ". Those are typical CMake output
+            return Status::InProgress;
         }
-        IOutputParser::stdError(line);
-        return;
+        return Status::NotHandled;
     case LINE_LOCATION:
         {
             QRegularExpressionMatch m = m_locationLine.match(trimmedLine);
             QTC_CHECK(m.hasMatch());
-            m_lastTask.file = Utils::FileName::fromUserInput(trimmedLine.mid(0, m.capturedStart()));
+            m_lastTask.file = absoluteFilePath(FilePath::fromUserInput(
+                                                   trimmedLine.mid(0, m.capturedStart())));
             m_lastTask.line = m.captured(1).toInt();
             m_expectTripleLineErrorData = LINE_DESCRIPTION;
+            LinkSpecs linkSpecs;
+            addLinkSpecForAbsoluteFilePath(linkSpecs, m_lastTask.file, m_lastTask.line, 0,
+                                           m.capturedStart());
+            return {Status::InProgress, linkSpecs};
         }
-        return;
     case LINE_DESCRIPTION:
         m_lastTask.description = trimmedLine;
         if (trimmedLine.endsWith(QLatin1Char('\"')))
             m_expectTripleLineErrorData = LINE_DESCRIPTION2;
         else {
             m_expectTripleLineErrorData = NONE;
-            doFlush();
+            flush();
+            return Status::Done;
         }
-        return;
+        return Status::InProgress;
     case LINE_DESCRIPTION2:
         m_lastTask.description.append(QLatin1Char('\n'));
         m_lastTask.description.append(trimmedLine);
         m_expectTripleLineErrorData = NONE;
-        doFlush();
-        return;
+        flush();
+        return Status::Done;
     }
+    return Status::NotHandled;
 }
 
-void CMakeParser::doFlush()
+void CMakeParser::flush()
 {
     if (m_lastTask.isNull())
         return;
     Task t = m_lastTask;
     m_lastTask.clear();
-    emit addTask(t, m_lines, 1);
+    scheduleTask(t, m_lines, 1);
     m_lines = 0;
 }
+
+} // CMakeProjectManager
 
 #ifdef WITH_TESTS
 #include "cmakeprojectplugin.h"
@@ -140,27 +174,27 @@ void CMakeParser::doFlush()
 
 #include <QTest>
 
+namespace CMakeProjectManager {
+
 void Internal::CMakeProjectPlugin::testCMakeParser_data()
 {
     QTest::addColumn<QString>("input");
     QTest::addColumn<OutputParserTester::Channel>("inputChannel");
     QTest::addColumn<QString>("childStdOutLines");
     QTest::addColumn<QString>("childStdErrLines");
-    QTest::addColumn<QList<ProjectExplorer::Task> >("tasks");
+    QTest::addColumn<Tasks>("tasks");
     QTest::addColumn<QString>("outputLines");
-
-    const Core::Id categoryBuild = Constants::TASK_CATEGORY_BUILDSYSTEM;
 
     // negative tests
     QTest::newRow("pass-through stdout")
             << QString::fromLatin1("Sometext") << OutputParserTester::STDOUT
             << QString::fromLatin1("Sometext\n") << QString()
-            << QList<ProjectExplorer::Task>()
+            << Tasks()
             << QString();
     QTest::newRow("pass-through stderr")
             << QString::fromLatin1("Sometext") << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("Sometext\n")
-            << QList<ProjectExplorer::Task>()
+            << Tasks()
             << QString();
 
     // positive tests
@@ -177,15 +211,15 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "  .hxx .in .txx\n\n")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Error,
-                        QLatin1String("Cannot find source file: unknownFile.qml Tried extensions .c .C .c++ .cc .cpp .cxx .m .M .mm .h .hh .h++ .hm .hpp .hxx .in .txx"),
-                        Utils::FileName::fromUserInput(QLatin1String("src/1/app/CMakeLists.txt")), 70,
-                        categoryBuild)
-            << Task(Task::Error,
-                    QLatin1String("Cannot find source file: CMakeLists.txt2 Tried extensions .c .C .c++ .cc .cpp .cxx .m .M .mm .h .hh .h++ .hm .hpp .hxx .in .txx"),
-                    Utils::FileName::fromUserInput(QLatin1String("src/1/app/CMakeLists.txt")), -1,
-                    categoryBuild))
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "Cannot find source file: unknownFile.qml Tried extensions "
+                                   ".c .C .c++ .cc .cpp .cxx .m .M .mm .h .hh .h++ .hm .hpp .hxx .in .txx",
+                                    FilePath::fromUserInput("src/1/app/CMakeLists.txt"), 70)
+                << BuildSystemTask(Task::Error,
+                                   "Cannot find source file: CMakeLists.txt2 Tried extensions "
+                                   ".c .C .c++ .cc .cpp .cxx .m .M .mm .h .hh .h++ .hm .hpp .hxx .in .txx",
+                                   FilePath::fromUserInput("src/1/app/CMakeLists.txt"), -1))
             << QString();
 
     QTest::newRow("add subdirectory")
@@ -193,11 +227,10 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "  add_subdirectory given source \"app1\" which is not an existing directory.\n\n")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Error,
-                        QLatin1String("add_subdirectory given source \"app1\" which is not an existing directory."),
-                        Utils::FileName::fromUserInput(QLatin1String("src/1/CMakeLists.txt")), 8,
-                        categoryBuild))
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "add_subdirectory given source \"app1\" which is not an existing directory.",
+                                   FilePath::fromUserInput("src/1/CMakeLists.txt"), 8))
             << QString();
 
     QTest::newRow("unknown command")
@@ -205,11 +238,10 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "  Unknown CMake command \"i_am_wrong_command\".\n\n")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Error,
-                        QLatin1String("Unknown CMake command \"i_am_wrong_command\"."),
-                        Utils::FileName::fromUserInput(QLatin1String("src/1/CMakeLists.txt")), 8,
-                        categoryBuild))
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "Unknown CMake command \"i_am_wrong_command\".",
+                                   FilePath::fromUserInput("src/1/CMakeLists.txt"), 8))
             << QString();
 
     QTest::newRow("incorrect arguments")
@@ -217,11 +249,10 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "  message called with incorrect number of arguments\n\n")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Error,
-                        QLatin1String("message called with incorrect number of arguments"),
-                        Utils::FileName::fromUserInput(QLatin1String("src/1/CMakeLists.txt")), 8,
-                        categoryBuild))
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "message called with incorrect number of arguments",
+                                   FilePath::fromUserInput("src/1/CMakeLists.txt"), 8))
             << QString();
 
     QTest::newRow("cmake error")
@@ -231,11 +262,10 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "\".")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Error,
-                        QLatin1String("Parse error.  Expected \"(\", got newline with text \"\n\"."),
-                        Utils::FileName::fromUserInput(QLatin1String("/test/path/CMakeLists.txt")), 9,
-                        categoryBuild))
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "Parse error.  Expected \"(\", got newline with text \"\n\".",
+                                   FilePath::fromUserInput("/test/path/CMakeLists.txt"), 9))
             << QString();
 
     QTest::newRow("cmake error2")
@@ -243,11 +273,24 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "Missing variable is:\n"
                                    "CMAKE_MAKE_PROGRAM\n")
             << OutputParserTester::STDERR
-            << QString() << QString::fromLatin1("Missing variable is:\nCMAKE_MAKE_PROGRAM\n")
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Error,
-                        QLatin1String("Error required internal CMake variable not set, cmake may be not be built correctly."),
-                        Utils::FileName(), -1, categoryBuild))
+            << QString() << QString("Missing variable is:\nCMAKE_MAKE_PROGRAM\n")
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "Error required internal CMake variable not set, "
+                                   "cmake may be not be built correctly."))
+            << QString();
+
+    QTest::newRow("cmake error at")
+            << QString::fromLatin1("CMake Error at CMakeLists.txt:4:\n"
+                                   "  Parse error.  Expected \"(\", got newline with text \"\n"
+                                   "\n"
+                                   "  \".\n")
+            << OutputParserTester::STDERR
+            << QString() << QString()
+            << (Tasks()
+                << BuildSystemTask(Task::Error,
+                                   "Parse error.  Expected \"(\", got newline with text \" \".",
+                                   FilePath::fromUserInput("CMakeLists.txt"), 4))
             << QString();
 
     QTest::newRow("cmake warning")
@@ -256,21 +299,24 @@ void Internal::CMakeProjectPlugin::testCMakeParser_data()
                                    "Argument not separated from preceding token by whitespace.")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Warning,
-                        QLatin1String("Argument not separated from preceding token by whitespace."),
-                        Utils::FileName::fromUserInput(QLatin1String("/test/path/CMakeLists.txt")), 9,
-                        categoryBuild))
+            << (Tasks()
+                << BuildSystemTask(Task::Warning,
+                                   "Argument not separated from preceding token by whitespace.",
+                                   FilePath::fromUserInput("/test/path/CMakeLists.txt"), 9))
             << QString();
+    QTest::newRow("eat normal CMake output")
+        << QString::fromLatin1("-- Qt5 install prefix: /usr/lib\n"
+                               " * Plugin componentsplugin, with CONDITION TARGET QmlDesigner")
+        << OutputParserTester::STDERR << QString() << QString() << (Tasks()) << QString();
 }
 
 void Internal::CMakeProjectPlugin::testCMakeParser()
 {
     OutputParserTester testbench;
-    testbench.appendOutputParser(new CMakeParser);
+    testbench.addLineParser(new CMakeParser);
     QFETCH(QString, input);
     QFETCH(OutputParserTester::Channel, inputChannel);
-    QFETCH(QList<Task>, tasks);
+    QFETCH(Tasks, tasks);
     QFETCH(QString, childStdOutLines);
     QFETCH(QString, childStdErrLines);
     QFETCH(QString, outputLines);
@@ -279,5 +325,7 @@ void Internal::CMakeProjectPlugin::testCMakeParser()
                           tasks, childStdOutLines, childStdErrLines,
                           outputLines);
 }
+
+} // CMakeProjectManager
 
 #endif

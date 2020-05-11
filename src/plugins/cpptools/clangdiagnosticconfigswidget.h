@@ -28,59 +28,67 @@
 #include "cpptools_global.h"
 
 #include "clangdiagnosticconfig.h"
-#include "clangdiagnosticconfigsmodel.h"
 
+#include <QHash>
 #include <QWidget>
+
+#include <memory>
+
+QT_BEGIN_NAMESPACE
+class QTabWidget;
+QT_END_NAMESPACE
 
 namespace CppTools {
 
-namespace Ui { class ClangDiagnosticConfigsWidget; }
+class ClangDiagnosticConfig;
+
+namespace Ui {
+class ClangDiagnosticConfigsWidget;
+class ClangBaseChecks;
+}
+
+class ConfigsModel;
 
 class CPPTOOLS_EXPORT ClangDiagnosticConfigsWidget : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit ClangDiagnosticConfigsWidget(
-            const ClangDiagnosticConfigsModel &diagnosticConfigsModel = ClangDiagnosticConfigsModel(),
-            const Core::Id &configToSelect = Core::Id(),
-            QWidget *parent = 0);
-    ~ClangDiagnosticConfigsWidget();
+    explicit ClangDiagnosticConfigsWidget(const ClangDiagnosticConfigs &configs,
+                                          const Core::Id &configToSelect,
+                                          QWidget *parent = nullptr);
+    ~ClangDiagnosticConfigsWidget() override;
 
-    Core::Id currentConfigId() const;
-    ClangDiagnosticConfigs customConfigs() const;
+    void sync();
 
-    void refresh(const ClangDiagnosticConfigsModel &diagnosticConfigsModel,
-                 const Core::Id &configToSelect);
+    ClangDiagnosticConfigs configs() const;
+    const ClangDiagnosticConfig currentConfig() const;
 
-signals:
-    void currentConfigChanged(const Core::Id &currentConfigId);
-    void customConfigsChanged(const CppTools::ClangDiagnosticConfigs &customConfigs);
+protected:
+    void updateConfig(const CppTools::ClangDiagnosticConfig &config);
+    virtual void syncExtraWidgets(const ClangDiagnosticConfig &) {}
+    QTabWidget *tabWidget() const;
 
 private:
-    void onCurrentConfigChanged(int);
     void onCopyButtonClicked();
+    void onRenameButtonClicked();
     void onRemoveButtonClicked();
 
-    void onDiagnosticOptionsEdited();
-
-    void syncWidgetsToModel(const Core::Id &configToSelect = Core::Id());
-    void syncConfigChooserToModel(const Core::Id &configToSelect = Core::Id());
-    void syncOtherWidgetsToComboBox();
-
-    bool isConfigChooserEmpty() const;
-    const ClangDiagnosticConfig &currentConfig() const;
+    void onClangOnlyOptionsChanged();
 
     void setDiagnosticOptions(const QString &options);
+    void updateValidityWidgets(const QString &errorMessage);
 
-    void connectConfigChooserCurrentIndex();
-    void disconnectConfigChooserCurrentIndex();
-    void connectDiagnosticOptionsChanged();
-    void disconnectDiagnosticOptionsChanged();
+    void connectClangOnlyOptionsChanged();
+    void disconnectClangOnlyOptionsChanged();
 
 private:
     Ui::ClangDiagnosticConfigsWidget *m_ui;
-    ClangDiagnosticConfigsModel m_diagnosticConfigsModel;
+    ConfigsModel *m_configsModel = nullptr;
+    QHash<Core::Id, QString> m_notAcceptedOptions;
+
+    std::unique_ptr<CppTools::Ui::ClangBaseChecks> m_clangBaseChecks;
+    QWidget *m_clangBaseChecksWidget = nullptr;
 };
 
 } // CppTools namespace

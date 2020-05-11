@@ -44,9 +44,8 @@ public:
 
 using namespace Internal;
 
-UploadAndInstallTarPackageService::UploadAndInstallTarPackageService(QObject *parent)
-    : AbstractUploadAndInstallPackageService(parent),
-      d(new UploadAndInstallTarPackageServicePrivate)
+UploadAndInstallTarPackageService::UploadAndInstallTarPackageService()
+    : d(new UploadAndInstallTarPackageServicePrivate)
 {
 }
 
@@ -61,41 +60,29 @@ AbstractRemoteLinuxPackageInstaller *UploadAndInstallTarPackageService::packageI
 }
 
 
-UploadAndInstallTarPackageStep::UploadAndInstallTarPackageStep(BuildStepList *bsl)
-    : AbstractRemoteLinuxDeployStep(bsl, stepId())
+UploadAndInstallTarPackageStep::UploadAndInstallTarPackageStep(BuildStepList *bsl, Core::Id id)
+    : AbstractRemoteLinuxDeployStep(bsl, id)
 {
-    ctor();
-}
+    auto service = createDeployService<UploadAndInstallTarPackageService>();
 
-UploadAndInstallTarPackageStep::UploadAndInstallTarPackageStep(BuildStepList *bsl,
-        UploadAndInstallTarPackageStep *other)
-    : AbstractRemoteLinuxDeployStep(bsl, other)
-{
-    ctor();
-}
-
-void UploadAndInstallTarPackageStep::ctor()
-{
-    m_deployService = new UploadAndInstallTarPackageService(this);
     setDefaultDisplayName(displayName());
-}
+    setWidgetExpandedByDefault(false);
 
-bool UploadAndInstallTarPackageStep::initInternal(QString *error)
-{
-    const TarPackageCreationStep * const pStep
-        = deployConfiguration()->earlierBuildStep<TarPackageCreationStep>(this);
-    if (!pStep) {
-        if (error)
-            *error = tr("No tarball creation step found.");
-        return false;
-    }
-    m_deployService->setPackageFilePath(pStep->packageFilePath());
-    return m_deployService->isDeploymentPossible(error);
-}
+    setInternalInitializer([this, service] {
+        const TarPackageCreationStep *pStep = nullptr;
 
-BuildStepConfigWidget *UploadAndInstallTarPackageStep::createConfigWidget()
-{
-    return new SimpleBuildStepConfigWidget(this);
+        for (BuildStep *step : deployConfiguration()->stepList()->steps()) {
+            if (step == this)
+                break;
+            if ((pStep = dynamic_cast<TarPackageCreationStep *>(step)))
+                break;
+        }
+        if (!pStep)
+            return CheckResult::failure(tr("No tarball creation step found."));
+
+        service->setPackageFilePath(pStep->packageFilePath());
+        return service->isDeploymentPossible();
+    });
 }
 
 Core::Id UploadAndInstallTarPackageStep::stepId()

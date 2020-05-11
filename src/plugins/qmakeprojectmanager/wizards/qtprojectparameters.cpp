@@ -36,10 +36,7 @@ namespace QmakeProjectManager {
 namespace Internal {
 
 // ----------- QtProjectParameters
-QtProjectParameters::QtProjectParameters()
-  : type(ConsoleApp), flags(0), qtVersionSupport(SupportQt4And5)
-{
-}
+QtProjectParameters::QtProjectParameters() = default;
 
 QString QtProjectParameters::projectPath() const
 {
@@ -103,20 +100,20 @@ void QtProjectParameters::writeProFile(QTextStream &str) const
     case SharedLibrary:
         str << "TEMPLATE = lib\n\nDEFINES += " << libraryMacro(fileName) << '\n';
         break;
-    case Qt4Plugin:
+    case QtPlugin:
         str << "TEMPLATE = lib\nCONFIG += plugin\n";
         break;
     default:
         break;
     }
 
-    if (!targetDirectory.isEmpty())
+    if (!targetDirectory.isEmpty() && !targetDirectory.contains("QT_INSTALL_"))
         str << "\nDESTDIR = " << targetDirectory << '\n';
 
     if (qtVersionSupport != SupportQt4Only) {
         str << "\n"
                "# The following define makes your compiler emit warnings if you use\n"
-               "# any feature of Qt which as been marked as deprecated (the exact warnings\n"
+               "# any feature of Qt which has been marked as deprecated (the exact warnings\n"
                "# depend on your compiler). Please consult the documentation of the\n"
                "# deprecated API in order to know how to port your code away from it.\n"
                "DEFINES += QT_DEPRECATED_WARNINGS\n\n"

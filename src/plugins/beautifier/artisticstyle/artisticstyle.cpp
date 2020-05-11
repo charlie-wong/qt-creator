@@ -29,7 +29,6 @@
 
 #include "artisticstyleconstants.h"
 #include "artisticstyleoptionspage.h"
-#include "artisticstylesettings.h"
 
 #include "../beautifierconstants.h"
 #include "../beautifierplugin.h"
@@ -42,34 +41,26 @@
 #include <coreplugin/editormanager/ieditor.h>
 #include <coreplugin/idocument.h>
 #include <cppeditor/cppeditorconstants.h>
-#include <projectexplorer/projecttree.h>
 #include <projectexplorer/project.h>
+#include <projectexplorer/projectnodes.h>
+#include <projectexplorer/projecttree.h>
+#include <texteditor/formattexteditor.h>
 #include <utils/fileutils.h>
 #include <utils/hostosinfo.h>
 
 #include <QAction>
 #include <QMenu>
 
+using namespace TextEditor;
+
 namespace Beautifier {
 namespace Internal {
 namespace ArtisticStyle {
 
-ArtisticStyle::ArtisticStyle(BeautifierPlugin *parent) :
-    BeautifierAbstractTool(parent),
-    m_beautifierPlugin(parent),
-    m_settings(new ArtisticStyleSettings)
-{
-}
-
-ArtisticStyle::~ArtisticStyle()
-{
-    delete m_settings;
-}
-
-bool ArtisticStyle::initialize()
+ArtisticStyle::ArtisticStyle()
 {
     Core::ActionContainer *menu = Core::ActionManager::createMenu(Constants::ArtisticStyle::MENU_ID);
-    menu->menu()->setTitle(tr(Constants::ArtisticStyle::DISPLAY_NAME));
+    menu->menu()->setTitle(tr("&Artistic Style"));
 
     m_formatFile = new QAction(BeautifierPlugin::msgFormatCurrentFile(), this);
     menu->addAction(Core::ActionManager::registerAction(m_formatFile,
@@ -78,10 +69,8 @@ bool ArtisticStyle::initialize()
 
     Core::ActionManager::actionContainer(Constants::MENU_ID)->addMenu(menu);
 
-    connect(m_settings, &ArtisticStyleSettings::supportedMimeTypesChanged,
+    connect(&m_settings, &ArtisticStyleSettings::supportedMimeTypesChanged,
             [this] { updateActions(Core::EditorManager::currentEditor()); });
-
-    return true;
 }
 
 QString ArtisticStyle::id() const
@@ -91,12 +80,7 @@ QString ArtisticStyle::id() const
 
 void ArtisticStyle::updateActions(Core::IEditor *editor)
 {
-    m_formatFile->setEnabled(editor && m_settings->isApplicable(editor->document()));
-}
-
-QList<QObject *> ArtisticStyle::autoReleaseObjects()
-{
-    return {new ArtisticStyleOptionsPage(m_settings, this)};
+    m_formatFile->setEnabled(editor && m_settings.isApplicable(editor->document()));
 }
 
 void ArtisticStyle::formatFile()
@@ -106,36 +90,35 @@ void ArtisticStyle::formatFile()
         BeautifierPlugin::showError(BeautifierPlugin::msgCannotGetConfigurationFile(
                                         tr(Constants::ArtisticStyle::DISPLAY_NAME)));
     } else {
-        m_beautifierPlugin->formatCurrentFile(command(cfgFileName));
+        formatCurrentFile(command(cfgFileName));
     }
 }
 
 QString ArtisticStyle::configurationFile() const
 {
-    if (m_settings->useCustomStyle())
-        return m_settings->styleFileName(m_settings->customStyle());
+    if (m_settings.useCustomStyle())
+        return m_settings.styleFileName(m_settings.customStyle());
 
-    if (m_settings->useOtherFiles()) {
+    if (m_settings.useOtherFiles()) {
         if (const ProjectExplorer::Project *project
                 = ProjectExplorer::ProjectTree::currentProject()) {
-            const QStringList files = project->files(ProjectExplorer::Project::AllFiles);
-            for (const QString &file : files) {
-                if (!file.endsWith(".astylerc"))
-                    continue;
-                const QFileInfo fi(file);
+            const Utils::FilePaths astyleRcfiles = project->files(
+                [](const ProjectExplorer::Node *n) { return n->filePath().endsWith(".astylerc"); });
+            for (const Utils::FilePath &file : astyleRcfiles) {
+                const QFileInfo fi = file.toFileInfo();
                 if (fi.isReadable())
-                    return file;
+                    return file.toString();
             }
         }
     }
 
-    if (m_settings->useSpecificConfigFile()) {
-        const Utils::FileName file = m_settings->specificConfigFile();
+    if (m_settings.useSpecificConfigFile()) {
+        const Utils::FilePath file = m_settings.specificConfigFile();
         if (file.exists())
             return file.toUserOutput();
     }
 
-    if (m_settings->useHomeFile()) {
+    if (m_settings.useHomeFile()) {
         const QDir homeDirectory = QDir::home();
         QString file = homeDirectory.filePath(".astylerc");
         if (QFile::exists(file))
@@ -156,17 +139,17 @@ Command ArtisticStyle::command() const
 
 bool ArtisticStyle::isApplicable(const Core::IDocument *document) const
 {
-    return m_settings->isApplicable(document);
+    return m_settings.isApplicable(document);
 }
 
 Command ArtisticStyle::command(const QString &cfgFile) const
 {
     Command command;
-    command.setExecutable(m_settings->command());
+    command.setExecutable(m_settings.command().toString());
     command.addOption("-q");
     command.addOption("--options=" + cfgFile);
 
-    const int version = m_settings->version();
+    const int version = m_settings.version();
     if (version > ArtisticStyleSettings::Version_2_03) {
         command.setProcessing(Command::PipeProcessing);
         if (version == ArtisticStyleSettings::Version_2_04)

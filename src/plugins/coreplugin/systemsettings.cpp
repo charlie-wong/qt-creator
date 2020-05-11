@@ -26,11 +26,13 @@
 #include "systemsettings.h"
 #include "coreconstants.h"
 #include "editormanager/editormanager_p.h"
+#include "fileutils.h"
 #include "icore.h"
 #include "iversioncontrol.h"
 #include "patchtool.h"
 #include "vcsmanager.h"
 
+#include <app/app_version.h>
 #include <utils/checkablemessagebox.h>
 #include <utils/consoleprocess.h>
 #include <utils/environment.h>
@@ -48,130 +50,153 @@ using namespace Utils;
 namespace Core {
 namespace Internal {
 
-SystemSettings::SystemSettings()
-    : m_page(nullptr), m_dialog(0)
+class SystemSettingsWidget : public IOptionsPageWidget
 {
-    setId(Constants::SETTINGS_ID_SYSTEM);
-    setDisplayName(tr("System"));
-    setCategory(Constants::SETTINGS_CATEGORY_CORE);
-    setDisplayCategory(QCoreApplication::translate("Core", Constants::SETTINGS_TR_CATEGORY_CORE));
-    setCategoryIcon(Utils::Icon(Constants::SETTINGS_CATEGORY_CORE_ICON));
+    Q_DECLARE_TR_FUNCTIONS(Core::Internal::SystemSettingsWidget)
 
-    connect(VcsManager::instance(), &VcsManager::configurationChanged,
-            this, &SystemSettings::updatePath);
-}
+public:
+    SystemSettingsWidget()
+    {
+        m_ui.setupUi(this);
+        m_ui.terminalOpenArgs->setToolTip(
+            tr("Command line arguments used for \"%1\".").arg(FileUtils::msgTerminalHereAction()));
 
-QWidget *SystemSettings::widget()
-{
-    if (!m_widget) {
-        m_page = new Ui::SystemSettings();
-        m_widget = new QWidget;
-        m_page->setupUi(m_widget);
-
-        m_page->reloadBehavior->setCurrentIndex(EditorManager::reloadSetting());
+        m_ui.reloadBehavior->setCurrentIndex(EditorManager::reloadSetting());
         if (HostOsInfo::isAnyUnixHost()) {
-            const QStringList availableTerminals = ConsoleProcess::availableTerminalEmulators();
-            const QString currentTerminal = ConsoleProcess::terminalEmulator(ICore::settings(), false);
-            m_page->terminalComboBox->addItems(availableTerminals);
-            m_page->terminalComboBox->lineEdit()->setText(currentTerminal);
-            m_page->terminalComboBox->lineEdit()->setPlaceholderText(ConsoleProcess::defaultTerminalEmulator());
+            const QVector<TerminalCommand> availableTerminals = ConsoleProcess::availableTerminalEmulators();
+            for (const TerminalCommand &term : availableTerminals)
+                m_ui.terminalComboBox->addItem(term.command, QVariant::fromValue(term));
+            updateTerminalUi(ConsoleProcess::terminalEmulator(ICore::settings()));
+            connect(m_ui.terminalComboBox,
+                    QOverload<int>::of(&QComboBox::currentIndexChanged),
+                    this,
+                    [this](int index) {
+                        updateTerminalUi(
+                            m_ui.terminalComboBox->itemData(index).value<TerminalCommand>());
+                    });
         } else {
-            m_page->terminalLabel->hide();
-            m_page->terminalComboBox->hide();
-            m_page->resetTerminalButton->hide();
+            m_ui.terminalLabel->hide();
+            m_ui.terminalComboBox->hide();
+            m_ui.terminalOpenArgs->hide();
+            m_ui.terminalExecuteArgs->hide();
+            m_ui.resetTerminalButton->hide();
         }
 
         if (HostOsInfo::isAnyUnixHost() && !HostOsInfo::isMacHost()) {
-            m_page->externalFileBrowserEdit->setText(UnixUtils::fileBrowser(ICore::settings()));
+            m_ui.externalFileBrowserEdit->setText(UnixUtils::fileBrowser(ICore::settings()));
         } else {
-            m_page->externalFileBrowserLabel->hide();
-            m_page->externalFileBrowserEdit->hide();
-            m_page->resetFileBrowserButton->hide();
-            m_page->helpExternalFileBrowserButton->hide();
+            m_ui.externalFileBrowserLabel->hide();
+            m_ui.externalFileBrowserEdit->hide();
+            m_ui.resetFileBrowserButton->hide();
+            m_ui.helpExternalFileBrowserButton->hide();
         }
 
         const QString patchToolTip = tr("Command used for reverting diff chunks.");
-        m_page->patchCommandLabel->setToolTip(patchToolTip);
-        m_page->patchChooser->setToolTip(patchToolTip);
-        m_page->patchChooser->setExpectedKind(PathChooser::ExistingCommand);
-        m_page->patchChooser->setHistoryCompleter(QLatin1String("General.PatchCommand.History"));
-        m_page->patchChooser->setPath(PatchTool::patchCommand());
-        m_page->autoSaveCheckBox->setChecked(EditorManagerPrivate::autoSaveEnabled());
-        m_page->autoSaveInterval->setValue(EditorManagerPrivate::autoSaveInterval());
-        m_page->autoSuspendCheckBox->setChecked(EditorManagerPrivate::autoSuspendEnabled());
-        m_page->autoSuspendMinDocumentCount->setValue(EditorManagerPrivate::autoSuspendMinDocumentCount());
-        m_page->warnBeforeOpeningBigFiles->setChecked(
+        m_ui.patchCommandLabel->setToolTip(patchToolTip);
+        m_ui.patchChooser->setToolTip(patchToolTip);
+        m_ui.patchChooser->setExpectedKind(PathChooser::ExistingCommand);
+        m_ui.patchChooser->setHistoryCompleter(QLatin1String("General.PatchCommand.History"));
+        m_ui.patchChooser->setPath(PatchTool::patchCommand());
+        m_ui.autoSaveCheckBox->setChecked(EditorManagerPrivate::autoSaveEnabled());
+        m_ui.autoSaveCheckBox->setToolTip(tr("Automatically creates temporary copies of "
+                                                "modified files. If %1 is restarted after "
+                                                "a crash or power failure, it asks whether to "
+                                                "recover the auto-saved content.")
+                                             .arg(Constants::IDE_DISPLAY_NAME));
+        m_ui.autoSaveInterval->setValue(EditorManagerPrivate::autoSaveInterval());
+        m_ui.autoSuspendCheckBox->setChecked(EditorManagerPrivate::autoSuspendEnabled());
+        m_ui.autoSuspendMinDocumentCount->setValue(EditorManagerPrivate::autoSuspendMinDocumentCount());
+        m_ui.warnBeforeOpeningBigFiles->setChecked(
                     EditorManagerPrivate::warnBeforeOpeningBigFilesEnabled());
-        m_page->bigFilesLimitSpinBox->setValue(EditorManagerPrivate::bigFileSizeLimit());
+        m_ui.bigFilesLimitSpinBox->setValue(EditorManagerPrivate::bigFileSizeLimit());
+        m_ui.maxRecentFilesSpinBox->setMinimum(1);
+        m_ui.maxRecentFilesSpinBox->setMaximum(99);
+        m_ui.maxRecentFilesSpinBox->setValue(EditorManagerPrivate::maxRecentFiles());
 
         if (HostOsInfo::isAnyUnixHost()) {
-            connect(m_page->resetTerminalButton, &QAbstractButton::clicked,
-                    this, &SystemSettings::resetTerminal);
+            connect(m_ui.resetTerminalButton, &QAbstractButton::clicked,
+                    this, &SystemSettingsWidget::resetTerminal);
             if (!HostOsInfo::isMacHost()) {
-                connect(m_page->resetFileBrowserButton, &QAbstractButton::clicked,
-                        this, &SystemSettings::resetFileBrowser);
-                connect(m_page->helpExternalFileBrowserButton, &QAbstractButton::clicked,
-                        this, &SystemSettings::showHelpForFileBrowser);
+                connect(m_ui.resetFileBrowserButton, &QAbstractButton::clicked,
+                        this, &SystemSettingsWidget::resetFileBrowser);
+                connect(m_ui.helpExternalFileBrowserButton, &QAbstractButton::clicked,
+                        this, &SystemSettingsWidget::showHelpForFileBrowser);
             }
         }
 
         if (HostOsInfo::isMacHost()) {
             Qt::CaseSensitivity defaultSensitivity
-                    = OsSpecificAspects(HostOsInfo::hostOs()).fileNameCaseSensitivity();
+                    = OsSpecificAspects::fileNameCaseSensitivity(HostOsInfo::hostOs());
             if (defaultSensitivity == Qt::CaseSensitive) {
-                m_page->fileSystemCaseSensitivityChooser->addItem(tr("Case Sensitive (Default)"),
+                m_ui.fileSystemCaseSensitivityChooser->addItem(tr("Case Sensitive (Default)"),
                                                                   Qt::CaseSensitive);
             } else {
-                m_page->fileSystemCaseSensitivityChooser->addItem(tr("Case Sensitive"),
+                m_ui.fileSystemCaseSensitivityChooser->addItem(tr("Case Sensitive"),
                                                                   Qt::CaseSensitive);
             }
             if (defaultSensitivity == Qt::CaseInsensitive) {
-                m_page->fileSystemCaseSensitivityChooser->addItem(tr("Case Insensitive (Default)"),
+                m_ui.fileSystemCaseSensitivityChooser->addItem(tr("Case Insensitive (Default)"),
                                                                   Qt::CaseInsensitive);
             } else {
-                m_page->fileSystemCaseSensitivityChooser->addItem(tr("Case Insensitive"),
+                m_ui.fileSystemCaseSensitivityChooser->addItem(tr("Case Insensitive"),
                                                                   Qt::CaseInsensitive);
             }
             if (HostOsInfo::fileNameCaseSensitivity() == Qt::CaseSensitive)
-                m_page->fileSystemCaseSensitivityChooser->setCurrentIndex(0);
+                m_ui.fileSystemCaseSensitivityChooser->setCurrentIndex(0);
             else
-                m_page->fileSystemCaseSensitivityChooser->setCurrentIndex(1);
+                m_ui.fileSystemCaseSensitivityChooser->setCurrentIndex(1);
         } else {
-            m_page->fileSystemCaseSensitivityWidget->hide();
+            m_ui.fileSystemCaseSensitivityWidget->hide();
         }
 
         updatePath();
-    }
-    return m_widget;
-}
 
-void SystemSettings::apply()
+        connect(VcsManager::instance(), &VcsManager::configurationChanged,
+                this, &SystemSettingsWidget::updatePath);
+    }
+
+private:
+    void apply() final;
+
+    void showHelpForFileBrowser();
+    void resetFileBrowser();
+    void resetTerminal();
+    void updateTerminalUi(const Utils::TerminalCommand &term);
+    void updatePath();
+
+    void variableHelpDialogCreator(const QString &helpText);
+    Ui::SystemSettings m_ui;
+    QPointer<QMessageBox> m_dialog;
+};
+
+void SystemSettingsWidget::apply()
 {
-    if (!m_page) // wasn't shown, can't be changed
-        return;
-    EditorManager::setReloadSetting(IDocument::ReloadSetting(m_page->reloadBehavior->currentIndex()));
+    EditorManager::setReloadSetting(IDocument::ReloadSetting(m_ui.reloadBehavior->currentIndex()));
     if (HostOsInfo::isAnyUnixHost()) {
         ConsoleProcess::setTerminalEmulator(ICore::settings(),
-                                            m_page->terminalComboBox->lineEdit()->text());
+                                            {m_ui.terminalComboBox->lineEdit()->text(),
+                                             m_ui.terminalOpenArgs->text(),
+                                             m_ui.terminalExecuteArgs->text()});
         if (!HostOsInfo::isMacHost()) {
             UnixUtils::setFileBrowser(ICore::settings(),
-                                      m_page->externalFileBrowserEdit->text());
+                                      m_ui.externalFileBrowserEdit->text());
         }
     }
-    PatchTool::setPatchCommand(m_page->patchChooser->path());
-    EditorManagerPrivate::setAutoSaveEnabled(m_page->autoSaveCheckBox->isChecked());
-    EditorManagerPrivate::setAutoSaveInterval(m_page->autoSaveInterval->value());
-    EditorManagerPrivate::setAutoSuspendEnabled(m_page->autoSuspendCheckBox->isChecked());
-    EditorManagerPrivate::setAutoSuspendMinDocumentCount(m_page->autoSuspendMinDocumentCount->value());
+    PatchTool::setPatchCommand(m_ui.patchChooser->filePath().toString());
+    EditorManagerPrivate::setAutoSaveEnabled(m_ui.autoSaveCheckBox->isChecked());
+    EditorManagerPrivate::setAutoSaveInterval(m_ui.autoSaveInterval->value());
+    EditorManagerPrivate::setAutoSuspendEnabled(m_ui.autoSuspendCheckBox->isChecked());
+    EditorManagerPrivate::setAutoSuspendMinDocumentCount(m_ui.autoSuspendMinDocumentCount->value());
     EditorManagerPrivate::setWarnBeforeOpeningBigFilesEnabled(
-                m_page->warnBeforeOpeningBigFiles->isChecked());
-    EditorManagerPrivate::setBigFileSizeLimit(m_page->bigFilesLimitSpinBox->value());
+                m_ui.warnBeforeOpeningBigFiles->isChecked());
+    EditorManagerPrivate::setBigFileSizeLimit(m_ui.bigFilesLimitSpinBox->value());
+    EditorManagerPrivate::setMaxRecentFiles(m_ui.maxRecentFilesSpinBox->value());
 
     if (HostOsInfo::isMacHost()) {
         Qt::CaseSensitivity defaultSensitivity
-                = OsSpecificAspects(HostOsInfo::hostOs()).fileNameCaseSensitivity();
+                = OsSpecificAspects::fileNameCaseSensitivity(HostOsInfo::hostOs());
         Qt::CaseSensitivity selectedSensitivity = Qt::CaseSensitivity(
-                m_page->fileSystemCaseSensitivityChooser->currentData().toInt());
+                m_ui.fileSystemCaseSensitivityChooser->currentData().toInt());
         if (defaultSensitivity == selectedSensitivity)
             HostOsInfo::unsetOverrideFileNameCaseSensitivity();
         else
@@ -179,37 +204,34 @@ void SystemSettings::apply()
     }
 }
 
-void SystemSettings::finish()
-{
-    delete m_widget;
-    delete m_page;
-    m_page = 0;
-}
-
-void SystemSettings::resetTerminal()
+void SystemSettingsWidget::resetTerminal()
 {
     if (HostOsInfo::isAnyUnixHost())
-        m_page->terminalComboBox->lineEdit()->clear();
+        m_ui.terminalComboBox->setCurrentIndex(0);
 }
 
-void SystemSettings::resetFileBrowser()
+void SystemSettingsWidget::updateTerminalUi(const TerminalCommand &term)
+{
+    m_ui.terminalComboBox->lineEdit()->setText(term.command);
+    m_ui.terminalOpenArgs->setText(term.openArgs);
+    m_ui.terminalExecuteArgs->setText(term.executeArgs);
+}
+
+void SystemSettingsWidget::resetFileBrowser()
 {
     if (HostOsInfo::isAnyUnixHost() && !HostOsInfo::isMacHost())
-        m_page->externalFileBrowserEdit->setText(UnixUtils::defaultFileBrowser());
+        m_ui.externalFileBrowserEdit->setText(UnixUtils::defaultFileBrowser());
 }
 
-void SystemSettings::updatePath()
+void SystemSettingsWidget::updatePath()
 {
-    if (!m_page)
-       return;
-
     Environment env = Environment::systemEnvironment();
     QStringList toAdd = VcsManager::additionalToolsPath();
     env.appendOrSetPath(toAdd.join(HostOsInfo::pathListSeparator()));
-    m_page->patchChooser->setEnvironment(env);
+    m_ui.patchChooser->setEnvironment(env);
 }
 
-void SystemSettings::variableHelpDialogCreator(const QString &helpText)
+void SystemSettingsWidget::variableHelpDialogCreator(const QString &helpText)
 {
     if (m_dialog) {
         if (m_dialog->text() != helpText)
@@ -223,17 +245,24 @@ void SystemSettings::variableHelpDialogCreator(const QString &helpText)
                                   tr("Variables"),
                                   helpText,
                                   QMessageBox::Close,
-                                  m_widget);
+                                  this);
     mb->setWindowModality(Qt::NonModal);
     m_dialog = mb;
     mb->show();
 }
 
-
-void SystemSettings::showHelpForFileBrowser()
+void SystemSettingsWidget::showHelpForFileBrowser()
 {
     if (HostOsInfo::isAnyUnixHost() && !HostOsInfo::isMacHost())
         variableHelpDialogCreator(UnixUtils::fileBrowserHelpText());
+}
+
+SystemSettings::SystemSettings()
+{
+    setId(Constants::SETTINGS_ID_SYSTEM);
+    setDisplayName(SystemSettingsWidget::tr("System"));
+    setCategory(Constants::SETTINGS_CATEGORY_CORE);
+    setWidgetCreator([] { return new SystemSettingsWidget; });
 }
 
 } // namespace Internal

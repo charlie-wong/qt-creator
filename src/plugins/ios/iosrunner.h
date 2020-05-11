@@ -47,16 +47,16 @@ class IosRunner : public ProjectExplorer::RunWorker
 
 public:
     IosRunner(ProjectExplorer::RunControl *runControl);
-    ~IosRunner();
+    ~IosRunner() override;
 
     void setCppDebugging(bool cppDebug);
     void setQmlDebugging(QmlDebug::QmlDebugServicesPreset qmlDebugServices);
 
     QString bundlePath();
-    QStringList extraArgs();
     QString deviceId();
     IosToolHandler::RunKind runType();
     bool cppDebug() const;
+    bool qmlDebug() const;
     QmlDebug::QmlDebugServicesPreset qmlDebugServices() const;
 
     void start() override;
@@ -64,6 +64,7 @@ public:
 
     virtual void appOutput(const QString &/*output*/) {}
     virtual void errorMsg(const QString &/*msg*/) {}
+    virtual void onStart() { reportStarted(); }
 
     Utils::Port qmlServerPort() const;
     Utils::Port gdbServerPort() const;
@@ -71,8 +72,6 @@ public:
     bool isAppRunning() const;
 
 private:
-    void handleDidStartApp(Ios::IosToolHandler *handler, const QString &bundlePath,
-                           const QString &deviceId, Ios::IosToolHandler::OpStatus status);
     void handleGotServerPorts(Ios::IosToolHandler *handler, const QString &bundlePath,
                               const QString &deviceId, Utils::Port gdbPort, Utils::Port qmlPort);
     void handleGotInferiorPid(Ios::IosToolHandler *handler, const QString &bundlePath,
@@ -84,7 +83,6 @@ private:
 
     IosToolHandler *m_toolHandler = nullptr;
     QString m_bundleDir;
-    QStringList m_arguments;
     ProjectExplorer::IDevice::ConstPtr m_device;
     IosDeviceType m_deviceType;
     bool m_cppDebug = false;
@@ -112,22 +110,17 @@ private:
 };
 
 
-class IosAnalyzeSupport : public IosRunner
+class IosQmlProfilerSupport : public ProjectExplorer::RunWorker
 {
     Q_OBJECT
 
 public:
-    IosAnalyzeSupport(ProjectExplorer::RunControl *runControl);
+    IosQmlProfilerSupport(ProjectExplorer::RunControl *runControl);
 
 private:
     void start() override;
-
-    void qmlServerReady();
-    void appOutput(const QString &output) override;
-    void errorMsg(const QString &output) override;
-
-    QmlDebug::QmlOutputParser m_outputParser;
-    IosRunner *m_runner;
+    IosRunner *m_runner = nullptr;
+    ProjectExplorer::RunWorker *m_profiler = nullptr;
 };
 
 
@@ -140,7 +133,6 @@ public:
 
 private:
     void start() override;
-    void onFinished() override;
 
     const QString m_dumperLib;
     IosRunner *m_runner;

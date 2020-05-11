@@ -27,41 +27,26 @@
 
 #include <debugger/debuggerruncontrol.h>
 
-namespace ProjectExplorer { class ApplicationLauncher; }
+namespace ProjectExplorer {
+class RunControl;
+}
 
 namespace BareMetal {
 namespace Internal {
 
-class BareMetalDebugSupport : public Debugger::DebuggerRunTool
+class IDebugServerProvider;
+
+// BareMetalDebugSupport
+
+class BareMetalDebugSupport final : public Debugger::DebuggerRunTool
 {
     Q_OBJECT
 
 public:
-    BareMetalDebugSupport(ProjectExplorer::RunControl *runControl,
-                          const Debugger::DebuggerStartParameters &sp);
-    ~BareMetalDebugSupport();
+    explicit BareMetalDebugSupport(ProjectExplorer::RunControl *runControl);
 
 private:
-    enum State { Inactive, StartingRunner, Running };
-
-    void remoteSetupRequested();
-    void debuggingFinished();
-    void remoteOutputMessage(const QByteArray &output);
-    void remoteErrorOutputMessage(const QByteArray &output);
-    void remoteProcessStarted();
-    void appRunnerFinished(bool success);
-    void progressReport(const QString &progressOutput);
-    void appRunnerError(const QString &error);
-
-    void adapterSetupDone();
-    void adapterSetupFailed(const QString &error);
-
-    void startExecution();
-    void setFinished();
-    void reset();
-
-    ProjectExplorer::ApplicationLauncher *m_appLauncher;
-    State m_state = Inactive;
+    void start() final;
 };
 
 } // namespace Internal

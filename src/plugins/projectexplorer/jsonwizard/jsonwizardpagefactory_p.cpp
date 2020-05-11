@@ -57,11 +57,12 @@ FieldPageFactory::FieldPageFactory()
     JsonFieldPage::registerFieldFactory(QLatin1String("PathChooser"), []() { return new PathChooserField; });
     JsonFieldPage::registerFieldFactory(QLatin1String("CheckBox"), []() { return new CheckBoxField; });
     JsonFieldPage::registerFieldFactory(QLatin1String("ComboBox"), []() { return new ComboBoxField; });
+    JsonFieldPage::registerFieldFactory(QLatin1String("IconList"), []() { return new IconListField; });
 }
 
 Utils::WizardPage *FieldPageFactory::create(JsonWizard *wizard, Core::Id typeId, const QVariant &data)
 {
-    Q_UNUSED(wizard);
+    Q_UNUSED(wizard)
 
     QTC_ASSERT(canCreate(typeId), return nullptr);
 
@@ -82,7 +83,7 @@ bool FieldPageFactory::validateData(Core::Id typeId, const QVariant &data, QStri
     QList<QVariant> list = JsonWizardFactory::objectOrList(data, errorMessage);
     if (list.isEmpty()) {
         *errorMessage = QCoreApplication::translate("ProjectExplorer::JsonWizard",
-                                                    "When parsing fields of page '%1': %2")
+                                                    "When parsing fields of page \"%1\": %2")
                 .arg(typeId.toString()).arg(*errorMessage);
         return false;
     }
@@ -108,8 +109,8 @@ FilePageFactory::FilePageFactory()
 
 Utils::WizardPage *FilePageFactory::create(JsonWizard *wizard, Core::Id typeId, const QVariant &data)
 {
-    Q_UNUSED(wizard);
-    Q_UNUSED(data);
+    Q_UNUSED(wizard)
+    Q_UNUSED(data)
     QTC_ASSERT(canCreate(typeId), return nullptr);
 
     return new JsonFilePage;
@@ -142,7 +143,7 @@ KitsPageFactory::KitsPageFactory()
 
 Utils::WizardPage *KitsPageFactory::create(JsonWizard *wizard, Core::Id typeId, const QVariant &data)
 {
-    Q_UNUSED(wizard);
+    Q_UNUSED(wizard)
     QTC_ASSERT(canCreate(typeId), return nullptr);
 
     auto page = new JsonKitsPage;
@@ -202,8 +203,8 @@ ProjectPageFactory::ProjectPageFactory()
 
 Utils::WizardPage *ProjectPageFactory::create(JsonWizard *wizard, Core::Id typeId, const QVariant &data)
 {
-    Q_UNUSED(wizard);
-    Q_UNUSED(data);
+    Q_UNUSED(wizard)
+    Q_UNUSED(data)
     QTC_ASSERT(canCreate(typeId), return nullptr);
 
     auto page = new JsonProjectPage;
@@ -225,7 +226,7 @@ Utils::WizardPage *ProjectPageFactory::create(JsonWizard *wizard, Core::Id typeI
 
 bool ProjectPageFactory::validateData(Core::Id typeId, const QVariant &data, QString *errorMessage)
 {
-    Q_UNUSED(errorMessage);
+    Q_UNUSED(errorMessage)
 
     QTC_ASSERT(canCreate(typeId), return false);
     if (!data.isNull() && data.type() != QVariant::Map) {
@@ -262,8 +263,8 @@ SummaryPageFactory::SummaryPageFactory()
 
 Utils::WizardPage *SummaryPageFactory::create(JsonWizard *wizard, Core::Id typeId, const QVariant &data)
 {
-    Q_UNUSED(wizard);
-    Q_UNUSED(data);
+    Q_UNUSED(wizard)
+    Q_UNUSED(data)
     QTC_ASSERT(canCreate(typeId), return nullptr);
 
     auto page = new JsonSummaryPage;

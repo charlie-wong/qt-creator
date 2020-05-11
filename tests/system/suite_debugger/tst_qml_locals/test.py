@@ -40,7 +40,7 @@ def main():
         return
     qmlProjFile = os.path.join(qmlProjDir, projName)
     # start Creator by passing a .qmlproject file
-    startApplication('qtcreator' + SettingsPath + ' "%s"' % qmlProjFile)
+    startQC(['"%s"' % qmlProjFile])
     if not startedWithoutPluginError():
         return
     waitFor('object.exists(":Qt Creator_Utils::NavigationTreeView")', 10000)
@@ -56,18 +56,10 @@ def main():
         earlyExit("Something went wrong opening Qml project - probably missing Qt5.")
         return
     switchViewTo(ViewConstants.PROJECTS)
-    switchToBuildOrRunSettingsFor(1, 0, ProjectSettings.RUN)
+    switchToBuildOrRunSettingsFor(Targets.getDefaultKit(), ProjectSettings.RUN)
     ensureChecked("{container=':Qt Creator.scrollArea_QScrollArea' text='Enable QML' "
                   "type='QCheckBox' unnamed='1' visible='1'}")
     switchViewTo(ViewConstants.EDIT)
-    if platform.system() in ('Microsoft', 'Windows'):
-        qmake = getQtInformationForQmlProject()[3]
-        if qmake == None:
-            earlyExit("Could not figure out which qmake is used.")
-            return
-        qmlScenePath = os.path.abspath(os.path.dirname(qmake))
-        qmlScene = "qmlscene.exe"
-        allowAppThroughWinFW(qmlScenePath, qmlScene, None)
     clickButton(fancyDebugButton)
     locAndExprTV = waitForObject(":Locals and Expressions_Debugger::Internal::WatchTreeView")
     # Locals and Expressions populates treeview only on demand - so the tree must be expanded
@@ -79,6 +71,14 @@ def main():
         earlyExit("Could not find expected Inspector tree inside Locals and Expressions.")
         return
     # reduce items to outer Rectangle object
+    items = items.getChild("QQuickView")
+    if items == None:
+        earlyExit("Could not find expected QQuickView tree inside Locals and Expressions.")
+        return
+    items = items.getChild("QQuickRootItem")
+    if items == None:
+        earlyExit("Could not find expected QQuickRootItem tree inside Locals and Expressions.")
+        return
     items = items.getChild("Rectangle")
     if items == None:
         earlyExit("Could not find expected Rectangle tree inside Locals and Expressions.")
@@ -96,27 +96,31 @@ def main():
             subItem = items
         checkForExpectedValues(subItem, current[2], current[3])
     clickButton(waitForObject(':Debugger Toolbar.Exit Debugger_QToolButton', 5000))
-    if platform.system() in ('Microsoft', 'Windows'):
-        deleteAppFromWinFW(qmlScenePath, qmlScene)
     invokeMenuItem("File", "Exit")
 
 def __unfoldTree__():
-    rootIndex = getQModelIndexStr("text='Rectangle'",
+    # TODO inspect the qmlengine as well?
+    rootIndex = getQModelIndexStr("text='QQuickView'",
                                   ':Locals and Expressions_Debugger::Internal::WatchTreeView')
-    unfoldQModelIndexIncludingProperties(rootIndex)
+    unfoldQModelIndex(rootIndex, False)
+    quickRootItem = getQModelIndexStr("text='QQuickRootItem'", rootIndex)
+    unfoldQModelIndex(quickRootItem, False)
+    mainRect = getQModelIndexStr("text='Rectangle'", quickRootItem)
+    unfoldQModelIndex(mainRect)
     subItems = ["text='Rectangle'", "text='Rectangle' occurrence='2'", "text='Text'"]
     for item in subItems:
-        unfoldQModelIndexIncludingProperties(getQModelIndexStr(item, rootIndex))
+        unfoldQModelIndex(getQModelIndexStr(item, mainRect))
 
-def unfoldQModelIndexIncludingProperties(indexStr):
+def unfoldQModelIndex(indexStr, includingProperties=True):
     tv = waitForObject(':Locals and Expressions_Debugger::Internal::WatchTreeView')
     # HACK to avoid failing clicks
     tv.scrollToBottom()
     doubleClick(waitForObject(indexStr))
-    propIndex = getQModelIndexStr("text='Properties'", indexStr)
-    # HACK to avoid failing clicks
-    tv.scrollToBottom()
-    doubleClick(waitForObject(propIndex))
+    if includingProperties:
+        propIndex = getQModelIndexStr("text='Properties'", indexStr)
+        # HACK to avoid failing clicks
+        tv.scrollToBottom()
+        doubleClick(waitForObject(propIndex))
 
 def fetchItems(index, valIndex, treeView):
     tree = Tree()
@@ -127,7 +131,8 @@ def fetchItems(index, valIndex, treeView):
             tree.setName(name)
             tree.setValue(value)
     for row in range(model.rowCount(index)):
-         tree.addChild(fetchItems(model.index(row, 0, index), model.index(row, 1, index), treeView))
+        tree.addChild(fetchItems(model.index(row, 0, index),
+                                 model.index(row, 2, index), treeView))
     return tree
 
 def checkForEmptyRows(items, isRootCheck=True):

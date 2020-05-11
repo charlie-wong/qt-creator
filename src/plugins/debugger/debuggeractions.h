@@ -25,7 +25,7 @@
 
 #pragma once
 
-#include <QObject>
+#include <QCoreApplication>
 #include <QHash>
 #include <QMap>
 #include <QRegExp>
@@ -36,8 +36,8 @@ namespace Utils { class SavedAction; }
 namespace Debugger {
 namespace Internal {
 
-typedef QMap<QString, QString> SourcePathMap;
-typedef QVector<QPair<QRegExp, QString> > SourcePathRegExpMap;
+using SourcePathMap = QMap<QString, QString>;
+using SourcePathRegExpMap = QVector<QPair<QRegExp, QString> >;
 
 // Global debugger options that are not stored as saved action.
 class GlobalDebuggerOptions
@@ -50,9 +50,9 @@ public:
     SourcePathRegExpMap sourcePathRegExpMap;
 };
 
-class DebuggerSettings : public QObject
+class DebuggerSettings
 {
-    Q_OBJECT // For tr().
+    Q_DECLARE_TR_FUNCTIONS(Debugger::Internal::DebuggerSettings)
 
 public:
     explicit DebuggerSettings();
@@ -61,12 +61,15 @@ public:
     void insertItem(int code, Utils::SavedAction *item);
     Utils::SavedAction *item(int code) const;
 
-    QString dump() const;
+    static QString dump();
 
     void readSettings();
     void writeSettings() const;
 
 private:
+    DebuggerSettings(const DebuggerSettings &) = delete;
+    DebuggerSettings &operator=(const DebuggerSettings &) = delete;
+
     QHash<int, Utils::SavedAction *> m_items;
 };
 
@@ -82,7 +85,6 @@ enum DebuggerActionCode
     AutoQuit,
     LockView,
     LogTimeStamps,
-    OperateByInstruction,
     CloseSourceBuffersOnExit,
     CloseMemoryBuffersOnExit,
     SwitchModeOnExit,
@@ -99,8 +101,6 @@ enum DebuggerActionCode
     UseToolTipsInLocalsView,
     UseToolTipsInBreakpointsView,
     UseToolTipsInStackView,
-    UseAddressInBreakpointsView,
-    UseAddressInStackView,
 
     RegisterForPostMortem,
     AlwaysAdjustColumnWidths,
@@ -117,6 +117,8 @@ enum DebuggerActionCode
     UseCdbConsole,
     CdbBreakPointCorrection,
     CdbUsePythonDumper,
+    FirstChanceExceptionTaskEntry,
+    SecondChanceExceptionTaskEntry,
     IgnoreFirstChanceAccessViolation,
 
     // Gdb
@@ -131,7 +133,6 @@ enum DebuggerActionCode
     WarnOnReleaseBuilds,
     MultiInferior,
     IntelFlavor,
-    IdentifyDebugInfoPackages,
 
     // Stack
     MaximalStackDepth,

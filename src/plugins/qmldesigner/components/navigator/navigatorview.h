@@ -54,8 +54,8 @@ class NavigatorView : public AbstractView
     Q_OBJECT
 
 public:
-    NavigatorView(QObject* parent = 0);
-    ~NavigatorView();
+    NavigatorView(QObject* parent = nullptr);
+    ~NavigatorView() override;
 
     bool hasWidget() const override;
     WidgetInfo widgetInfo() override;
@@ -84,8 +84,13 @@ public:
 
     void bindingPropertiesChanged(const QList<BindingProperty> &propertyList, PropertyChangeFlags) override;
 
+    void customNotification(const AbstractView *view, const QString &identifier, const QList<ModelNode> &nodeList, const QList<QVariant> &data) override;
+
     void handleChangedExport(const ModelNode &modelNode, bool exported);
     bool isNodeInvisible(const ModelNode &modelNode) const;
+
+    void disableWidget() override;
+    void enableWidget() override;
 
 private:
     ModelNode modelNodeForIndex(const QModelIndex &modelIndex) const;
@@ -99,12 +104,15 @@ private:
     void rightButtonClicked();
     void upButtonClicked();
     void downButtonClicked();
+    void filterToggled(bool);
 
 protected: //functions
     QTreeView *treeWidget() const;
     NavigatorTreeModel *treeModel();
     bool blockSelectionChangedSignal(bool block);
-    void expandRecursively(const QModelIndex &index);
+    void expandAncestors(const QModelIndex &index);
+    void reparentAndCatch(NodeAbstractProperty property, const ModelNode &modelNode);
+    void setupWidget();
 
 private:
     bool m_blockSelectionChangedSignal;

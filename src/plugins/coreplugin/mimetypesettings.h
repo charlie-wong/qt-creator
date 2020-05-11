@@ -37,12 +37,12 @@ class MimeTypeSettings : public IOptionsPage
     Q_OBJECT
 
 public:
-    MimeTypeSettings(QObject *parent = 0);
-    virtual ~MimeTypeSettings();
+    MimeTypeSettings();
+    ~MimeTypeSettings() override;
 
-    virtual QWidget *widget();
-    virtual void apply();
-    virtual void finish();
+    QWidget *widget() override;
+    void apply() override;
+    void finish() override;
 
     static void restoreSettings();
 private:

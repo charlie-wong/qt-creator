@@ -25,8 +25,6 @@
 
 #include "openpagesswitcher.h"
 
-#include "centralwidget.h"
-#include "openpagesmodel.h"
 #include "openpageswidget.h"
 
 #include <utils/hostosinfo.h>
@@ -41,8 +39,8 @@ using namespace Help::Internal;
 const int gWidth = 300;
 const int gHeight = 200;
 
-OpenPagesSwitcher::OpenPagesSwitcher(OpenPagesModel *model)
-    : QFrame(0, Qt::Popup)
+OpenPagesSwitcher::OpenPagesSwitcher(QAbstractItemModel *model)
+    : QFrame(nullptr, Qt::Popup)
     , m_openPagesModel(model)
 {
     resize(gWidth, gHeight);
@@ -58,8 +56,8 @@ OpenPagesSwitcher::OpenPagesSwitcher(OpenPagesModel *model)
     m_openPagesWidget->allowContextMenu(false);
     m_openPagesWidget->installEventFilter(this);
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setMargin(0);
+    auto layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_openPagesWidget);
 
     connect(m_openPagesWidget, &OpenPagesWidget::closePage,
@@ -68,9 +66,7 @@ OpenPagesSwitcher::OpenPagesSwitcher(OpenPagesModel *model)
             this, &OpenPagesSwitcher::setCurrentPage);
 }
 
-OpenPagesSwitcher::~OpenPagesSwitcher()
-{
-}
+OpenPagesSwitcher::~OpenPagesSwitcher() = default;
 
 void OpenPagesSwitcher::gotoNextPage()
 {
@@ -88,9 +84,9 @@ void OpenPagesSwitcher::selectAndHide()
     emit setCurrentPage(m_openPagesWidget->currentIndex());
 }
 
-void OpenPagesSwitcher::selectCurrentPage()
+void OpenPagesSwitcher::selectCurrentPage(int index)
 {
-    m_openPagesWidget->selectCurrentPage();
+    m_openPagesWidget->selectCurrentPage(index);
 }
 
 void OpenPagesSwitcher::setVisible(bool visible)
@@ -110,7 +106,7 @@ bool OpenPagesSwitcher::eventFilter(QObject *object, QEvent *event)
 {
     if (object == m_openPagesWidget) {
         if (event->type() == QEvent::KeyPress) {
-            QKeyEvent *ke = static_cast<QKeyEvent*>(event);
+            auto ke = static_cast<const QKeyEvent*>(event);
             if (ke->key() == Qt::Key_Escape) {
                 setVisible(false);
                 return true;
@@ -129,7 +125,7 @@ bool OpenPagesSwitcher::eventFilter(QObject *object, QEvent *event)
             else if (key == Qt::Key_Tab && (ke->modifiers() == modifier))
                 gotoPreviousPage();
         } else if (event->type() == QEvent::KeyRelease) {
-            QKeyEvent *ke = static_cast<QKeyEvent*>(event);
+            auto ke = static_cast<const QKeyEvent*>(event);
             if (ke->modifiers() == 0
                /*HACK this is to overcome some event inconsistencies between platforms*/
                || (ke->modifiers() == Qt::AltModifier

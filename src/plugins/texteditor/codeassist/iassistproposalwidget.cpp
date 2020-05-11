@@ -49,11 +49,20 @@ using namespace TextEditor;
 */
 
 IAssistProposalWidget::IAssistProposalWidget()
-    : QFrame(0, Qt::Popup)
+    : QFrame(nullptr, Qt::Popup)
 {}
 
-IAssistProposalWidget::~IAssistProposalWidget()
-{}
+IAssistProposalWidget::~IAssistProposalWidget() = default;
+
+int IAssistProposalWidget::basePosition() const
+{
+    return m_basePosition;
+}
+
+void IAssistProposalWidget::setBasePosition(int basePosition)
+{
+    m_basePosition = basePosition;
+}
 
 /*!
     \fn void TextEditor::IAssistProposalWidget::setAssistant(CodeAssistant *assistant)

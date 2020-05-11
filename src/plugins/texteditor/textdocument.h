@@ -26,15 +26,21 @@
 #pragma once
 
 #include "texteditor_global.h"
+#include "formatter.h"
+#include "indenter.h"
 
 #include <coreplugin/id.h>
 #include <coreplugin/textdocument.h>
+#include <utils/link.h>
 
 #include <QList>
 #include <QMap>
 #include <QSharedPointer>
 
+#include <functional>
+
 QT_BEGIN_NAMESPACE
+class QAction;
 class QTextCursor;
 class QTextDocument;
 QT_END_NAMESPACE
@@ -44,8 +50,7 @@ namespace TextEditor {
 class CompletionAssistProvider;
 class ExtraEncodingSettings;
 class FontSettings;
-class Indenter;
-class QuickFixAssistProvider;
+class IAssistProvider;
 class StorageSettings;
 class SyntaxHighlighter;
 class TabSettings;
@@ -53,7 +58,7 @@ class TextDocumentPrivate;
 class TextMark;
 class TypingSettings;
 
-typedef QList<TextMark *> TextMarks;
+using TextMarks = QList<TextMark *>;
 
 class TEXTEDITOR_EXPORT TextDocument : public Core::BaseTextDocument
 {
@@ -66,6 +71,7 @@ public:
     static QMap<QString, QString> openedTextDocumentContents();
     static QMap<QString, QTextCodec *> openedTextDocumentEncodings();
     static TextDocument *currentTextDocument();
+    static TextDocument *textDocumentForFilePath(const Utils::FilePath &filePath);
 
     virtual QString plainText() const;
     virtual QString textAt(int pos, int length) const;
@@ -77,18 +83,23 @@ public:
 
     const TypingSettings &typingSettings() const;
     const StorageSettings &storageSettings() const;
-    const TabSettings &tabSettings() const;
+    virtual TabSettings tabSettings() const;
     const ExtraEncodingSettings &extraEncodingSettings() const;
     const FontSettings &fontSettings() const;
 
     void setIndenter(Indenter *indenter);
     Indenter *indenter() const;
-    void autoIndent(const QTextCursor &cursor, QChar typedChar = QChar::Null);
-    void autoReindent(const QTextCursor &cursor);
-    QTextCursor indent(const QTextCursor &cursor, bool blockSelection = false, int column = 0,
-                       int *offset = 0);
+    void autoIndent(const QTextCursor &cursor,
+                    QChar typedChar = QChar::Null,
+                    int currentCursorPosition = -1);
+    void autoReindent(const QTextCursor &cursor, int currentCursorPosition = -1);
+    void autoFormatOrIndent(const QTextCursor &cursor);
+    QTextCursor indent(const QTextCursor &cursor, bool blockSelection, int column, int *offset);
     QTextCursor unindent(const QTextCursor &cursor, bool blockSelection = false, int column = 0,
-                         int *offset = 0);
+                         int *offset = nullptr);
+
+    void setFormatter(Formatter *indenter); // transfers ownership
+    void autoFormat(const QTextCursor &cursor);
 
     TextMarks marks() const;
     bool addMark(TextMark *mark);
@@ -108,7 +119,7 @@ public:
     bool isSaveAsAllowed() const override;
     void checkPermissions() override;
     bool reload(QString *errorString, ReloadFlag flag, ChangeType type) override;
-    void setFilePath(const Utils::FileName &newName) override;
+    void setFilePath(const Utils::FilePath &newName) override;
 
     QString fallbackSaveAsPath() const override;
     QString fallbackSaveAsFileName() const override;
@@ -133,10 +144,16 @@ public:
 
     void setCompletionAssistProvider(CompletionAssistProvider *provider);
     virtual CompletionAssistProvider *completionAssistProvider() const;
-    virtual QuickFixAssistProvider *quickFixAssistProvider() const;
+    void setFunctionHintAssistProvider(CompletionAssistProvider *provider);
+    virtual CompletionAssistProvider *functionHintAssistProvider() const;
+    void setQuickFixAssistProvider(IAssistProvider *provider) const;
+    virtual IAssistProvider *quickFixAssistProvider() const;
 
     void setTabSettings(const TextEditor::TabSettings &tabSettings);
     void setFontSettings(const TextEditor::FontSettings &fontSettings);
+
+    static QAction *createDiffAgainstCurrentFileAction(QObject *parent,
+        const std::function<Utils::FilePath()> &filePath);
 
 signals:
     void aboutToOpen(const QString &fileName, const QString &realFileName);
@@ -144,6 +161,7 @@ signals:
     void contentsChangedWithPosition(int position, int charsRemoved, int charsAdded);
     void tabSettingsChanged();
     void fontSettingsChanged();
+    void markRemoved(TextMark *mark);
 
 protected:
     virtual void applyFontSettings();
@@ -151,13 +169,14 @@ protected:
 private:
     OpenResult openImpl(QString *errorString, const QString &fileName, const QString &realFileName,
                         bool reload);
-    void cleanWhitespace(QTextCursor &cursor, bool cleanIndentation, bool inEntireDocument);
+    void cleanWhitespace(QTextCursor &cursor, const StorageSettings &storageSettings);
     void ensureFinalNewLine(QTextCursor &cursor);
     void modificationChanged(bool modified);
+    void updateLayout() const;
 
     TextDocumentPrivate *d;
 };
 
-typedef QSharedPointer<TextDocument> TextDocumentPtr;
+using TextDocumentPtr = QSharedPointer<TextDocument>;
 
 } // namespace TextEditor

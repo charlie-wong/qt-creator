@@ -35,20 +35,21 @@
 
 #include <utils/qtcassert.h>
 
+using namespace Utils;
 using namespace Valgrind::Internal;
 using namespace Valgrind::Callgrind;
 
 namespace Constants { const char CALLGRIND_TEXT_MARK_CATEGORY[] = "Callgrind.Textmark"; }
 
 CallgrindTextMark::CallgrindTextMark(const QPersistentModelIndex &index,
-                                     const QString &fileName, int lineNumber)
+                                     const FilePath &fileName, int lineNumber)
     : TextEditor::TextMark(fileName, lineNumber, Constants::CALLGRIND_TEXT_MARK_CATEGORY, 4.0)
     , m_modelIndex(index)
 {
     setPriority(TextEditor::TextMark::HighPriority);
 }
 
-void CallgrindTextMark::paint(QPainter *painter, const QRect &paintRect) const
+void CallgrindTextMark::paintIcon(QPainter *painter, const QRect &paintRect) const
 {
     if (!m_modelIndex.isValid())
         return;
@@ -91,7 +92,7 @@ void CallgrindTextMark::paint(QPainter *painter, const QRect &paintRect) const
 const Function *CallgrindTextMark::function() const
 {
     if (!m_modelIndex.isValid())
-        return 0;
+        return nullptr;
 
     return m_modelIndex.data(DataModel::FunctionRole).value<const Function *>();
 }

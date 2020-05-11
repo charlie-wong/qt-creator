@@ -51,13 +51,15 @@ private:
     bool preVisit(AST::Node *) override;
     void postVisit(AST::Node *) override;
 
-    bool visit(AST::ObjectLiteral *ast) override;
-    bool visit(AST::ArrayLiteral *ast) override;
+    bool visit(AST::ObjectPattern *ast) override;
+    bool visit(AST::ArrayPattern *ast) override;
     bool visit(AST::NullExpression *ast) override;
     bool visit(AST::TrueLiteral *ast) override;
     bool visit(AST::FalseLiteral *ast) override;
     bool visit(AST::NumericLiteral *ast) override;
     bool visit(AST::StringLiteral *ast) override;
+
+    void throwRecursionDepthError() override;
 
     struct AnalysisData
     {
@@ -71,12 +73,12 @@ private:
     };
 
     void processSchema(AST::Node *ast);
-    bool proceedCheck(Utils::JsonValue::Kind kind, const AST::SourceLocation &location);
+    bool proceedCheck(Utils::JsonValue::Kind kind, const SourceLocation &location);
 
     AnalysisData *analysis();
 
     Document::Ptr m_doc;
-    AST::SourceLocation m_firstLoc;
+    SourceLocation m_firstLoc;
     Utils::JsonSchema *m_schema;
     QStack<AnalysisData> m_analysis;
 };

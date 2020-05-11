@@ -29,7 +29,7 @@
 
 #include <cpptools/cppcompletionassistprocessor.h>
 
-#include <clangbackendipc/codecompletion.h>
+#include <clangsupport/codecompletion.h>
 
 #include <QCoreApplication>
 #include <QTextCursor>
@@ -46,12 +46,12 @@ class ClangCompletionAssistProcessor : public CppTools::CppCompletionAssistProce
 
 public:
     ClangCompletionAssistProcessor();
-    ~ClangCompletionAssistProcessor();
+    ~ClangCompletionAssistProcessor() override;
 
     TextEditor::IAssistProposal *perform(const TextEditor::AssistInterface *interface) override;
 
-    void handleAvailableCompletions(const CodeCompletions &completions,
-                                    CompletionCorrection neededCorrection);
+    void handleAvailableCompletions(const CodeCompletions &completions);
+    bool running() final { return m_requestSent; }
 
     const TextEditor::TextEditorWidget *textEditorWidget() const;
 
@@ -61,10 +61,9 @@ private:
     int findStartOfName(int pos = -1) const;
     bool accepts() const;
 
-    TextEditor::IAssistProposal *createProposal(
-            CompletionCorrection neededCorrection = CompletionCorrection::NoCorrection) const;
+    TextEditor::IAssistProposal *createProposal();
     TextEditor::IAssistProposal *createFunctionHintProposal(
-            const CodeCompletions &completions) const;
+            const CodeCompletions &completions);
 
     bool completeInclude(const QTextCursor &cursor);
     bool completeInclude(int position);
@@ -82,13 +81,23 @@ private:
     UnsavedFileContentInfo unsavedFileContent(const QByteArray &customFileContent) const;
 
     void sendFileContent(const QByteArray &customFileContent);
-    bool sendCompletionRequest(int position, const QByteArray &customFileContent);
+    bool sendCompletionRequest(int position,
+                               const QByteArray &customFileContent,
+                               int functionNameStartPosition = -1);
+
+    CodeCompletions applyCompletionFixIt(const CodeCompletions &completions);
 
 private:
+    struct Position { int line; int column; };
+    Position extractLineColumn(int position);
+
     QScopedPointer<const ClangCompletionAssistInterface> m_interface;
     unsigned m_completionOperator;
-    enum CompletionRequestType { NormalCompletion, FunctionHintCompletion } m_sentRequestType;
+    enum CompletionRequestType { NormalCompletion, FunctionHintCompletion };
+    CompletionRequestType m_sentRequestType = NormalCompletion;
+    bool m_requestSent = false;
     bool m_addSnippets = false; // For type == Type::NormalCompletion
+    bool m_fallbackToNormalCompletion = true;
 };
 
 } // namespace Internal

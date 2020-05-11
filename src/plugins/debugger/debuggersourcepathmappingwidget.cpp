@@ -33,6 +33,7 @@
 #include <utils/pathchooser.h>
 #include <utils/qtcassert.h>
 #include <utils/synchronousprocess.h>
+#include <utils/hostosinfo.h>
 
 #include <QStandardItemModel>
 #include <QTreeView>
@@ -44,27 +45,28 @@
 
 using namespace Utils;
 
-// Qt's various build paths for unpatched versions.
-#if defined(Q_OS_WIN)
-static const char* qtBuildPaths[] = {
-    "Q:/qt5_workdir/w/s",
-    "C:/work/build/qt5_workdir/w/s",
-    "c:/users/qt/work/qt",
-    "c:/Users/qt/work/install"
-};
-#elif defined(Q_OS_MAC)
-static const char* qtBuildPaths[] = {};
-#else
-static const char* qtBuildPaths[] = {"/var/tmp/qt-src"};
-#endif
-
 enum { SourceColumn, TargetColumn, ColumnCount };
 
 namespace Debugger {
 namespace Internal {
 
-typedef QPair<QString, QString> Mapping;
-typedef DebuggerSourcePathMappingWidget::SourcePathMap SourcePathMap;
+using Mapping = QPair<QString, QString>;
+using SourcePathMap = DebuggerSourcePathMappingWidget::SourcePathMap;
+
+// Qt's various build paths for unpatched versions.
+QStringList qtBuildPaths()
+{
+    if (HostOsInfo::isWindowsHost()) {
+        return {"Q:/qt5_workdir/w/s",
+                "C:/work/build/qt5_workdir/w/s",
+                "c:/users/qt/work/qt",
+                "c:/Users/qt/work/install"};
+    } else if (HostOsInfo::isMacHost()) {
+        return { "/Users/qt/work/qt" };
+    } else {
+        return { "/home/qt/work/qt" };
+    }
+}
 
 /*!
     \class Debugger::Internal::SourcePathMappingModel
@@ -131,8 +133,8 @@ SourcePathMap SourcePathMappingModel::sourcePathMap() const
 // Check a mapping whether it still contains a placeholder.
 bool SourcePathMappingModel::isNewPlaceHolder(const Mapping &m) const
 {
-    const QLatin1Char lessThan('<');
-    const QLatin1Char greaterThan('<');
+    const QChar lessThan('<');
+    const QChar greaterThan('>');
     return m.first.isEmpty() || m.first.startsWith(lessThan)
            || m.first.endsWith(greaterThan)
            || m.first == m_newSourcePlaceHolder
@@ -166,9 +168,9 @@ void SourcePathMappingModel::setSourcePathMap(const SourcePathMap &m)
 void SourcePathMappingModel::addRawMapping(const QString &source, const QString &target)
 {
     QList<QStandardItem *> items;
-    QStandardItem *sourceItem = new QStandardItem(source);
+    auto sourceItem = new QStandardItem(source);
     sourceItem->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);
-    QStandardItem *targetItem = new QStandardItem(target);
+    auto targetItem = new QStandardItem(target);
     targetItem->setFlags(Qt::ItemIsEnabled|Qt::ItemIsSelectable);
     items << sourceItem << targetItem;
     appendRow(items);
@@ -215,7 +217,7 @@ DebuggerSourcePathMappingWidget::DebuggerSourcePathMappingWidget(QWidget *parent
                   "at which the modules where built, for example, while "
                   "doing remote debugging.</p>"
                   "<p>If source is specified as a regular expression by starting it with an "
-                  "open parenthesis, Qt Creator matches the paths in the ELF with the "
+                  "open parenthesis, the paths in the ELF are matched with the "
                   "regular expression to automatically determine the source path.</p>"
                   "<p>Example: <b>(/home/.*/Project)/KnownSubDir -> D:\\Project</b> will "
                   "substitute ELF built by any user to your local project directory.</p>"));
@@ -232,7 +234,7 @@ DebuggerSourcePathMappingWidget::DebuggerSourcePathMappingWidget(QWidget *parent
     auto buttonLayout = new QVBoxLayout;
     buttonLayout->addWidget(m_addButton);
     buttonLayout->addWidget(m_addQtButton);
-    m_addQtButton->setVisible(sizeof(qtBuildPaths) > 0);
+    m_addQtButton->setVisible(!qtBuildPaths().isEmpty());
     m_addQtButton->setToolTip(tr("<p>Add a mapping for Qt's source folders "
         "when using an unpatched version of Qt."));
     buttonLayout->addWidget(m_removeButton);
@@ -251,7 +253,7 @@ DebuggerSourcePathMappingWidget::DebuggerSourcePathMappingWidget(QWidget *parent
 
     // Edit part
     m_targetChooser->setExpectedKind(PathChooser::ExistingDirectory);
-    m_targetChooser->setHistoryCompleter(QLatin1String("Debugger.MappingTarget.History"));
+    m_targetChooser->setHistoryCompleter("Debugger.MappingTarget.History");
     connect(m_sourceLineEdit, &QLineEdit::textChanged,
             this, &DebuggerSourcePathMappingWidget::slotEditSourceFieldChanged);
     connect(m_targetChooser, &PathChooser::pathChanged,
@@ -292,7 +294,7 @@ QString DebuggerSourcePathMappingWidget::editSourceField() const
 
 QString DebuggerSourcePathMappingWidget::editTargetField() const
 {
-    return m_targetChooser->path();
+    return m_targetChooser->rawPath();
 }
 
 void DebuggerSourcePathMappingWidget::setEditFieldMapping(const Mapping &m)
@@ -364,13 +366,11 @@ void DebuggerSourcePathMappingWidget::slotAdd()
 void DebuggerSourcePathMappingWidget::slotAddQt()
 {
     // Add a mapping for various Qt build locations in case of unpatched builds.
-    const QString qtSourcesPath =
-        QFileDialog::getExistingDirectory(this, tr("Qt Sources"));
+    const QString qtSourcesPath = QFileDialog::getExistingDirectory(this, tr("Qt Sources"));
     if (qtSourcesPath.isEmpty())
         return;
-    const size_t buildPathCount = sizeof(qtBuildPaths)/sizeof(qtBuildPaths[0]);
-    for (size_t i = 0; i != buildPathCount; ++i) // use != to avoid 0<0 which triggers warning on Mac
-        m_model->addMapping(QString::fromLatin1(qtBuildPaths[i]), qtSourcesPath);
+    for (const QString &buildPath : qtBuildPaths())
+        m_model->addMapping(buildPath, qtSourcesPath);
     resizeColumns();
     setCurrentRow(m_model->rowCount() - 1);
 }
@@ -401,14 +401,14 @@ void DebuggerSourcePathMappingWidget::slotEditTargetFieldChanged()
 }
 
 // Find Qt installation by running qmake
-static QString findQtInstallPath(const FileName &qmakePath)
+static QString findQtInstallPath(const FilePath &qmakePath)
 {
     if (qmakePath.isEmpty())
         return QString();
     QProcess proc;
     QStringList args;
-    args.append(QLatin1String("-query"));
-    args.append(QLatin1String("QT_INSTALL_HEADERS"));
+    args.append("-query");
+    args.append("QT_INSTALL_HEADERS");
     proc.start(qmakePath.toString(), args);
     if (!proc.waitForStarted()) {
         qWarning("%s: Cannot start '%s': %s", Q_FUNC_INFO, qPrintable(qmakePath.toString()),
@@ -438,7 +438,7 @@ DebuggerSourcePathMappingWidget::SourcePathMap
     DebuggerSourcePathMappingWidget::mergePlatformQtPath(const DebuggerRunParameters &sp,
                                                          const SourcePathMap &in)
 {
-    const FileName qmake = BuildableHelperLibrary::findSystemQt(sp.inferior.environment);
+    const FilePath qmake = BuildableHelperLibrary::findSystemQt(sp.inferior.environment);
     // FIXME: Get this from the profile?
     //        We could query the QtVersion for this information directly, but then we
     //        will need to add a dependency on QtSupport to the debugger.
@@ -446,15 +446,13 @@ DebuggerSourcePathMappingWidget::SourcePathMap
     //        The profile could also get a function to extract the required information from
     //        its information to avoid this dependency (as we do for the environment).
     const QString qtInstallPath = findQtInstallPath(qmake);
-    SourcePathMap rc = in;
-    const size_t buildPathCount = sizeof(qtBuildPaths)/sizeof(const char *);
-    if (qtInstallPath.isEmpty() || buildPathCount == 0)
-        return rc;
+    if (qtInstallPath.isEmpty())
+        return in;
 
-    for (size_t i = 0; i != buildPathCount; ++i) { // use != to avoid 0<0 which triggers warning on Mac
-        const QString buildPath = QString::fromLatin1(qtBuildPaths[i]);
+    SourcePathMap rc = in;
+    for (const QString &buildPath : qtBuildPaths()) {
         if (!rc.contains(buildPath)) // Do not overwrite user settings.
-            rc.insert(buildPath, qtInstallPath);
+            rc.insert(buildPath, qtInstallPath + "/../Src");
     }
     return rc;
 }

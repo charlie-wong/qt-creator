@@ -25,75 +25,62 @@
 
 #pragma once
 
-#include "runconfiguration.h"
+#include "projectconfigurationaspects.h"
 #include "applicationlauncher.h"
+#include "environmentaspect.h"
 
-#include <utils/fileutils.h>
+#include <QPointer>
 
 QT_BEGIN_NAMESPACE
 class QCheckBox;
-class QFormLayout;
-class QLineEdit;
+class QPlainTextEdit;
 class QToolButton;
 QT_END_NAMESPACE
 
-namespace Utils {
-class FancyLineEdit;
-class PathChooser;
-}
+namespace Utils { class ExpandButton; }
 
 namespace ProjectExplorer {
 
-class PROJECTEXPLORER_EXPORT TerminalAspect : public IRunConfigurationAspect
+class PROJECTEXPLORER_EXPORT TerminalAspect : public ProjectConfigurationAspect
 {
     Q_OBJECT
 
 public:
-    explicit TerminalAspect(RunConfiguration *rc, const QString &key,
-                            bool useTerminal = false, bool userSet = false);
+    TerminalAspect();
 
-    TerminalAspect *create(RunConfiguration *runConfig) const override;
-    TerminalAspect *clone(RunConfiguration *runConfig) const override;
-
-    void addToMainConfigurationWidget(QWidget *parent, QFormLayout *layout);
+    void addToLayout(LayoutBuilder &builder) override;
 
     bool useTerminal() const;
-    void setUseTerminal(bool useTerminal);
-
-    ApplicationLauncher::Mode runMode() const;
-    void setRunMode(ApplicationLauncher::Mode runMode);
+    void setUseTerminalHint(bool useTerminal);
 
     bool isUserSet() const;
-
-signals:
-    void useTerminalChanged(bool);
 
 private:
     void fromMap(const QVariantMap &map) override;
     void toMap(QVariantMap &map) const override;
 
+    void calculateUseTerminal();
+
+    bool m_useTerminalHint = false;
     bool m_useTerminal = false;
     bool m_userSet = false;
     QPointer<QCheckBox> m_checkBox; // Owned by RunConfigWidget
-    QString m_key;
 };
 
-class PROJECTEXPLORER_EXPORT WorkingDirectoryAspect : public IRunConfigurationAspect
+class PROJECTEXPLORER_EXPORT WorkingDirectoryAspect : public ProjectConfigurationAspect
 {
     Q_OBJECT
 
 public:
-    explicit WorkingDirectoryAspect(RunConfiguration *runConfig, const QString &key);
+    WorkingDirectoryAspect();
 
-    WorkingDirectoryAspect *create(RunConfiguration *runConfig) const override;
-    WorkingDirectoryAspect *clone(RunConfiguration *runConfig) const override;
+    void addToLayout(LayoutBuilder &builder) override;
+    void acquaintSiblings(const ProjectConfigurationAspects &) override;
 
-    void addToMainConfigurationWidget(QWidget *parent, QFormLayout *layout);
-
-    Utils::FileName workingDirectory() const;
-    Utils::FileName defaultWorkingDirectory() const;
-    Utils::FileName unexpandedWorkingDirectory() const;
-    void setDefaultWorkingDirectory(const Utils::FileName &defaultWorkingDir);
+    Utils::FilePath workingDirectory(const Utils::MacroExpander *expander) const;
+    Utils::FilePath defaultWorkingDirectory() const;
+    Utils::FilePath unexpandedWorkingDirectory() const;
+    void setDefaultWorkingDirectory(const Utils::FilePath &defaultWorkingDir);
     Utils::PathChooser *pathChooser() const;
 
 private:
@@ -103,26 +90,23 @@ private:
     void resetPath();
     QString keyForDefaultWd() const;
 
-    Utils::FileName m_workingDirectory;
-    Utils::FileName m_defaultWorkingDirectory;
+    EnvironmentAspect *m_envAspect = nullptr;
+    Utils::FilePath m_workingDirectory;
+    Utils::FilePath m_defaultWorkingDirectory;
     QPointer<Utils::PathChooser> m_chooser;
     QPointer<QToolButton> m_resetButton;
-    QString m_key;
 };
 
-class PROJECTEXPLORER_EXPORT ArgumentsAspect : public IRunConfigurationAspect
+class PROJECTEXPLORER_EXPORT ArgumentsAspect : public ProjectConfigurationAspect
 {
     Q_OBJECT
 
 public:
-    explicit ArgumentsAspect(RunConfiguration *runConfig, const QString &key, const QString &arguments = QString());
+    ArgumentsAspect();
 
-    ArgumentsAspect *create(RunConfiguration *runConfig) const override;
-    ArgumentsAspect *clone(RunConfiguration *runConfig) const override;
+    void addToLayout(LayoutBuilder &builder) override;
 
-    void addToMainConfigurationWidget(QWidget *parent, QFormLayout *layout);
-
-    QString arguments() const;
+    QString arguments(const Utils::MacroExpander *expander) const;
     QString unexpandedArguments() const;
 
     void setArguments(const QString &arguments);
@@ -134,9 +118,71 @@ private:
     void fromMap(const QVariantMap &map) override;
     void toMap(QVariantMap &map) const override;
 
+    QWidget *setupChooser();
+
     QString m_arguments;
     QPointer<Utils::FancyLineEdit> m_chooser;
-    QString m_key;
+    QPointer<QPlainTextEdit> m_multiLineChooser;
+    QPointer<Utils::ExpandButton> m_multiLineButton;
+    bool m_multiLine = false;
+    mutable bool m_currentlyExpanding = false;
+};
+
+class PROJECTEXPLORER_EXPORT UseLibraryPathsAspect : public BaseBoolAspect
+{
+    Q_OBJECT
+
+public:
+    UseLibraryPathsAspect();
+};
+
+class PROJECTEXPLORER_EXPORT UseDyldSuffixAspect : public BaseBoolAspect
+{
+    Q_OBJECT
+
+public:
+    UseDyldSuffixAspect();
+};
+
+class PROJECTEXPLORER_EXPORT ExecutableAspect : public ProjectConfigurationAspect
+{
+    Q_OBJECT
+
+public:
+    ExecutableAspect();
+    ~ExecutableAspect() override;
+
+    Utils::FilePath executable() const;
+    void setExecutable(const Utils::FilePath &executable);
+
+    void setSettingsKey(const QString &key);
+    void makeOverridable(const QString &overridingKey, const QString &useOverridableKey);
+    void addToLayout(LayoutBuilder &builder) override;
+    void setLabelText(const QString &labelText);
+    void setPlaceHolderText(const QString &placeHolderText);
+    void setExecutablePathStyle(Utils::OsType osType);
+    void setHistoryCompleter(const QString &historyCompleterKey);
+    void setExpectedKind(const Utils::PathChooser::Kind expectedKind);
+    void setEnvironment(const Utils::Environment &env);
+    void setDisplayStyle(BaseStringAspect::DisplayStyle style);
+
+protected:
+    void fromMap(const QVariantMap &map) override;
+    void toMap(QVariantMap &map) const override;
+
+private:
+    QString executableText() const;
+
+    BaseStringAspect m_executable;
+    BaseStringAspect *m_alternativeExecutable = nullptr;
+};
+
+class PROJECTEXPLORER_EXPORT SymbolFileAspect : public BaseStringAspect
+{
+    Q_OBJECT
+
+public:
+     SymbolFileAspect() = default;
 };
 
 } // namespace ProjectExplorer

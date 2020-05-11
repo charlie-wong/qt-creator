@@ -27,6 +27,9 @@
 
 #include "vcsbase_global.h"
 
+#include <coreplugin/icontext.h>
+#include <coreplugin/iversioncontrol.h>
+#include <coreplugin/vcsmanager.h>
 #include <extensionsystem/iplugin.h>
 
 #include <QList>
@@ -39,7 +42,7 @@ class QTextCodec;
 QT_END_NAMESPACE
 
 namespace Utils {
-class FileName;
+class CommandLine;
 class SynchronousProcessResponse;
 } // namespace Utils
 
@@ -57,7 +60,7 @@ namespace Internal { class State; }
 class VcsBaseSubmitEditor;
 class VcsBasePluginPrivate;
 class VcsBasePluginStateData;
-class VcsBasePlugin;
+class VcsBasePluginPrivate;
 
 // Documentation inside.
 class VCSBASE_EXPORT VcsBasePluginState
@@ -107,7 +110,7 @@ public:
     friend VCSBASE_EXPORT QDebug operator<<(QDebug in, const VcsBasePluginState &state);
 
 private:
-    friend class VcsBasePlugin;
+    friend class VcsBasePluginPrivate;
     bool equals(const Internal::State &s) const;
     void setState(const Internal::State &s);
 
@@ -121,54 +124,57 @@ inline bool operator==(const VcsBasePluginState &s1, const VcsBasePluginState &s
 inline bool operator!=(const VcsBasePluginState &s1, const VcsBasePluginState &s2)
 { return !s1.equals(s2); }
 
-class VCSBASE_EXPORT VcsBasePlugin : public ExtensionSystem::IPlugin
+// Convenience that searches for the repository specifically for version control
+// systems that do not have directories like "CVS" in each managed subdirectory
+// but have a directory at the top of the repository like ".git" containing
+// a well known file. See implementation for gory details.
+VCSBASE_EXPORT QString findRepositoryForDirectory(const QString &dir, const QString &checkFile);
+
+// Returns SSH prompt configured in settings.
+VCSBASE_EXPORT QString sshPrompt();
+// Returns whether an SSH prompt is configured.
+VCSBASE_EXPORT bool isSshPromptConfigured();
+
+// Set up the environment for a version control command line call.
+// Sets up SSH graphical password prompting (note that the latter
+// requires a terminal-less process) and sets LANG to 'C' to force English
+// (suppress LOCALE warnings/parse commands output) if desired.
+VCSBASE_EXPORT void setProcessEnvironment(QProcessEnvironment *e,
+                                          bool forceCLocale,
+                                          const QString &sshPasswordPrompt = sshPrompt());
+// Sets the source of editor contents, can be directory or file.
+VCSBASE_EXPORT void setSource(Core::IDocument *document, const QString &source);
+// Returns the source of editor contents.
+VCSBASE_EXPORT QString source(Core::IDocument *document);
+
+VCSBASE_EXPORT Utils::SynchronousProcessResponse runVcs(const QString &workingDir,
+                                                        const Utils::CommandLine &cmd,
+                                                        int timeOutS,
+                                                        unsigned flags = 0,
+                                                        QTextCodec *outputCodec = nullptr,
+                                                        const QProcessEnvironment &env = {});
+
+class VCSBASE_EXPORT VcsBasePluginPrivate : public Core::IVersionControl
 {
     Q_OBJECT
 
 protected:
-    explicit VcsBasePlugin();
-
-    void initializeVcs(Core::IVersionControl *vc, const Core::Context &context);
-    void extensionsInitialized() override;
+    explicit VcsBasePluginPrivate(const Core::Context &context);
 
 public:
-    ~VcsBasePlugin() override;
+    void extensionsInitialized();
 
     const VcsBasePluginState &currentState() const;
-    Core::IVersionControl *versionControl() const;
 
-    // Convenience that searches for the repository specifically for version control
-    // systems that do not have directories like "CVS" in each managed subdirectory
-    // but have a directory at the top of the repository like ".git" containing
-    // a well known file. See implementation for gory details.
-    static QString findRepositoryForDirectory(const QString &dir, const QString &checkFile);
+    // Display name of the commit action
+    virtual QString commitDisplayName() const;
 
-    // Set up the environment for a version control command line call.
-    // Sets up SSH graphical password prompting (note that the latter
-    // requires a terminal-less process) and sets LANG to 'C' to force English
-    // (suppress LOCALE warnings/parse commands output) if desired.
-    static void setProcessEnvironment(QProcessEnvironment *e,
-                                      bool forceCLocale,
-                                      const QString &sshPasswordPrompt = sshPrompt());
-    // Returns SSH prompt configured in settings.
-    static QString sshPrompt();
-    // Returns whether an SSH prompt is configured.
-    static bool isSshPromptConfigured();
-
-    // Sets the source of editor contents, can be directory or file.
-    static void setSource(Core::IDocument *document, const QString &source);
-    // Returns the source of editor contents.
-    static QString source(Core::IDocument *document);
-
-    static Utils::SynchronousProcessResponse runVcs(const QString &workingDir,
-                                                    const Utils::FileName &binary,
-                                                    const QStringList &arguments,
-                                                    int timeOutS,
-                                                    unsigned flags = 0,
-                                                    QTextCodec *outputCodec = 0,
-                                                    const QProcessEnvironment &env = QProcessEnvironment());
+    virtual void commitFromEditor() = 0;
 
 protected:
+    // Prompt to save all files before commit:
+    bool promptBeforeCommit();
+
     // Convenience slot for "Delete current file" action. Prompts to
     // delete the file via VcsManager.
     void promptToDeleteCurrentFile();
@@ -202,9 +208,14 @@ protected:
 
 private:
     void slotSubmitEditorAboutToClose(VcsBaseSubmitEditor *submitEditor, bool *result);
-    void slotStateChanged(const VcsBase::Internal::State &s, Core::IVersionControl *vc);
+    void slotStateChanged(const Internal::State &s, Core::IVersionControl *vc);
 
-    VcsBasePluginPrivate *d;
+    bool supportsRepositoryCreation() const;
+
+    QPointer<VcsBaseSubmitEditor> m_submitEditor;
+    Core::Context m_context;
+    VcsBasePluginState m_state;
+    int m_actionState = -1;
 };
 
 } // namespace VcsBase

@@ -42,31 +42,32 @@ class QmlProfilerDetailsRewriter : public QObject
 public:
     explicit QmlProfilerDetailsRewriter(QObject *parent = nullptr);
 
-    void clearRequests();
+    void clear();
     void requestDetailsForLocation(int typeId, const QmlEventLocation &location);
     QString getLocalFile(const QString &remoteFile);
     void reloadDocuments();
-    void documentReady(QmlJS::Document::Ptr doc);
-    void populateFileFinder(const ProjectExplorer::RunConfiguration *runConfiguration);
-
-    struct PendingEvent {
-        QmlEventLocation location;
-        int typeId;
-    };
+    void populateFileFinder(const ProjectExplorer::Target *target);
 
 signals:
     void rewriteDetailsString(int typeId, const QString &details);
     void eventDetailsChanged();
 
 private:
+    struct PendingEvent {
+        QmlEventLocation location;
+        int typeId;
+    };
+
     QMultiHash<QString, PendingEvent> m_pendingEvents;
     Utils::FileInProjectFinder m_projectFinder;
-    QHash<QString, QString> m_filesCache;
 
     void rewriteDetailsForLocation(const QString &source, QmlJS::Document::Ptr doc, int typeId,
                                    const QmlEventLocation &location);
     void connectQmlModel();
     void disconnectQmlModel();
+    void documentReady(QmlJS::Document::Ptr doc);
+
+    friend class QTypeInfo<PendingEvent>;
 };
 
 } // namespace Internal

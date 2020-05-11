@@ -25,8 +25,7 @@
 
 #pragma once
 
-#include <QHash>
-#include <QSharedPointer>
+#include "itestframework.h"
 
 QT_BEGIN_NAMESPACE
 class QSettings;
@@ -36,45 +35,25 @@ namespace Core { class Id; }
 
 namespace Autotest {
 namespace Internal {
-
-class IFrameworkSettings;
-class ITestFramework;
-class ITestParser;
-class TestRunner;
 struct TestSettings;
-class TestTreeItem;
-class TestTreeModel;
+}
 
-class TestFrameworkManager
+class TestFrameworkManager final
 {
+
 public:
-    static TestFrameworkManager *instance();
-    virtual ~TestFrameworkManager();
+    TestFrameworkManager();
+    ~TestFrameworkManager();
+
     bool registerTestFramework(ITestFramework *framework);
-
-    void activateFrameworksFromSettings(QSharedPointer<TestSettings> settings);
-    QString frameworkNameForId(const Core::Id &id) const;
-    QList<Core::Id> registeredFrameworkIds() const;
-    QList<Core::Id> sortedRegisteredFrameworkIds() const;
-    QVector<Core::Id> sortedActiveFrameworkIds() const;
-
-    TestTreeItem *rootNodeForTestFramework(const Core::Id &frameworkId) const;
-    ITestParser *testParserForTestFramework(const Core::Id &frameworkId) const;
-    QSharedPointer<IFrameworkSettings> settingsForTestFramework(const Core::Id &frameworkId) const;
     void synchronizeSettings(QSettings *s);
-    bool isActive(const Core::Id &frameworkId) const;
-    bool hasActiveFrameworks() const;
+
+    static ITestFramework *frameworkForId(Core::Id frameworkId);
+    static void activateFrameworksFromSettings(const Internal::TestSettings *settings);
+    static TestFrameworks registeredFrameworks();
 
 private:
-    QVector<Core::Id> activeFrameworkIds() const;
-    explicit TestFrameworkManager();
-    QHash<Core::Id, ITestFramework *> m_registeredFrameworks;
-    QHash<Core::Id, QSharedPointer<IFrameworkSettings> > m_frameworkSettings;
-    TestTreeModel *m_testTreeModel;
-    TestRunner *m_testRunner;
-
-    typedef QHash<Core::Id, ITestFramework *>::ConstIterator FrameworkIterator;
+    TestFrameworks m_registeredFrameworks;
 };
 
-} // namespace Internal
 } // namespace Autotest

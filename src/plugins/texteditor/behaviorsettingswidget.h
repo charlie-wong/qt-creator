@@ -49,13 +49,13 @@ class TEXTEDITOR_EXPORT BehaviorSettingsWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit BehaviorSettingsWidget(QWidget *parent = 0);
-    virtual ~BehaviorSettingsWidget();
+    explicit BehaviorSettingsWidget(QWidget *parent = nullptr);
+    ~BehaviorSettingsWidget() override;
 
     void setActive(bool active);
 
     void setAssignedCodec(QTextCodec *codec);
-    QTextCodec *assignedCodec() const;
+    QByteArray assignedCodecName() const;
 
     void setCodeStyle(ICodeStylePreferences *preferences);
 
@@ -70,6 +70,9 @@ public:
 
     void setAssignedExtraEncodingSettings(const ExtraEncodingSettings &encodingSettings);
     void assignedExtraEncodingSettings(ExtraEncodingSettings *encodingSettings) const;
+
+    void setAssignedLineEnding(int lineEnding);
+    int assignedLineEnding() const;
 
     TabSettingsWidget *tabSettingsWidget() const;
 

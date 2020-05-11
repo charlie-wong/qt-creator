@@ -26,6 +26,7 @@
 
 #include "androidconfigurations.h"
 
+#include <functional>
 #include <memory>
 
 namespace Android {
@@ -36,13 +37,14 @@ class AvdManagerOutputParser;
 
 class AndroidAvdManager
 {
+    Q_DECLARE_TR_FUNCTIONS(Android::Internal::AndroidAvdManager)
+
 public:
     AndroidAvdManager(const AndroidConfig& config = AndroidConfigurations::currentConfig());
     ~AndroidAvdManager();
 
-    bool avdManagerUiToolAvailable() const;
     void launchAvdManagerUiTool() const;
-    QFuture<AndroidConfig::CreateAvdInfo> createAvd(AndroidConfig::CreateAvdInfo info) const;
+    QFuture<CreateAvdInfo> createAvd(CreateAvdInfo info) const;
     bool removeAvd(const QString &name) const;
     QFuture<AndroidDeviceInfoList> avdList() const;
 
@@ -50,11 +52,15 @@ public:
     bool startAvdAsync(const QString &avdName) const;
     QString findAvd(const QString &avdName) const;
     QString waitForAvd(const QString &avdName,
-                       const QFutureInterface<bool> &fi = QFutureInterface<bool>()) const;
+                       const std::function<bool()> &cancelChecker = {}) const;
     bool isAvdBooted(const QString &device) const;
+    static bool avdManagerCommand(const AndroidConfig &config,
+                                  const QStringList &args,
+                                  QString *output);
 
 private:
-    bool waitForBooted(const QString &serialNumber, const QFutureInterface<bool> &fi) const;
+    bool waitForBooted(const QString &serialNumber,
+                       const std::function<bool()> &cancelChecker) const;
 
 private:
     const AndroidConfig &m_config;

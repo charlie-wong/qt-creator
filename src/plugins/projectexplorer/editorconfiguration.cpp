@@ -24,9 +24,9 @@
 ****************************************************************************/
 
 #include "editorconfiguration.h"
-#include "session.h"
-#include "projectexplorer.h"
 #include "project.h"
+#include "projectexplorer.h"
+#include "session.h"
 
 #include <utils/algorithm.h>
 
@@ -83,12 +83,11 @@ struct EditorConfigurationPrivate
     QList<BaseTextEditor *> m_editors;
 };
 
-EditorConfiguration::EditorConfiguration() : d(new EditorConfigurationPrivate)
+EditorConfiguration::EditorConfiguration() : d(std::make_unique<EditorConfigurationPrivate>())
 {
     const QMap<Core::Id, ICodeStylePreferences *> languageCodeStylePreferences = TextEditorSettings::codeStyles();
-    QMapIterator<Core::Id, ICodeStylePreferences *> itCodeStyle(languageCodeStylePreferences);
-    while (itCodeStyle.hasNext()) {
-        itCodeStyle.next();
+    for (auto itCodeStyle = languageCodeStylePreferences.cbegin(), end = languageCodeStylePreferences.cend();
+            itCodeStyle != end; ++itCodeStyle) {
         Core::Id languageId = itCodeStyle.key();
         // global prefs for language
         ICodeStylePreferences *originalPreferences = itCodeStyle.value();
@@ -119,7 +118,6 @@ EditorConfiguration::EditorConfiguration() : d(new EditorConfigurationPrivate)
 EditorConfiguration::~EditorConfiguration()
 {
     qDeleteAll(d->m_languageCodeStylePreferences);
-    delete d;
 }
 
 bool EditorConfiguration::useGlobalSettings() const
@@ -190,10 +188,11 @@ QVariantMap EditorConfiguration::toMap() const
     map.insert(kCodec, d->m_textCodec->name());
 
     map.insert(kCodeStyleCount, d->m_languageCodeStylePreferences.count());
-    QMapIterator<Core::Id, ICodeStylePreferences *> itCodeStyle(d->m_languageCodeStylePreferences);
+
     int i = 0;
-    while (itCodeStyle.hasNext()) {
-        itCodeStyle.next();
+    for (auto itCodeStyle = d->m_languageCodeStylePreferences.cbegin(),
+               end = d->m_languageCodeStylePreferences.cend();
+            itCodeStyle != end; ++itCodeStyle) {
         QVariantMap settingsIdMap;
         settingsIdMap.insert(QLatin1String("language"), itCodeStyle.key().toSetting());
         QVariantMap value;
@@ -273,9 +272,9 @@ void EditorConfiguration::deconfigureEditor(BaseTextEditor *textEditor) const
 void EditorConfiguration::setUseGlobalSettings(bool use)
 {
     d->m_useGlobal = use;
-    d->m_defaultCodeStyle->setCurrentDelegate(use ? TextEditorSettings::codeStyle() : 0);
+    d->m_defaultCodeStyle->setCurrentDelegate(use ? TextEditorSettings::codeStyle() : nullptr);
     foreach (Core::IEditor *editor, Core::DocumentModel::editorsForOpenedDocuments()) {
-        if (auto widget = qobject_cast<TextEditorWidget *>(editor->widget())) {
+        if (auto widget = TextEditorWidget::fromEditor(editor)) {
             Project *project = SessionManager::projectForFile(editor->document()->filePath());
             if (project && project->editorConfiguration() == this)
                 switchSettings(widget);
@@ -396,7 +395,7 @@ TabSettings actualTabSettings(const QString &fileName,
 {
     if (baseTextdocument)
         return baseTextdocument->tabSettings();
-    if (Project *project = SessionManager::projectForFile(Utils::FileName::fromString(fileName)))
+    if (Project *project = SessionManager::projectForFile(Utils::FilePath::fromString(fileName)))
         return project->editorConfiguration()->codeStyle()->tabSettings();
     return TextEditorSettings::codeStyle()->tabSettings();
 }

@@ -23,10 +23,6 @@
 **
 ****************************************************************************/
 
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0400
-#endif
-
 #include "registerpostmortemaction.h"
 
 #include <registryaccess.h>
@@ -47,8 +43,8 @@ namespace Internal {
 void RegisterPostMortemAction::registerNow(const QVariant &value)
 {
     const bool boolValue = value.toBool();
-    const QString debuggerExe = QDir::toNativeSeparators(QCoreApplication::applicationDirPath() + QLatin1Char('/')
-                                + QLatin1String(debuggerApplicationFileC) + QLatin1String(".exe"));
+    const QString debuggerExe = QDir::toNativeSeparators(QCoreApplication::applicationDirPath() + '/'
+                                + QLatin1String(debuggerApplicationFileC) + ".exe");
     const ushort *debuggerWString = debuggerExe.utf16();
 
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -75,10 +71,10 @@ RegisterPostMortemAction::RegisterPostMortemAction(QObject *parent) : Utils::Sav
 
 void RegisterPostMortemAction::readSettings(const QSettings *)
 {
-    Q_UNUSED(debuggerRegistryValueNameC); // avoid warning from MinGW
+    Q_UNUSED(debuggerRegistryValueNameC) // avoid warning from MinGW
 
     bool registered = false;
-    HKEY handle = 0;
+    HKEY handle = NULL;
     QString errorMessage;
     if (openRegistryKey(HKEY_LOCAL_MACHINE, debuggerRegistryKeyC, false, &handle, &errorMessage))
         registered = isRegistered(handle, debuggerCall(), &errorMessage);

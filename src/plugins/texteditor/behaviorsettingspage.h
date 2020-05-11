@@ -27,8 +27,9 @@
 
 #include "texteditor_global.h"
 
-#include "texteditoroptionspage.h"
 #include "tabsettingswidget.h"
+
+#include <coreplugin/dialogs/ioptionspage.h>
 
 namespace TextEditor {
 
@@ -40,26 +41,18 @@ class ExtraEncodingSettings;
 class ICodeStylePreferences;
 class CodeStylePool;
 
-class BehaviorSettingsPageParameters
-{
-public:
-    Core::Id id;
-    QString displayName;
-    QString settingsPrefix;
-};
-
-class BehaviorSettingsPage : public TextEditorOptionsPage
+class BehaviorSettingsPage : public Core::IOptionsPage
 {
     Q_OBJECT
 
 public:
-    BehaviorSettingsPage(const BehaviorSettingsPageParameters &p, QObject *parent);
-    ~BehaviorSettingsPage();
+    BehaviorSettingsPage();
+    ~BehaviorSettingsPage() override;
 
     // IOptionsPage
-    QWidget *widget();
-    void apply();
-    void finish();
+    QWidget *widget() override;
+    void apply() override;
+    void finish() override;
 
     ICodeStylePreferences *codeStyle() const;
     CodeStylePool *codeStylePool() const;
@@ -67,12 +60,6 @@ public:
     const StorageSettings &storageSettings() const;
     const BehaviorSettings &behaviorSettings() const;
     const ExtraEncodingSettings &extraEncodingSettings() const;
-
-signals:
-    void typingSettingsChanged(const TextEditor::TypingSettings &);
-    void storageSettingsChanged(const TextEditor::StorageSettings &);
-    void behaviorSettingsChanged(const TextEditor::BehaviorSettings &);
-    void extraEncodingSettingsChanged(const TextEditor::ExtraEncodingSettings &);
 
 private:
     void openCodingStylePreferences(TextEditor::TabSettingsWidget::CodingStyleLink link);

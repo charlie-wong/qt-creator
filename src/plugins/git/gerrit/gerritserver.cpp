@@ -32,9 +32,11 @@
 #include <coreplugin/icore.h>
 #include <coreplugin/shellcommand.h>
 #include <utils/hostosinfo.h>
+#include <utils/synchronousprocess.h>
 
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QSettings>
@@ -47,12 +49,14 @@ namespace Internal {
 
 static const char defaultHostC[] = "codereview.qt-project.org";
 static const char accountUrlC[] = "/accounts/self";
+static const char versionUrlC[] = "/config/server/version";
 static const char isGerritKey[] = "IsGerrit";
 static const char rootPathKey[] = "RootPath";
 static const char userNameKey[] = "UserName";
 static const char fullNameKey[] = "FullName";
 static const char isAuthenticatedKey[] = "IsAuthenticated";
 static const char validateCertKey[] = "ValidateCert";
+static const char versionKey[] = "Version";
 
 enum ErrorCodes
 {
@@ -151,8 +155,10 @@ bool GerritServer::fillFromRemote(const QString &remote,
     host = r.host;
     port = r.port;
     user.userName = r.userName.isEmpty() ? parameters.server.user.userName : r.userName;
-    if (type == GerritServer::Ssh)
+    if (type == GerritServer::Ssh) {
+        resolveVersion(parameters, forceReload);
         return true;
+    }
     curlBinary = parameters.curl;
     if (curlBinary.isEmpty() || !QFile::exists(curlBinary))
         return false;
@@ -164,10 +170,16 @@ bool GerritServer::fillFromRemote(const QString &remote,
         // The rest of the path needs to be inspected to find the root path
         // (can be http://example.net/review)
         ascendPath();
-        return resolveRoot();
+        if (resolveRoot()) {
+            resolveVersion(parameters, forceReload);
+            saveSettings(Valid);
+            return true;
+        }
+        return false;
     case NotGerrit:
         return false;
     case Valid:
+        resolveVersion(parameters, false);
         return true;
     }
     return true;
@@ -229,13 +241,17 @@ QStringList GerritServer::curlArguments() const
 
 int GerritServer::testConnection()
 {
-    static GitClient *const client = GitPlugin::client();
+    static GitClient *const client = GitClient::instance();
     const QStringList arguments = curlArguments() << (url(RestUrl) + accountUrlC);
     const SynchronousProcessResponse resp = client->vcsFullySynchronousExec(
-                QString(), FileName::fromString(curlBinary), arguments,
+                QString(), {curlBinary, arguments},
                 Core::ShellCommand::NoOutput);
     if (resp.result == SynchronousProcessResponse::Finished) {
         QString output = resp.stdOut();
+        // Gerrit returns an empty response for /p/qt-creator/a/accounts/self
+        // so consider this as 404.
+        if (output.isEmpty())
+            return PageNotFound;
         output.remove(0, output.indexOf('\n')); // Strip first line
         QJsonDocument doc = QJsonDocument::fromJson(output.toUtf8());
         if (!doc.isNull()) {
@@ -286,7 +302,7 @@ bool GerritServer::resolveRoot()
             return setupAuthentication();
         case CertificateError:
             if (QMessageBox::question(
-                        Core::ICore::mainWindow(),
+                        Core::ICore::dialogParent(),
                         QCoreApplication::translate(
                             "Gerrit::Internal::GerritDialog", "Certificate Error"),
                         QCoreApplication::translate(
@@ -308,10 +324,51 @@ bool GerritServer::resolveRoot()
             }
             break;
         default: // unknown error - fail
+            authenticated = false;
             return false;
         }
     }
     return false;
+}
+
+void GerritServer::resolveVersion(const GerritParameters &p, bool forceReload)
+{
+    static GitClient *const client = GitClient::instance();
+    QSettings *settings = Core::ICore::settings();
+    const QString fullVersionKey = "Gerrit/" + host + '/' + versionKey;
+    version = settings->value(fullVersionKey).toString();
+    if (!version.isEmpty() && !forceReload)
+        return;
+    if (type == Ssh) {
+        SynchronousProcess process;
+        QStringList arguments;
+        if (port)
+            arguments << p.portFlag << QString::number(port);
+        arguments << hostArgument() << "gerrit" << "version";
+        const SynchronousProcessResponse resp = client->vcsFullySynchronousExec(
+                    QString(), {p.ssh, arguments},
+                    Core::ShellCommand::NoOutput);
+        QString stdOut = resp.stdOut().trimmed();
+        stdOut.remove("gerrit version ");
+        version = stdOut;
+    } else {
+        const QStringList arguments = curlArguments() << (url(RestUrl) + versionUrlC);
+        const SynchronousProcessResponse resp = client->vcsFullySynchronousExec(
+                    QString(), {curlBinary, arguments},
+                    Core::ShellCommand::NoOutput);
+        // REST endpoint for version is only available from 2.8 and up. Do not consider invalid
+        // if it fails.
+        if (resp.result == SynchronousProcessResponse::Finished) {
+            QString output = resp.stdOut();
+            if (output.isEmpty())
+                return;
+            output.remove(0, output.indexOf('\n')); // Strip first line
+            output.remove('\n');
+            output.remove('"');
+            version = output;
+        }
+    }
+    settings->setValue(fullVersionKey, version);
 }
 
 } // namespace Internal

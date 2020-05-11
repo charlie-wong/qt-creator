@@ -27,10 +27,6 @@
 
 #include <coreplugin/dialogs/ioptionspage.h>
 
-#include <QPointer>
-#include <QSharedPointer>
-#include <QWidget>
-
 QT_BEGIN_NAMESPACE
 class QSettings;
 QT_END_NAMESPACE
@@ -38,20 +34,17 @@ QT_END_NAMESPACE
 namespace CppTools {
 namespace Internal {
 
-namespace Ui { class CppFileSettingsPage; }
-
 struct CppFileSettings
 {
-    CppFileSettings();
-
     QStringList headerPrefixes;
     QString headerSuffix;
     QStringList headerSearchPaths;
     QStringList sourcePrefixes;
     QString sourceSuffix;
     QStringList sourceSearchPaths;
-    bool lowerCaseFiles;
     QString licenseTemplatePath;
+    bool headerPragmaOnce = false;
+    bool lowerCaseFiles = false;
 
     void toSettings(QSettings *) const;
     void fromSettings(QSettings *);
@@ -66,38 +59,10 @@ struct CppFileSettings
     bool operator!=(const CppFileSettings &s) const { return !equals(s); }
 };
 
-class CppFileSettingsWidget : public QWidget
-{
-    Q_OBJECT
-
-public:
-    explicit CppFileSettingsWidget(QWidget *parent = 0);
-    virtual ~CppFileSettingsWidget();
-
-    CppFileSettings settings() const;
-    void setSettings(const CppFileSettings &s);
-
-private:
-    void slotEdit();
-    QString licenseTemplatePath() const;
-    void setLicenseTemplatePath(const QString &);
-
-    Ui::CppFileSettingsPage *m_ui;
-};
-
 class CppFileSettingsPage : public Core::IOptionsPage
 {
 public:
-    explicit CppFileSettingsPage(QSharedPointer<CppFileSettings> &settings,
-                                 QObject *parent = 0);
-
-    QWidget *widget();
-    void apply();
-    void finish();
-
-private:
-    const QSharedPointer<CppFileSettings> m_settings;
-    QPointer<CppFileSettingsWidget> m_widget;
+    explicit CppFileSettingsPage(CppFileSettings *settings);
 };
 
 } // namespace Internal

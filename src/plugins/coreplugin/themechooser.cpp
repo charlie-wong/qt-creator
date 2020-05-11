@@ -28,6 +28,8 @@
 #include "manhattanstyle.h"
 #include "themechooser.h"
 
+#include "dialogs/restartdialog.h"
+
 #include <utils/algorithm.h>
 #include <utils/theme/theme.h>
 #include <utils/theme/theme_p.h>
@@ -79,7 +81,7 @@ QString ThemeEntry::filePath() const
 class ThemeListModel : public QAbstractListModel
 {
 public:
-    ThemeListModel(QObject *parent = 0):
+    ThemeListModel(QObject *parent = nullptr):
         QAbstractListModel(parent)
     {
     }
@@ -135,13 +137,13 @@ ThemeChooserPrivate::ThemeChooserPrivate(QWidget *widget)
     : m_themeListModel(new ThemeListModel)
     , m_themeComboBox(new QComboBox)
 {
-    QHBoxLayout *layout = new QHBoxLayout(widget);
+    auto layout = new QHBoxLayout(widget);
     layout->addWidget(m_themeComboBox);
     auto overriddenLabel = new QLabel;
     overriddenLabel->setText(ThemeChooser::tr("Current theme: %1")
                              .arg(creatorTheme()->displayName()));
     layout->addWidget(overriddenLabel);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     auto horizontalSpacer = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
     layout->addSpacerItem(horizontalSpacer);
     m_themeComboBox->setModel(m_themeListModel);
@@ -178,11 +180,11 @@ void ThemeChooser::apply()
     QSettings *settings = ICore::settings();
     const QString currentThemeId = ThemeEntry::themeSetting().toString();
     if (currentThemeId != themeId) {
-        QMessageBox::information(ICore::mainWindow(), tr("Restart Required"),
-                                 tr("The theme change will take effect after a restart of Qt Creator."));
-
         // save filename of selected theme in global config
         settings->setValue(QLatin1String(Constants::SETTINGS_THEME), themeId);
+        RestartDialog restartDialog(ICore::dialogParent(),
+                                    tr("The theme change will take effect after restart."));
+        restartDialog.exec();
     }
 }
 

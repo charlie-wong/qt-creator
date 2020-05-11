@@ -29,6 +29,7 @@
 #include <coreplugin/opendocumentstreeview.h>
 
 #include <QAbstractProxyModel>
+#include <QCoreApplication>
 
 namespace Core {
 class IEditor;
@@ -37,9 +38,8 @@ namespace Internal {
 
 class ProxyModel : public QAbstractProxyModel
 {
-    Q_OBJECT
 public:
-    explicit ProxyModel(QObject *parent = 0);
+    explicit ProxyModel(QObject *parent = nullptr);
     QModelIndex mapFromSource(const QModelIndex & sourceIndex) const override;
     QModelIndex mapToSource(const QModelIndex & proxyIndex) const override;
 
@@ -65,11 +65,10 @@ private:
 
 class OpenEditorsWidget : public OpenDocumentsTreeView
 {
-    Q_OBJECT
-
+    Q_DECLARE_TR_FUNCTIONS(OpenEditorsWidget)
 public:
     OpenEditorsWidget();
-    ~OpenEditorsWidget();
+    ~OpenEditorsWidget() override;
 
 private:
     void handleActivated(const QModelIndex &);
@@ -83,12 +82,10 @@ private:
 
 class OpenEditorsViewFactory : public INavigationWidgetFactory
 {
-    Q_OBJECT
-
 public:
     OpenEditorsViewFactory();
 
-    NavigationView createWidget();
+    NavigationView createWidget() override;
 };
 
 } // namespace Internal

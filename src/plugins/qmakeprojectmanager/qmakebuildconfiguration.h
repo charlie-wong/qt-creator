@@ -27,6 +27,7 @@
 
 #include "qmakeprojectmanager_global.h"
 
+#include <projectexplorer/projectconfigurationaspects.h>
 #include <projectexplorer/buildconfiguration.h>
 #include <qtsupport/baseqtversion.h>
 
@@ -34,24 +35,20 @@ namespace ProjectExplorer { class FileNode; }
 
 namespace QmakeProjectManager {
 
-class QmakeBuildInfo;
 class QMakeStep;
-class MakeStep;
-class QmakeBuildConfigurationFactory;
+class QmakeBuildSystem;
+class QmakeMakeStep;
 class QmakeProFileNode;
-
-namespace Internal { class QmakeProjectConfigWidget; }
 
 class QMAKEPROJECTMANAGER_EXPORT QmakeBuildConfiguration : public ProjectExplorer::BuildConfiguration
 {
     Q_OBJECT
 
 public:
-    explicit QmakeBuildConfiguration(ProjectExplorer::Target *target);
-    ~QmakeBuildConfiguration();
+    QmakeBuildConfiguration(ProjectExplorer::Target *target, Core::Id id);
+    ~QmakeBuildConfiguration() override;
 
-    ProjectExplorer::NamedWidget *createConfigWidget() override;
-    bool isShadowBuild() const;
+    ProjectExplorer::BuildSystem *buildSystem() const final;
 
     void setSubNodeBuild(QmakeProFileNode *node);
     QmakeProFileNode *subNodeBuild() const;
@@ -63,14 +60,10 @@ public:
     void setQMakeBuildConfiguration(QtSupport::BaseQtVersion::QmakeBuildConfigs config);
 
     /// suffix should be unique
-    static QString shadowBuildDirectory(const QString &profilePath, const ProjectExplorer::Kit *k,
-                                        const QString &suffix, BuildConfiguration::BuildType type);
-
-    /// \internal for qmakestep
-    // used by qmake step to notify that the qmake args have changed
-    // not really nice, the build configuration should save the arguments
-    // since they are needed for reevaluation
-    void emitQMakeBuildConfigurationChanged();
+    static Utils::FilePath shadowBuildDirectory(const Utils::FilePath &profilePath,
+                                                const ProjectExplorer::Kit *k,
+                                                const QString &suffix,
+                                                BuildConfiguration::BuildType type);
 
     QStringList configCommandLineArguments() const;
 
@@ -80,45 +73,58 @@ public:
     // QmakeProject *
     // So that we can later enable people to build qmake the way they would like
     QMakeStep *qmakeStep() const;
-    MakeStep *makeStep() const;
+    QmakeMakeStep *makeStep() const;
+
+    QmakeBuildSystem *qmakeBuildSystem() const;
 
     QString makefile() const;
 
     enum MakefileState { MakefileMatches, MakefileForWrongProject, MakefileIncompatible, MakefileMissing };
-    MakefileState compareToImportFrom(const QString &makefile, QString *errorString = 0);
-    static Utils::FileName extractSpecFromArguments(QString *arguments,
-                                            const QString &directory, const QtSupport::BaseQtVersion *version,
-                                            QStringList *outArgs = 0);
+    MakefileState compareToImportFrom(const QString &makefile, QString *errorString = nullptr);
+    static QString extractSpecFromArguments(
+            QString *arguments, const QString &directory, const QtSupport::BaseQtVersion *version,
+            QStringList *outArgs = nullptr);
 
     QVariantMap toMap() const override;
 
-    virtual bool isEnabled() const override;
-    virtual QString disabledReason() const override;
-    /// \internal For QmakeProject, since that manages the parsing information
-    void setEnabled(bool enabled);
-
     BuildType buildType() const override;
 
-    void emitProFileEvaluateNeeded();
+    void addToEnvironment(Utils::Environment &env) const override;
+    static void setupBuildEnvironment(ProjectExplorer::Kit *k, Utils::Environment &env);
+
+    static QString unalignedBuildDirWarning();
+    static bool isBuildDirAtSafeLocation(const QString &sourceDir, const QString &buildDir);
+    bool isBuildDirAtSafeLocation() const;
+
+    ProjectExplorer::TriState separateDebugInfo() const;
+    void forceSeparateDebugInfo(bool sepDebugInfo);
+
+    ProjectExplorer::TriState qmlDebugging() const;
+    void forceQmlDebugging(bool enable);
+
+    ProjectExplorer::TriState useQtQuickCompiler() const;
+    void forceQtQuickCompiler(bool enable);
 
 signals:
     /// emitted for setQMakeBuildConfig, not emitted for Qt version changes, even
     /// if those change the qmakebuildconfig
     void qmakeBuildConfigurationChanged();
-    void shadowBuildChanged();
+
+    void separateDebugInfoChanged();
+    void qmlDebuggingChanged();
+    void useQtQuickCompilerChanged();
+
+protected:
+    bool fromMap(const QVariantMap &map) override;
+    bool regenerateBuildFiles(ProjectExplorer::Node *node = nullptr) override;
 
 private:
+    void restrictNextBuild(const ProjectExplorer::RunConfiguration *rc) override;
+
     void kitChanged();
     void toolChainUpdated(ProjectExplorer::ToolChain *tc);
     void qtVersionsChanged(const QList<int> &, const QList<int> &, const QList<int> &changed);
-
-protected:
-    QmakeBuildConfiguration(ProjectExplorer::Target *target, QmakeBuildConfiguration *source);
-    QmakeBuildConfiguration(ProjectExplorer::Target *target, Core::Id id);
-    bool fromMap(const QVariantMap &map) override;
-
-private:
-    void ctor();
+    void updateProblemLabel();
 
     class LastKitState
     {
@@ -135,44 +141,16 @@ private:
     };
     LastKitState m_lastKitState;
 
-    bool m_shadowBuild = true;
-    bool m_isEnabled = true;
-    QtSupport::BaseQtVersion::QmakeBuildConfigs m_qmakeBuildConfiguration = 0;
+    QtSupport::BaseQtVersion::QmakeBuildConfigs m_qmakeBuildConfiguration;
     QmakeProFileNode *m_subNodeBuild = nullptr;
     ProjectExplorer::FileNode *m_fileNodeBuild = nullptr;
-
-    friend class Internal::QmakeProjectConfigWidget;
-    friend class QmakeBuildConfigurationFactory;
+    QmakeBuildSystem *m_buildSystem = nullptr;
 };
 
-class QMAKEPROJECTMANAGER_EXPORT QmakeBuildConfigurationFactory : public ProjectExplorer::IBuildConfigurationFactory
+class QMAKEPROJECTMANAGER_EXPORT QmakeBuildConfigurationFactory : public ProjectExplorer::BuildConfigurationFactory
 {
-    Q_OBJECT
-
 public:
-    explicit QmakeBuildConfigurationFactory(QObject *parent = 0);
-
-    int priority(const ProjectExplorer::Target *parent) const override;
-    QList<ProjectExplorer::BuildInfo *> availableBuilds(const ProjectExplorer::Target *parent) const override;
-    int priority(const ProjectExplorer::Kit *k, const QString &projectPath) const override;
-    QList<ProjectExplorer::BuildInfo *> availableSetups(const ProjectExplorer::Kit *k,
-                                                        const QString &projectPath) const override;
-    ProjectExplorer::BuildConfiguration *create(ProjectExplorer::Target *parent,
-                                                const ProjectExplorer::BuildInfo *info) const override;
-
-    bool canClone(const ProjectExplorer::Target *parent, ProjectExplorer::BuildConfiguration *source) const override;
-    ProjectExplorer::BuildConfiguration *clone(ProjectExplorer::Target *parent, ProjectExplorer::BuildConfiguration *source) override;
-    bool canRestore(const ProjectExplorer::Target *parent, const QVariantMap &map) const override;
-    ProjectExplorer::BuildConfiguration *restore(ProjectExplorer::Target *parent, const QVariantMap &map) override;
-protected:
-    void configureBuildConfiguration(ProjectExplorer::Target *parent, QmakeBuildConfiguration *bc, const QmakeBuildInfo *info) const;
-
-private:
-    void update();
-
-    bool canHandle(const ProjectExplorer::Target *t) const;
-    QmakeBuildInfo *createBuildInfo(const ProjectExplorer::Kit *k, const QString &projectPath,
-                                    ProjectExplorer::BuildConfiguration::BuildType type) const;
+    QmakeBuildConfigurationFactory();
 };
 
 } // namespace QmakeProjectManager

@@ -1,6 +1,5 @@
 import QtQuick 2.0
 
-
 /* Comment 1
    This is a multiline comment. */
 
@@ -21,6 +20,14 @@ Item {
         for (var i = model.count - 1; i >= 0; --i) // in-line comment
         {
             console.log("test")
+        }
+
+        var a = 1
+        if (a > 0) {
+            console.log("positive")
+        } // Final condition
+        else {
+            console.log("negative or zero")
         }
     }
 }

@@ -25,77 +25,15 @@
 
 #pragma once
 
-#include "ui_processstep.h"
-#include "abstractprocessstep.h"
+#include "buildstep.h"
 
 namespace ProjectExplorer {
-
 namespace Internal {
 
-class ProcessStepFactory : public IBuildStepFactory
+class ProcessStepFactory final : public BuildStepFactory
 {
-    Q_OBJECT
-
 public:
-    QList<ProjectExplorer::BuildStepInfo>
-        availableSteps(ProjectExplorer::BuildStepList *parent) const override;
-
-    BuildStep *create(BuildStepList *parent, Core::Id id) override;
-    BuildStep *clone(BuildStepList *parent, BuildStep *product) override;
-};
-
-class ProcessStep : public AbstractProcessStep
-{
-    Q_OBJECT
-    friend class ProcessStepFactory;
-
-public:
-    explicit ProcessStep(BuildStepList *bsl);
-
-    bool init(QList<const BuildStep *> &earlierSteps) override;
-    void run(QFutureInterface<bool> &) override;
-
-    BuildStepConfigWidget *createConfigWidget() override;
-    bool immutable() const override;
-
-    QString command() const;
-    QString arguments() const;
-    QString workingDirectory() const;
-
-    void setCommand(const QString &command);
-    void setArguments(const QString &arguments);
-    void setWorkingDirectory(const QString &workingDirectory);
-
-    QVariantMap toMap() const override;
-
-protected:
-    ProcessStep(BuildStepList *bsl, ProcessStep *bs);
-
-    bool fromMap(const QVariantMap &map) override;
-
-private:
-    void ctor();
-
-    QString m_command;
-    QString m_arguments;
-    QString m_workingDirectory;
-};
-
-class ProcessStepConfigWidget : public BuildStepConfigWidget
-{
-    Q_OBJECT
-public:
-    ProcessStepConfigWidget(ProcessStep *step);
-    virtual QString displayName() const;
-    virtual QString summaryText() const;
-private:
-    void commandLineEditTextEdited();
-    void workingDirectoryLineEditTextEdited();
-    void commandArgumentsLineEditTextEdited();
-    void updateDetails();
-    ProcessStep *m_step;
-    Ui::ProcessStepWidget m_ui;
-    QString m_summaryText;
+    ProcessStepFactory();
 };
 
 } // namespace Internal

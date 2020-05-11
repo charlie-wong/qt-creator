@@ -28,24 +28,23 @@
 
 #include <QSharedData>
 
+#include <utils/algorithm.h>
 #include <utils/fileutils.h>
 
 namespace QmlDesigner {
 
 namespace Internal {
 
-class ItemLibraryEntryData : public QSharedData
+class ItemLibraryEntryData
 {
 public:
-    ItemLibraryEntryData() : majorVersion(-1), minorVersion(-1)
-    { }
     QString name;
     TypeName typeName;
     QString category;
-    int majorVersion;
-    int minorVersion;
+    int majorVersion{-1};
+    int minorVersion{-1};
     QString libraryEntryIconPath;
-    QIcon typeIcon;
+    QIcon typeIcon = QIcon(":/ItemLibrary/images/item-default-icon.png");
     QList<PropertyContainer> properties;
     QString qml;
     QString qmlSource;
@@ -54,23 +53,6 @@ public:
 };
 
 } // namespace Internal
-
-//
-// ItemLibraryEntry
-//
-
-ItemLibraryEntry::ItemLibraryEntry(const ItemLibraryEntry &other)
-    : m_data(other.m_data)
-{
-}
-
-ItemLibraryEntry& ItemLibraryEntry::operator=(const ItemLibraryEntry &other)
-{
-    if (this !=&other)
-        m_data = other.m_data;
-
-    return *this;
-}
 
 void ItemLibraryEntry::setTypeIcon(const QIcon &icon)
 {
@@ -95,10 +77,6 @@ QHash<QString, QString> ItemLibraryEntry::hints() const
 ItemLibraryEntry::ItemLibraryEntry() : m_data(new Internal::ItemLibraryEntryData)
 {
     m_data->name.clear();
-}
-
-ItemLibraryEntry::~ItemLibraryEntry()
-{
 }
 
 QString ItemLibraryEntry::name() const
@@ -197,7 +175,7 @@ void ItemLibraryEntry::setRequiredImport(const QString &requiredImport)
 
 void ItemLibraryEntry::addHints(const QHash<QString, QString> &hints)
 {
-    m_data->hints.unite(hints);
+    Utils::addToHash(&m_data->hints, hints);
 }
 
 void ItemLibraryEntry::addProperty(PropertyName &name, QString &type, QVariant &value)
@@ -228,6 +206,10 @@ QDataStream& operator<<(QDataStream& stream, const ItemLibraryEntry &itemLibrary
 
 QDataStream& operator>>(QDataStream& stream, ItemLibraryEntry &itemLibraryEntry)
 {
+    // Clear containers so that we don't simply append to them in case the object is reused
+    itemLibraryEntry.m_data->hints.clear();
+    itemLibraryEntry.m_data->properties.clear();
+
     stream >> itemLibraryEntry.m_data->name;
     stream >> itemLibraryEntry.m_data->typeName;
     stream >> itemLibraryEntry.m_data->majorVersion;
@@ -335,6 +317,36 @@ void ItemLibraryInfo::clearEntries()
 {
     m_nameToEntryHash.clear();
     emit entriesChanged();
+}
+
+QStringList ItemLibraryInfo::blacklistImports() const
+{
+    auto list = m_blacklistImports;
+    if (m_baseInfo)
+        list.append(m_baseInfo->m_blacklistImports);
+    return list;
+}
+
+QStringList ItemLibraryInfo::showTagsForImports() const
+{
+    auto list = m_showTagsForImports;
+    if (m_baseInfo)
+        list.append(m_baseInfo->m_showTagsForImports);
+    list.removeDuplicates();
+    return list;
+}
+
+void ItemLibraryInfo::addBlacklistImports(const QStringList &list)
+{
+    m_blacklistImports.append(list);
+}
+
+void ItemLibraryInfo::addShowTagsForImports(const QStringList &list)
+{
+    if (!list.isEmpty()) {
+        m_showTagsForImports.append(list);
+        emit importTagsChanged();
+    }
 }
 
 void ItemLibraryInfo::setBaseInfo(ItemLibraryInfo *baseInfo)

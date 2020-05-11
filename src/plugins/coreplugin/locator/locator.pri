@@ -1,3 +1,5 @@
+QT *= qml
+
 HEADERS += \
     $$PWD/locator.h \
     $$PWD/commandlocator.h \
@@ -13,6 +15,7 @@ HEADERS += \
     $$PWD/executefilter.h \
     $$PWD/locatorsearchutils.h \
     $$PWD/locatorsettingspage.h \
+    $$PWD/urllocatorfilter.h \
     $$PWD/externaltoolsfilter.h
 
 SOURCES += \
@@ -29,7 +32,21 @@ SOURCES += \
     $$PWD/executefilter.cpp \
     $$PWD/locatorsearchutils.cpp \
     $$PWD/locatorsettingspage.cpp \
+    $$PWD/urllocatorfilter.cpp \
     $$PWD/externaltoolsfilter.cpp
+
+FORMS += \
+    $$PWD/urllocatorfilter.ui
+
+minQtVersion(5, 14, 0) {
+    DEFINES += WITH_JAVASCRIPTFILTER
+
+    HEADERS += \
+        $$PWD/javascriptfilter.h
+
+    SOURCES += \
+        $$PWD/javascriptfilter.cpp
+}
 
 FORMS += \
     $$PWD/filesystemfilter.ui \

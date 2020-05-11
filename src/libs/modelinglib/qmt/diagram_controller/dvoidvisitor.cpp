@@ -36,8 +36,10 @@
 #include "qmt/diagram/dinheritance.h"
 #include "qmt/diagram/ddependency.h"
 #include "qmt/diagram/dassociation.h"
+#include "qmt/diagram/dconnection.h"
 #include "qmt/diagram/dannotation.h"
 #include "qmt/diagram/dboundary.h"
+#include "qmt/diagram/dswimlane.h"
 
 namespace qmt {
 
@@ -47,7 +49,7 @@ DVoidVisitor::DVoidVisitor()
 
 void DVoidVisitor::visitDElement(DElement *element)
 {
-    Q_UNUSED(element);
+    Q_UNUSED(element)
 }
 
 void DVoidVisitor::visitDObject(DObject *object)
@@ -100,6 +102,11 @@ void DVoidVisitor::visitDAssociation(DAssociation *association)
     visitDRelation(association);
 }
 
+void DVoidVisitor::visitDConnection(DConnection *connection)
+{
+    visitDRelation(connection);
+}
+
 void DVoidVisitor::visitDAnnotation(DAnnotation *annotation)
 {
     visitDElement(annotation);
@@ -110,13 +117,18 @@ void DVoidVisitor::visitDBoundary(DBoundary *boundary)
     visitDElement(boundary);
 }
 
+void DVoidVisitor::visitDSwimlane(DSwimlane *swimlane)
+{
+    visitDElement(swimlane);
+}
+
 DConstVoidVisitor::DConstVoidVisitor()
 {
 }
 
 void DConstVoidVisitor::visitDElement(const DElement *element)
 {
-    Q_UNUSED(element);
+    Q_UNUSED(element)
 }
 
 void DConstVoidVisitor::visitDObject(const DObject *object)
@@ -169,6 +181,11 @@ void DConstVoidVisitor::visitDAssociation(const DAssociation *association)
     visitDRelation(association);
 }
 
+void DConstVoidVisitor::visitDConnection(const DConnection *connection)
+{
+    visitDRelation(connection);
+}
+
 void DConstVoidVisitor::visitDAnnotation(const DAnnotation *annotation)
 {
     visitDElement(annotation);
@@ -177,6 +194,11 @@ void DConstVoidVisitor::visitDAnnotation(const DAnnotation *annotation)
 void DConstVoidVisitor::visitDBoundary(const DBoundary *boundary)
 {
     visitDElement(boundary);
+}
+
+void DConstVoidVisitor::visitDSwimlane(const DSwimlane *swimlane)
+{
+    visitDElement(swimlane);
 }
 
 } // namespace qmt

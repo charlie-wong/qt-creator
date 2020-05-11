@@ -8,33 +8,56 @@ The standalone binary packages support the following platforms:
 
 * Windows 7 or later
 * (K)Ubuntu Linux 16.04 (64-bit) or later
-* macOS 10.8 or later
+* macOS 10.13 or later
+
+## Contributing
+
+For instructions on how to set up the Qt Creator repository to contribute
+patches back to Qt Creator, please check:
+
+https://wiki.qt.io/Setting_up_Gerrit
+
+See the following page for information about our coding standard:
+
+https://doc.qt.io/qtcreator-extending/coding-style.html
 
 ## Compiling Qt Creator
 
 Prerequisites:
 
-* Qt 5.6.0 or later
+* Qt 5.12.0 or later
 * Qt WebEngine module for QtWebEngine based help viewer
 * On Windows:
     * ActiveState Active Perl
-    * MinGW with g++ 4.9 or Visual Studio 2015 or later
+    * MinGW with g++ 5.3 or Visual Studio 2017 or later
     * jom
+    * Python 3.5 or later (optional, needed for the python enabled debug helper)
 * On Mac OS X: latest Xcode
-* On Linux: g++ 4.9 or later
-* LLVM/Clang 3.9.0 or later (optional, needed for the Clang Code Model, see the
-  section "Get LLVM/Clang for the Clang Code Model")
-    * CMake (only for manual builds of LLVM/Clang)
+* On Linux: g++ 5.3 or later
+* LLVM/Clang 8.0.0 or later (optional, needed for the Clang Code Model, Clang Tools, ClangFormat,
+  Clang PCH Manager and Clang Refactoring plugins, see the section
+  "Get LLVM/Clang for the Clang Code Model". The LLVM C++ API provides no compatibility garantee,
+  so if later versions don't compile we don't support that version.)
+* CMake (for manual builds of LLVM/Clang, and Qt Creator itself)
+* Ninja (optional, recommended for building with CMake)
 * Qbs 1.7.x (optional, sources also contain Qbs itself)
 
 The installed toolchains have to match the one Qt was compiled with.
 
 You can build Qt Creator with
 
-    # Optional, needed for the Clang Code Model:
+    # Optional, needed for the Clang Code Model if llvm-config is not in PATH:
     export LLVM_INSTALL_DIR=/path/to/llvm (or "set" on Windows)
+    # Optional, disable Clang Refactoring
+    export QTC_DISABLE_CLANG_REFACTORING=1
     # Optional, needed to let the QbsProjectManager plugin use system Qbs:
     export QBS_INSTALL_DIR=/path/to/qbs
+    # Optional, needed for the Python enabled dumper on Windows
+    set PYTHON_INSTALL_DIR=C:\path\to\python
+    # Optional, needed to use system KSyntaxHighlighting:
+    set KSYNTAXHIGHLIGHTING_LIB_DIR to folder holding the KSyntaxHighlighting library
+    # if automatic deducing of include folder fails set KSYNTAXHIGHLIGHTING_INCLUDE_DIR as well
+    # both variables can also be passed as qmake variables
 
     cd $SOURCE_DIRECTORY
     qmake -r
@@ -49,7 +72,7 @@ Installation ("make install") is not needed. It is however possible, using
 This section provides step by step instructions for compiling the latest
 versions of Qt and Qt Creator on Windows. Alternatively, to avoid having to
 compile Qt yourself, you can use one of the versions of Qt shipped with the Qt
-SDK (release builds of Qt using MinGW and Visual C++ 2015 or later).
+SDK (release builds of Qt using MinGW and Visual C++ 2017 or later).
 For detailed information on the supported compilers, see
 <https://wiki.qt.io/Building_Qt_5_from_Git> .
 
@@ -66,7 +89,7 @@ For detailed information on the supported compilers, see
        for example, `c:\work`. If you plan to use MinGW and Microsoft Visual
        Studio simultaneously or mix different Qt versions, we recommend
        creating a directory structure which reflects that. For example:
-       `C:\work\qt5.6.0-vs12, C:\work\qt5.6.0-mingw`.
+       `C:\work\qt5.12.0-vs15, C:\work\qt5.12.0-mingw`.
 
    4.  Download and install Perl from <https://www.activestate.com/activeperl>
        and check that perl.exe is added to the path. Run `perl -v` to verify
@@ -74,7 +97,7 @@ For detailed information on the supported compilers, see
        an outdated version 5.8 which cannot be used for Qt.
 
    5.  In the working directory, check out the respective branch of Qt from
-       <https://code.qt.io/cgit/qt/qt5.git> (we recommend the latest released version).
+       <https://code.qt.io/cgit/qt/qt5.git> (we recommend the highest released version).
 
    6.  Check out Qt Creator (master branch or latest version, see
        <https://code.qt.io/cgit/qt-creator/qt-creator.git>).
@@ -129,9 +152,10 @@ For detailed information on the supported compilers, see
        * Install LLVM/Clang - see the section "Get LLVM/Clang for the Clang
          Code Model".
        * Set the environment variable LLVM_INSTALL_DIR to the LLVM/Clang
-         installation directory.
-       * When you launch Qt Creator, activate the Clang Code Model plugin as
-         described in doc/src/editors/creator-clang-codemodel.qdoc.
+         installation directory if llvm-config is not in PATH.
+       * Before you launch Qt Creator you may prepend the PATH with
+         the location of libclang.dll/.so that you want to be used.
+         See more info in the section "Prebuilt LLVM/Clang packages".
 
    11. You are now ready to configure and build Qt and Qt Creator.
        Please see <https://wiki.qt.io/Building_Qt_5_from_Git> for
@@ -203,7 +227,7 @@ or using shadow builds.
 ## Get LLVM/Clang for the Clang Code Model
 
 The Clang Code Model depends on the LLVM/Clang libraries. The currently
-supported LLVM/Clang version is 3.9.
+supported LLVM/Clang version is 8.0.
 
 ### Prebuilt LLVM/Clang packages
 
@@ -212,26 +236,16 @@ Prebuilt packages of LLVM/Clang can be downloaded from
     https://download.qt.io/development_releases/prebuilt/libclang/
 
 This should be your preferred option because you will use the version that is
-shipped together with Qt Creator. In addition, the packages for Windows are
-faster due to profile-guided optimization. If the prebuilt packages do not
-match your configuration, you need to build LLVM/Clang manually.
+shipped together with Qt Creator (with backported/additional patches). In
+addition, MinGW packages for Windows are faster due to profile-guided
+optimization. If the prebuilt packages do not match your configuration, you
+need to build LLVM/Clang manually.
 
-If you use GCC 5 or higher on Linux, please do not use our LLVM package, but get
-the package for your distribution. Our LLVM package is compiled with GCC 4, so
-you get linking errors, because GCC 5 is using a C++ 11 conforming string
-implementation, which is not used by GCC 4. To sum it up, do not mix GCC 5 and
-GCC 4 binaries. On Ubuntu, you can download the package from
-http://apt.llvm.org/ with:
-
-   wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-   sudo apt-add-repository "deb http://apt.llvm.org/`lsb_release -cs`/ llvm-toolchain-`lsb_release -cs`-3.9 main"
-   sudo apt-get update
-   sudo apt-get install llvm-3.9 libclang-3.9-dev
-
-There is a workaround to set _GLIBCXX_USE_CXX11_ABI to 1 or 0, but we recommend
-to download the package from http://apt.llvm.org/.
-
-   https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
+If you use the MSVC compiler to build Qt Creator the suggested way is:
+    1. Download both MSVC and MinGW packages of libclang.
+    2. Use the MSVC version of libclang during the Qt Creator build.
+    3. Prepend PATH variable used for the run time with the location of MinGW version of libclang.dll.
+    4. Launch Qt Creator.
 
 ### Building LLVM/Clang manually
 
@@ -240,39 +254,190 @@ You need to install CMake in order to build LLVM/Clang.
 Build LLVM/Clang by roughly following the instructions at
 http://llvm.org/docs/GettingStarted.html#git-mirror:
 
-   1. Clone LLVM and switch to a suitable branch
+   1. Clone LLVM/Clang and checkout a suitable branch
 
-          git clone http://llvm.org/git/llvm.git
-          cd llvm
-          git checkout release_39
+          git clone -b release_80-based --recursive https://code.qt.io/clang/llvm-project.git
 
-   2. Clone Clang into llvm/tools/clang and switch to a suitable branch
+   2. Build and install LLVM/Clang
 
-          cd tools
-          git clone http://llvm.org/git/clang.git
-          cd clang
-          git checkout release_39
-
-   3. Build and install LLVM/Clang
-
-          cd ../../..
           mkdir build
           cd build
 
       For Linux/macOS:
 
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=<installation location> -DLLVM_ENABLE_RTTI=ON ../llvm
-          make install
+          cmake \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D LLVM_ENABLE_RTTI=ON \
+            -D LLVM_ENABLE_PROJECTS="clang;clang-tools-extra" \
+            -D CMAKE_INSTALL_PREFIX=<installation location> \
+            ../llvm-project/llvm
+          cmake --build . --target install
 
       For Windows:
 
-          cmake -G "NMake Makefiles JOM" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=<installation location> -DLLVM_ENABLE_RTTI=ON ..\llvm
-          jom install
+          cmake ^
+            -G "NMake Makefiles JOM" ^
+            -D CMAKE_BUILD_TYPE=Release ^
+            -D LLVM_ENABLE_RTTI=ON ^
+            -D LLVM_ENABLE_PROJECTS="clang;clang-tools-extra" ^
+            -D CMAKE_INSTALL_PREFIX=<installation location> ^
+            ..\llvm-project\llvm
+          cmake --build . --target install
+
+### Clang-Format
+
+The ClangFormat plugin depends on the additional patch
+
+    https://code.qt.io/cgit/clang/clang.git/commit/?h=release_80-based&id=fa1b9053729ec6a4425a44ec5502dd388928274a
+
+While the plugin builds without it, it will be disabled on start with an error message.
+
+Note that the plugin is disabled by default.
+
+### Building Qt Creator with CMake
+
+Qt Creator can also be built with CMake. The main Qt Creator dependencies, Qt and LLVM/Clang, both
+offer CMake find packages, which reduce the steps of configuring Qt Creator to a minimum.
+
+   Configure and build Qt Creator:
+
+      mkdir build
+      cd build
+
+    For Linux/macOS:
+
+      cmake \
+        -G Ninja \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_PREFIX_PATH=~/Qt/5.12.5/gcc_64;~/llvm \
+        ../qt-creator
+      cmake --build .
+
+    For Windows:
+
+      cmake ^
+        -G Ninja ^
+        -D CMAKE_BUILD_TYPE=Release ^
+        -D CMAKE_PREFIX_PATH=c:\Qt\5.12.5\msvc2017_64;c:\llvm ^
+        ..\qt-creator
+      cmake --build .
 
 ## Third-party Components
 
 Qt Creator includes the following third-party components,
 we thank the authors who made this possible:
+
+### YAML Parser yaml-cpp (MIT License)
+
+  https://github.com/jbeder/yaml-cpp
+
+  QtCreator/src/libs/3rdparty/yaml-cpp
+
+  Copyright (c) 2008-2015 Jesse Beder.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+### KSyntaxHighlighting
+
+  Syntax highlighting engine for Kate syntax definitions
+
+  This is a stand-alone implementation of the Kate syntax highlighting
+  engine. It's meant as a building block for text editors as well as
+  for simple highlighted text rendering (e.g. as HTML), supporting both
+  integration with a custom editor as well as a ready-to-use
+  QSyntaxHighlighter sub-class.
+
+  Distributed under the:
+
+  MIT License
+
+  Permission is hereby granted, free of charge, to any person obtaining
+  a copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+
+  The above copyright notice and this permission notice shall be included
+  in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+  The source code of KSyntaxHighlighting can be found here:
+      https://cgit.kde.org/syntax-highlighting.git
+      QtCreator/src/libs/3rdparty/syntax-highlighting
+      https://code.qt.io/cgit/qt-creator/qt-creator.git/tree/src/libs/3rdparty/syntax-highlighting
+
+### Clazy
+
+  https://github.com/KDE/clazy
+
+  Copyright (C) 2015-2018 Clazy Team
+
+  Distributed under GNU LIBRARY GENERAL PUBLIC LICENSE Version 2 (LGPL2).
+
+  Integrated with patches from
+  http://code.qt.io/cgit/clang/clang-tools-extra.git/.
+
+### LLVM/Clang
+
+  https://github.com/llvm/llvm-project.git
+
+  Copyright (C) 2003-2019 LLVM Team
+
+  Distributed under the University of Illinois/NCSA Open Source License (NCSA),
+  see https://github.com/llvm/llvm-project/blob/master/llvm/LICENSE.TXT
+
+  With backported/additional patches from https://code.qt.io/clang/llvm-project.git
+
+### Reference implementation for std::experimental::optional
+
+  https://github.com/akrzemi1/Optional
+
+  QtCreator/src/libs/3rdparty/optional
+
+  Copyright (C) 2011-2012 Andrzej Krzemienski
+
+  Distributed under the Boost Software License, Version 1.0
+  (see accompanying file LICENSE_1_0.txt or a copy at
+  http://www.boost.org/LICENSE_1_0.txt)
+
+  The idea and interface is based on Boost.Optional library
+  authored by Fernando Luis Cacciola Carballal
+
+### Implementation for std::variant
+
+  https://github.com/mpark/variant
+
+  QtCreator/src/libs/3rdparty/variant
+
+  Copyright Michael Park, 2015-2017
+
+  Distributed under the Boost Software License, Version 1.0.
+  (See accompanying file LICENSE.md or copy at http://boost.org/LICENSE_1_0.txt)
 
 ### Open Source front-end for C++ (license MIT), enhanced for use in Qt Creator
 
@@ -322,54 +487,6 @@ we thank the authors who made this possible:
   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
   CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-### Botan, a C++ crypto library. Version 1.10.2
-
-  Botan (http://botan.randombit.net/) is distributed under these terms::
-
-  Copyright (C) 1999-2011 Jack Lloyd
-                2001 Peter J Jones
-                2004-2007 Justin Karneges
-                2004 Vaclav Ovsik
-                2005 Matthew Gregan
-                2005-2006 Matt Johnston
-                2006 Luca Piccarreta
-                2007 Yves Jerschow
-                2007-2008 FlexSecure GmbH
-                2007-2008 Technische Universitat Darmstadt
-                2007-2008 Falko Strenzke
-                2007-2008 Martin Doering
-                2007 Manuel Hartl
-                2007 Christoph Ludwig
-                2007 Patrick Sona
-                2010 Olivier de Gaalon
-  All rights reserved.
-
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-  1. Redistributions of source code must retain the above copyright
-  notice, this list of conditions, and the following disclaimer.
-
-  2. Redistributions in binary form must reproduce the above copyright
-  notice, this list of conditions, and the following disclaimer in the
-  documentation and/or other materials provided with the distribution.
-
-  THIS SOFTWARE IS PROVIDED BY THE AUTHOR(S) "AS IS" AND ANY EXPRESS OR
-  IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
-  ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR(S) OR CONTRIBUTOR(S) BE
-  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
-  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-  OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
-  IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-  The source code of Botan C++ crypto library can be found in
-  QtCreator/src/libs/3rdparty
 
 ### SQLite, in-process library that implements a SQL database engine
 
@@ -425,3 +542,41 @@ SQLite (https://www.sqlite.org) is in the Public Domain.
 
   The font and license files can be found in QtCreator/src/libs/3rdparty/fonts.
 
+### JSON Library by Niels Lohmann
+
+  Used by the Chrome Trace Format Visualizer plugin instead of QJson
+  because of QJson's current hard limit of 128 Mb object size and
+  trace files often being much larger.
+
+  The sources can be found in `QtCreator/src/libs/3rdparty/json`.
+
+  The class is licensed under the MIT License:
+
+  Copyright © 2013-2019 Niels Lohmann
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the “Software”), to
+  deal in the Software without restriction, including without limitation the
+  rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is furnished
+  to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included
+  in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  \endcode
+
+  The class contains the UTF-8 Decoder from Bjoern Hoehrmann which is
+  licensed under the MIT License (see above). Copyright © 2008-2009 Björn
+  Hoehrmann bjoern@hoehrmann.de
+
+  The class contains a slightly modified version of the Grisu2 algorithm
+  from Florian Loitsch which is licensed under the MIT License (see above).
+  Copyright © 2009 Florian Loitsch

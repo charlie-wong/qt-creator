@@ -56,17 +56,18 @@ using namespace CPlusPlus;
 using namespace CppTools;
 using namespace CppTools::Internal;
 
-typedef Document::DiagnosticMessage Message;
+using Message = Document::DiagnosticMessage;
 
-static Q_LOGGING_CATEGORY(log, "qtc.cpptools.sourceprocessor")
+static Q_LOGGING_CATEGORY(log, "qtc.cpptools.sourceprocessor", QtWarningMsg)
 
 namespace {
 
-inline QByteArray generateFingerPrint(const QList<Macro> &definedMacros, const QByteArray &code)
+inline QByteArray generateFingerPrint(const QList<CPlusPlus::Macro> &definedMacros,
+                                      const QByteArray &code)
 {
     QCryptographicHash hash(QCryptographicHash::Sha1);
     hash.addData(code);
-    foreach (const Macro &macro, definedMacros) {
+    foreach (const CPlusPlus::Macro &macro, definedMacros) {
         if (macro.isHidden()) {
             static const QByteArray undef("#undef ");
             hash.addData(undef);
@@ -98,10 +99,10 @@ inline Message messageNoFileContents(Document::Ptr &document, const QString &fil
     return Message(Message::Warning, document->fileName(), line, /*column =*/ 0, text);
 }
 
-inline const Macro revision(const WorkingCopy &workingCopy,
-                            const Macro &macro)
+inline const CPlusPlus::Macro revision(const WorkingCopy &workingCopy,
+                                       const CPlusPlus::Macro &macro)
 {
-    Macro newMacro(macro);
+    CPlusPlus::Macro newMacro(macro);
     newMacro.setFileRevision(workingCopy.get(macro.fileName()).second);
     return newMacro;
 }
@@ -118,8 +119,7 @@ CppSourceProcessor::CppSourceProcessor(const Snapshot &snapshot, DocumentCallbac
     m_preprocess.setKeepComments(true);
 }
 
-CppSourceProcessor::~CppSourceProcessor()
-{ }
+CppSourceProcessor::~CppSourceProcessor() = default;
 
 void CppSourceProcessor::setCancelChecker(const CppSourceProcessor::CancelChecker &cancelChecker)
 {
@@ -129,17 +129,16 @@ void CppSourceProcessor::setCancelChecker(const CppSourceProcessor::CancelChecke
 void CppSourceProcessor::setWorkingCopy(const WorkingCopy &workingCopy)
 { m_workingCopy = workingCopy; }
 
-void CppSourceProcessor::setHeaderPaths(const ProjectPartHeaderPaths &headerPaths)
+void CppSourceProcessor::setHeaderPaths(const ProjectExplorer::HeaderPaths &headerPaths)
 {
+    using ProjectExplorer::HeaderPathType;
     m_headerPaths.clear();
 
-    for (int i = 0, ei = headerPaths.size(); i < ei; ++i) {
-        const ProjectPartHeaderPath &path = headerPaths.at(i);
-
-        if (path.type == ProjectPartHeaderPath::IncludePath)
-            m_headerPaths.append(ProjectPartHeaderPath(cleanPath(path.path), path.type));
-        else
+    for (const auto &path : headerPaths) {
+         if (path.type == HeaderPathType::Framework )
             addFrameworkPath(path);
+        else
+            m_headerPaths.append({cleanPath(path.path), path.type});
     }
 }
 
@@ -155,15 +154,15 @@ void CppSourceProcessor::setLanguageFeatures(const LanguageFeatures languageFeat
 // has private frameworks in:
 //  <framework-path>/ApplicationServices.framework/Frameworks
 // if the "Frameworks" folder exists inside the top level framework.
-void CppSourceProcessor::addFrameworkPath(const ProjectPartHeaderPath &frameworkPath)
+void CppSourceProcessor::addFrameworkPath(const ProjectExplorer::HeaderPath &frameworkPath)
 {
-    QTC_ASSERT(frameworkPath.isFrameworkPath(), return);
+    QTC_ASSERT(frameworkPath.type == ProjectExplorer::HeaderPathType::Framework, return);
 
     // The algorithm below is a bit too eager, but that's because we're not getting
     // in the frameworks we're linking against. If we would have that, then we could
     // add only those private frameworks.
-    const ProjectPartHeaderPath cleanFrameworkPath(cleanPath(frameworkPath.path),
-                                                   frameworkPath.type);
+    const ProjectExplorer::HeaderPath cleanFrameworkPath(cleanPath(frameworkPath.path),
+                                                         ProjectExplorer::HeaderPathType::Framework);
     if (!m_headerPaths.contains(cleanFrameworkPath))
         m_headerPaths.append(cleanFrameworkPath);
 
@@ -175,8 +174,8 @@ void CppSourceProcessor::addFrameworkPath(const ProjectPartHeaderPath &framework
         const QFileInfo privateFrameworks(framework.absoluteFilePath(),
                                           QLatin1String("Frameworks"));
         if (privateFrameworks.exists() && privateFrameworks.isDir())
-            addFrameworkPath(ProjectPartHeaderPath(privateFrameworks.absoluteFilePath(),
-                                                   frameworkPath.type));
+            addFrameworkPath({privateFrameworks.absoluteFilePath(),
+                              ProjectExplorer::HeaderPathType::Framework});
     }
 }
 
@@ -227,6 +226,7 @@ bool CppSourceProcessor::getFileContents(const QString &absoluteFilePath,
                  qPrintable(error));
         return false;
     }
+    contents->replace("\r\n", "\n");
     return true;
 }
 
@@ -293,14 +293,14 @@ QString CppSourceProcessor::resolveFile(const QString &fileName, IncludeType typ
 }
 
 QString CppSourceProcessor::resolveFile_helper(const QString &fileName,
-                                               ProjectPartHeaderPaths::Iterator headerPathsIt)
+                                               ProjectExplorer::HeaderPaths::Iterator headerPathsIt)
 {
     auto headerPathsEnd = m_headerPaths.end();
     const int index = fileName.indexOf(QLatin1Char('/'));
     for (; headerPathsIt != headerPathsEnd; ++headerPathsIt) {
-        if (headerPathsIt->isValid()) {
+        if (!headerPathsIt->path.isNull()) {
             QString path;
-            if (headerPathsIt->isFrameworkPath()) {
+            if (headerPathsIt->type == ProjectExplorer::HeaderPathType::Framework) {
                 if (index == -1)
                     continue;
                 path = headerPathsIt->path + fileName.left(index)
@@ -316,7 +316,7 @@ QString CppSourceProcessor::resolveFile_helper(const QString &fileName,
     return QString();
 }
 
-void CppSourceProcessor::macroAdded(const Macro &macro)
+void CppSourceProcessor::macroAdded(const CPlusPlus::Macro &macro)
 {
     if (!m_currentDoc)
         return;
@@ -324,8 +324,8 @@ void CppSourceProcessor::macroAdded(const Macro &macro)
     m_currentDoc->appendMacro(macro);
 }
 
-void CppSourceProcessor::passedMacroDefinitionCheck(unsigned bytesOffset, unsigned utf16charsOffset,
-                                                    unsigned line, const Macro &macro)
+void CppSourceProcessor::passedMacroDefinitionCheck(int bytesOffset, int utf16charsOffset,
+                                                    int line, const CPlusPlus::Macro &macro)
 {
     if (!m_currentDoc)
         return;
@@ -336,7 +336,7 @@ void CppSourceProcessor::passedMacroDefinitionCheck(unsigned bytesOffset, unsign
                               line, QVector<MacroArgumentReference>());
 }
 
-void CppSourceProcessor::failedMacroDefinitionCheck(unsigned bytesOffset, unsigned utf16charOffset,
+void CppSourceProcessor::failedMacroDefinitionCheck(int bytesOffset, int utf16charOffset,
                                                     const ByteArrayRef &name)
 {
     if (!m_currentDoc)
@@ -346,8 +346,8 @@ void CppSourceProcessor::failedMacroDefinitionCheck(unsigned bytesOffset, unsign
                                        bytesOffset, utf16charOffset);
 }
 
-void CppSourceProcessor::notifyMacroReference(unsigned bytesOffset, unsigned utf16charOffset,
-                                              unsigned line, const Macro &macro)
+void CppSourceProcessor::notifyMacroReference(int bytesOffset, int utf16charOffset,
+                                              int line, const CPlusPlus::Macro &macro)
 {
     if (!m_currentDoc)
         return;
@@ -358,8 +358,8 @@ void CppSourceProcessor::notifyMacroReference(unsigned bytesOffset, unsigned utf
                               line, QVector<MacroArgumentReference>());
 }
 
-void CppSourceProcessor::startExpandingMacro(unsigned bytesOffset, unsigned utf16charOffset,
-                                             unsigned line, const Macro &macro,
+void CppSourceProcessor::startExpandingMacro(int bytesOffset, int utf16charOffset,
+                                             int line, const CPlusPlus::Macro &macro,
                                              const QVector<MacroArgumentReference> &actuals)
 {
     if (!m_currentDoc)
@@ -371,7 +371,7 @@ void CppSourceProcessor::startExpandingMacro(unsigned bytesOffset, unsigned utf1
                               line, actuals);
 }
 
-void CppSourceProcessor::stopExpandingMacro(unsigned, const Macro &)
+void CppSourceProcessor::stopExpandingMacro(int, const CPlusPlus::Macro &)
 {
     if (!m_currentDoc)
         return;
@@ -409,19 +409,19 @@ void CppSourceProcessor::mergeEnvironment(Document::Ptr doc)
     m_env.addMacros(doc->definedMacros());
 }
 
-void CppSourceProcessor::startSkippingBlocks(unsigned utf16charsOffset)
+void CppSourceProcessor::startSkippingBlocks(int utf16charsOffset)
 {
     if (m_currentDoc)
         m_currentDoc->startSkippingBlocks(utf16charsOffset);
 }
 
-void CppSourceProcessor::stopSkippingBlocks(unsigned utf16charsOffset)
+void CppSourceProcessor::stopSkippingBlocks(int utf16charsOffset)
 {
     if (m_currentDoc)
         m_currentDoc->stopSkippingBlocks(utf16charsOffset);
 }
 
-void CppSourceProcessor::sourceNeeded(unsigned line, const QString &fileName, IncludeType type,
+void CppSourceProcessor::sourceNeeded(int line, const QString &fileName, IncludeType type,
                                       const QStringList &initialIncludes)
 {
     if (fileName.isEmpty())

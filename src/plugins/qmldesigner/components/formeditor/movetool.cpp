@@ -28,8 +28,11 @@
 #include "formeditorscene.h"
 #include "formeditorview.h"
 #include "formeditorwidget.h"
+#include "formeditorgraphicsview.h"
 
 #include "resizehandleitem.h"
+
+#include <utils/algorithm.h>
 
 #include <QApplication>
 #include <QGraphicsSceneMouseEvent>
@@ -50,10 +53,7 @@ MoveTool::MoveTool(FormEditorView *editorView)
     m_selectionIndicator.setCursor(Qt::SizeAllCursor);
 }
 
-MoveTool::~MoveTool()
-{
-
-}
+MoveTool::~MoveTool() = default;
 
 void MoveTool::clear()
 {
@@ -66,6 +66,12 @@ void MoveTool::clear()
     m_contentNotEditableIndicator.clear();
 
     AbstractFormEditorTool::clear();
+    view()->formEditorWidget()->graphicsView()->viewport()->unsetCursor();
+}
+
+void MoveTool::start()
+{
+    view()->formEditorWidget()->graphicsView()->viewport()->setCursor(Qt::SizeAllCursor);
 }
 
 void MoveTool::mousePressEvent(const QList<QGraphicsItem*> &itemList,
@@ -92,21 +98,22 @@ void MoveTool::mouseMoveEvent(const QList<QGraphicsItem*> &itemList,
         if (m_movingItems.isEmpty())
             return;
 
-        //    m_selectionIndicator.hide();
+        m_selectionIndicator.hide();
         m_resizeIndicator.hide();
         m_anchorIndicator.hide();
         m_bindingIndicator.hide();
 
         FormEditorItem *containerItem = containerFormEditorItem(itemList, m_movingItems);
         if (containerItem && view()->currentState().isBaseState()) {
-            if (containerItem != m_movingItems.first()->parentItem()
+            if (containerItem != m_movingItems.constFirst()->parentItem()
+                    && event->modifiers().testFlag(Qt::ControlModifier)
                     && event->modifiers().testFlag(Qt::ShiftModifier)) {
 
-                FormEditorItem *movingItem = m_movingItems.first();
+                const FormEditorItem *movingItem = m_movingItems.constFirst();
 
                 if (m_movingItems.count() > 1
                         || (movingItem->qmlItemNode().canBereparentedTo(containerItem->qmlItemNode())))
-                        m_moveManipulator.reparentTo(containerItem);
+                        m_moveManipulator.reparentTo(containerItem, MoveManipulator::EnforceReparent);
             }
         }
 
@@ -115,23 +122,38 @@ void MoveTool::mouseMoveEvent(const QList<QGraphicsItem*> &itemList,
 }
 
 void MoveTool::hoverMoveEvent(const QList<QGraphicsItem*> &itemList,
-                        QGraphicsSceneMouseEvent * /*event*/)
+                        QGraphicsSceneMouseEvent * event)
 {
     if (itemList.isEmpty()) {
         view()->changeToSelectionTool();
         return;
     }
 
-    ResizeHandleItem* resizeHandle = ResizeHandleItem::fromGraphicsItem(itemList.first());
+    ResizeHandleItem* resizeHandle = ResizeHandleItem::fromGraphicsItem(itemList.constFirst());
     if (resizeHandle) {
         view()->changeToResizeTool();
         return;
     }
 
+    if (view()->hasSingleSelectedModelNode() && selectedItemCursorInMovableArea(event->scenePos()))
+        return;
+
     if (!topSelectedItemIsMovable(itemList)) {
         view()->changeToSelectionTool();
         return;
     }
+
+    if (view()->hasSingleSelectedModelNode()) {
+        view()->changeToSelectionTool();
+        return;
+    }
+
+    if (event->modifiers().testFlag(Qt::ShiftModifier)
+            || event->modifiers().testFlag(Qt::ControlModifier) ) {
+        view()->changeToSelectionTool();
+        return;
+    }
+
 
     m_contentNotEditableIndicator.setItems(toFormEditorItemList(itemList));
 }
@@ -225,6 +247,8 @@ void MoveTool::mouseReleaseEvent(const QList<QGraphicsItem*> &itemList,
     }
 
     AbstractFormEditorTool::mouseReleaseEvent(itemList, event);
+
+    view()->changeToSelectionTool();
 }
 
 void MoveTool::mouseDoubleClickEvent(const QList<QGraphicsItem*> &itemList, QGraphicsSceneMouseEvent *event)
@@ -265,7 +289,7 @@ bool MoveTool::haveSameParent(const QList<FormEditorItem*> &itemList)
     if (itemList.isEmpty())
         return false;
 
-    QGraphicsItem *firstParent = itemList.first()->parentItem();
+    QGraphicsItem *firstParent = itemList.constFirst()->parentItem();
     foreach (FormEditorItem* item, itemList)
     {
         if (firstParent != item->parentItem())
@@ -291,7 +315,7 @@ bool MoveTool::isAncestorOfAllItems(FormEditorItem* maybeAncestorItem,
 FormEditorItem* MoveTool::ancestorIfOtherItemsAreChild(const QList<FormEditorItem*> &itemList)
 {
     if (itemList.isEmpty())
-        return 0;
+        return nullptr;
 
 
     foreach (FormEditorItem* item, itemList)
@@ -300,7 +324,7 @@ FormEditorItem* MoveTool::ancestorIfOtherItemsAreChild(const QList<FormEditorIte
             return item;
     }
 
-    return 0;
+    return nullptr;
 }
 
 void MoveTool::updateMoveManipulator()
@@ -319,38 +343,30 @@ void MoveTool::beginWithPoint(const QPointF &beginPoint)
     m_moveManipulator.begin(beginPoint);
 }
 
-
-
-QList<FormEditorItem*> movalbeItems(const QList<FormEditorItem*> &itemList)
+static QList<FormEditorItem *> movableItems(const QList<FormEditorItem *> &itemList)
 {
-    QList<FormEditorItem*> filteredItemList(itemList);
-
-    QMutableListIterator<FormEditorItem*> listIterator(filteredItemList);
-    while (listIterator.hasNext()) {
-        FormEditorItem *item = listIterator.next();
-        if (!item->qmlItemNode().isValid()
-                || !item->qmlItemNode().instanceIsMovable()
-                || !item->qmlItemNode().modelIsMovable()
-                || item->qmlItemNode().instanceIsInLayoutable())
-            listIterator.remove();
-    }
-
-    return filteredItemList;
+    return Utils::filtered(itemList, [](FormEditorItem *item) {
+        const QmlItemNode node = item->qmlItemNode();
+        return node.isValid()
+            && node.instanceIsMovable()
+            && node.modelIsMovable()
+            && !node.instanceIsInLayoutable();
+    });
 }
 
 QList<FormEditorItem*> MoveTool::movingItems(const QList<FormEditorItem*> &selectedItemList)
 {
-    QList<FormEditorItem*> filteredItemList = movalbeItems(selectedItemList);
+    QList<FormEditorItem*> filteredItemList = movableItems(selectedItemList);
 
     FormEditorItem* ancestorItem = ancestorIfOtherItemsAreChild(filteredItemList);
 
-    if (ancestorItem != 0 && ancestorItem->qmlItemNode().isRootNode()) {
+    if (ancestorItem != nullptr && ancestorItem->qmlItemNode().isRootNode()) {
 //        view()->changeToSelectionTool();
         return QList<FormEditorItem*>();
     }
 
 
-    if (ancestorItem != 0 && ancestorItem->parentItem() != 0)  {
+    if (ancestorItem != nullptr && ancestorItem->parentItem() != nullptr)  {
         QList<FormEditorItem*> ancestorItemList;
         ancestorItemList.append(ancestorItem);
         return ancestorItemList;

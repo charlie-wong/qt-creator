@@ -31,19 +31,19 @@ namespace Nim {
 
 class NimCodeStylePreferencesFactory : public TextEditor::ICodeStylePreferencesFactory
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(Nim::NimCodeStylePreferencesFactory)
 
 public:
     NimCodeStylePreferencesFactory();
 
-    Core::Id languageId();
-    QString displayName();
-    TextEditor::ICodeStylePreferences *createCodeStyle() const;
+    Core::Id languageId() override;
+    QString displayName() override;
+    TextEditor::ICodeStylePreferences *createCodeStyle() const override;
     QWidget *createEditor(TextEditor::ICodeStylePreferences *settings,
-                          QWidget *parent) const;
-    TextEditor::Indenter *createIndenter() const;
-    TextEditor::SnippetProvider *snippetProvider() const;
-    QString previewText() const;
+                          QWidget *parent) const override;
+    TextEditor::Indenter *createIndenter(QTextDocument *doc) const override;
+    QString snippetProviderGroupId() const override;
+    QString previewText() const override;
 };
 
 } // namespace Nim

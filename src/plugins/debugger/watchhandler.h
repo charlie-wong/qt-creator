@@ -37,14 +37,16 @@ class DebuggerCommand;
 class DebuggerEngine;
 class WatchModel;
 
-typedef QVector<DisplayFormat> DisplayFormats;
+using DisplayFormats = QVector<DisplayFormat>;
 
 class WatchModelBase : public Utils::TreeModel<WatchItem, WatchItem>
 {
     Q_OBJECT
 
 public:
-    WatchModelBase() {}
+    WatchModelBase() = default;
+
+    enum { NameColumn, TimeColumn, ValueColumn, TypeColumn };
 
 signals:
     void currentIndexRequested(const QModelIndex &idx);
@@ -60,7 +62,7 @@ class WatchHandler : public QObject
 
 public:
     explicit WatchHandler(DebuggerEngine *engine);
-    ~WatchHandler();
+    ~WatchHandler() override;
 
     WatchModelBase *model() const;
 
@@ -76,8 +78,7 @@ public:
     WatchItem *findItem(const QString &iname) const;
     const WatchItem *findCppLocalVariable(const QString &name) const;
 
-    void loadSessionData();
-    void saveSessionData();
+    void loadSessionDataForEngine();
 
     bool isExpandedIName(const QString &iname) const;
     QSet<QString> expandedINames() const;
@@ -85,8 +86,8 @@ public:
     static QStringList watchedExpressions();
     static QMap<QString, int> watcherNames();
 
-    void appendFormatRequests(DebuggerCommand *cmd);
-    void appendWatchersAndTooltipRequests(DebuggerCommand *cmd);
+    void appendFormatRequests(DebuggerCommand *cmd) const;
+    void appendWatchersAndTooltipRequests(DebuggerCommand *cmd) const;
 
     QString typeFormatRequests() const;
     QString individualFormatRequests() const;
@@ -100,10 +101,9 @@ public:
     QString watcherName(const QString &exp);
 
     void scheduleResetLocation();
-    void resetLocation();
 
     void setCurrentItem(const QString &iname);
-    void updateWatchersWindow();
+    void updateLocalsWindow();
 
     bool insertItem(WatchItem *item); // Takes ownership, returns whether item was added, not overwritten.
     void insertItems(const GdbMi &data);
@@ -120,6 +120,7 @@ public:
     void recordTypeInfo(const GdbMi &typeInfo);
 
 private:
+    DebuggerEngine * const m_engine; // Not owned
     WatchModel *m_model; // Owned.
 };
 

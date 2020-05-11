@@ -75,12 +75,9 @@ def generateMockTasksFile():
 def checkOrUncheckMyTasks():
     filterButton = waitForObject(toolButton % 'Filter by categories')
     clickButton(filterButton)
-    if platform.system() == 'Darwin':
-        waitFor("macHackActivateContextMenuItem('My Tasks')", 5000)
-    else:
-        activateItem(waitForObjectItem("{type='QMenu' unnamed='1' visible='1' "
-                                       "window=':Qt Creator_Core::Internal::MainWindow'}",
-                                       "My Tasks"))
+    activateItem(waitForObjectItem("{type='QMenu' unnamed='1' visible='1' "
+                                   "window=':Qt Creator_Core::Internal::MainWindow'}",
+                                   "My Tasks"))
 
 def getBuildIssuesTypeCounts(model):
     issueTypes = map(lambda x: x.data(Qt.UserRole + 5).toInt(), dumpIndices(model))
@@ -92,14 +89,14 @@ def getBuildIssuesTypeCounts(model):
 def main():
     tasksFile, issueTypes = generateMockTasksFile()
     expectedNo = sum(issueTypes)
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
     ensureChecked(":Qt Creator_Issues_Core::Internal::OutputPaneToggleButton")
     model = waitForObject(":Qt Creator.Issues_QListView").model()
     test.verify(model.rowCount() == 0, 'Got an empty issue list to start from.')
     invokeMenuItem("File", "Open File or Project...")
-    selectFromFileDialog(tasksFile)
+    selectFromFileDialog(tasksFile, False, True)
     starttime = datetime.utcnow()
     waitFor("model.rowCount() == expectedNo", 10000)
     endtime = datetime.utcnow()

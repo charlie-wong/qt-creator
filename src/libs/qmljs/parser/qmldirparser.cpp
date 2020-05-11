@@ -24,11 +24,10 @@
 ****************************************************************************/
 
 #include "qmldirparser_p.h"
-#include "qmlerror.h"
 
 #include <QtCore/QtDebug>
 
-QT_BEGIN_NAMESPACE
+QT_QML_BEGIN_NAMESPACE
 
 static int parseInt(const QStringRef &str, bool *ok)
 {
@@ -60,12 +59,18 @@ static bool parseVersion(const QString &str, int *major, int *minor)
     return false;
 }
 
-QmlDirParser::QmlDirParser() : _designerSupported(false)
+void QmlDirParser::clear()
 {
-}
-
-QmlDirParser::~QmlDirParser()
-{
+    _errors.clear();
+    _typeNamespace.clear();
+    _components.clear();
+    _dependencies.clear();
+    _imports.clear();
+    _scripts.clear();
+    _plugins.clear();
+    _designerSupported = false;
+    _typeInfos.clear();
+    _className.clear();
 }
 
 inline static void scanSpace(const QChar *&ch) {
@@ -88,12 +93,6 @@ inline static void scanWord(const QChar *&ch) {
 */
 bool QmlDirParser::parse(const QString &source)
 {
-    _errors.clear();
-    _plugins.clear();
-    _components.clear();
-    _scripts.clear();
-    _designerSupported = false;
-
     quint16 lineNumber = 0;
     bool firstLine = true;
 
@@ -182,7 +181,8 @@ bool QmlDirParser::parse(const QString &source)
                 continue;
             }
 
-            // Ignore these. qmlimportscanner uses them.
+            _className = sections[1];
+
         } else if (sections[0] == QLatin1String("internal")) {
             if (sectionCount != 3) {
                 reportError(lineNumber, 0,
@@ -191,7 +191,7 @@ bool QmlDirParser::parse(const QString &source)
             }
             Component entry(sections[1], sections[2], -1, -1);
             entry.internal = true;
-            _components.insertMulti(entry.typeName, entry);
+            _components.insert(entry.typeName, entry);
         } else if (sections[0] == QLatin1String("singleton")) {
             if (sectionCount < 3 || sectionCount > 4) {
                 reportError(lineNumber, 0,
@@ -202,7 +202,7 @@ bool QmlDirParser::parse(const QString &source)
                 // singleton TestSingletonType TestSingletonType.qml
                 Component entry(sections[1], sections[2], -1, -1);
                 entry.singleton = true;
-                _components.insertMulti(entry.typeName, entry);
+                _components.insert(entry.typeName, entry);
             } else {
                 // handle qmldir module listing case where singleton is defined in the following pattern:
                 // singleton TestSingletonType 2.0 TestSingletonType20.qml
@@ -211,7 +211,7 @@ bool QmlDirParser::parse(const QString &source)
                     const QString &fileName = sections[3];
                     Component entry(sections[1], fileName, major, minor);
                     entry.singleton = true;
-                    _components.insertMulti(entry.typeName, entry);
+                    _components.insert(entry.typeName, entry);
                 } else {
                     reportError(lineNumber, 0, QStringLiteral("invalid version %1, expected <major>.<minor>").arg(sections[2]));
                 }
@@ -247,22 +247,29 @@ bool QmlDirParser::parse(const QString &source)
             } else {
                 reportError(lineNumber, 0, QStringLiteral("invalid version %1, expected <major>.<minor>").arg(sections[2]));
             }
+        } else if (sections[0] == QLatin1String("import")) {
+            if (sectionCount != 2) {
+                reportError(lineNumber, 0,
+                            QStringLiteral("import requires 2 arguments, but %1 were provided").arg(sectionCount - 1));
+                continue;
+            }
+            _imports << sections[1];
         } else if (sectionCount == 2) {
             // No version specified (should only be used for relative qmldir files)
             const Component entry(sections[0], sections[1], -1, -1);
-            _components.insertMulti(entry.typeName, entry);
+            _components.insert(entry.typeName, entry);
         } else if (sectionCount == 3) {
             int major, minor;
             if (parseVersion(sections[1], &major, &minor)) {
                 const QString &fileName = sections[2];
 
-                if (fileName.endsWith(QLatin1String(".js"))) {
+                if (fileName.endsWith(QLatin1String(".js")) || fileName.endsWith(QLatin1String(".mjs"))) {
                     // A 'js' extension indicates a namespaced script import
                     const Script entry(sections[0], fileName, major, minor);
                     _scripts.append(entry);
                 } else {
                     const Component entry(sections[0], fileName, major, minor);
-                    _components.insertMulti(entry.typeName, entry);
+                    _components.insert(entry.typeName, entry);
                 }
             } else {
                 reportError(lineNumber, 0, QStringLiteral("invalid version %1, expected <major>.<minor>").arg(sections[1]));
@@ -295,27 +302,20 @@ bool QmlDirParser::hasError() const
     return false;
 }
 
-void QmlDirParser::setError(const QmlError &e)
+void QmlDirParser::setError(const QmlJS::DiagnosticMessage &e)
 {
     _errors.clear();
-    reportError(e.line(), e.column(), e.description());
+    reportError(e.loc.startLine, e.loc.startColumn, e.message);
 }
 
-QList<QmlError> QmlDirParser::errors(const QString &uri) const
+QList<QmlJS::DiagnosticMessage> QmlDirParser::errors(const QString &uri) const
 {
-    QUrl url(uri);
-    QList<QmlError> errors;
+    QList<QmlJS::DiagnosticMessage> errors;
     const int numErrors = _errors.size();
     errors.reserve(numErrors);
     for (int i = 0; i < numErrors; ++i) {
-        const QmlJS::DiagnosticMessage &msg = _errors.at(i);
-        QmlError e;
-        QString description = msg.message;
-        description.replace(QLatin1String("$$URI$$"), uri);
-        e.setDescription(description);
-        e.setUrl(url);
-        e.setLine(msg.loc.startLine);
-        e.setColumn(msg.loc.startColumn);
+        QmlJS::DiagnosticMessage e = _errors.at(i);
+        e.message.replace(QLatin1String("$$URI$$"), uri);
         errors << e;
     }
     return errors;
@@ -336,7 +336,7 @@ QList<QmlDirParser::Plugin> QmlDirParser::plugins() const
     return _plugins;
 }
 
-QHash<QString, QmlDirParser::Component> QmlDirParser::components() const
+QMultiHash<QString, QmlDirParser::Component> QmlDirParser::components() const
 {
     return _components;
 }
@@ -346,21 +346,29 @@ QHash<QString, QmlDirParser::Component> QmlDirParser::dependencies() const
     return _dependencies;
 }
 
+QStringList QmlDirParser::imports() const
+{
+    return _imports;
+}
+
 QList<QmlDirParser::Script> QmlDirParser::scripts() const
 {
     return _scripts;
 }
 
-#ifdef QT_CREATOR
 QList<QmlDirParser::TypeInfo> QmlDirParser::typeInfos() const
 {
     return _typeInfos;
 }
-#endif
 
 bool QmlDirParser::designerSupported() const
 {
     return _designerSupported;
+}
+
+QString QmlDirParser::className() const
+{
+    return _className;
 }
 
 QDebug &operator<< (QDebug &debug, const QmlDirParser::Component &component)
@@ -377,4 +385,4 @@ QDebug &operator<< (QDebug &debug, const QmlDirParser::Script &script)
     return debug << qPrintable(output);
 }
 
-QT_END_NAMESPACE
+QT_QML_END_NAMESPACE

@@ -98,15 +98,8 @@ double integerFromString(const char *buf, int size, int radix)
     return result;
 }
 
-double integerFromString(const QString &str, int radix)
-{
-    QByteArray ba = QStringRef(&str).trimmed().toLatin1();
-    return integerFromString(ba.constData(), ba.size(), radix);
-}
-
-
 Engine::Engine()
-    : _lexer(0), _directives(0)
+    : _lexer(nullptr), _directives(nullptr)
 { }
 
 Engine::~Engine()
@@ -116,9 +109,9 @@ void Engine::setCode(const QString &code)
 { _code = code; }
 
 void Engine::addComment(int pos, int len, int line, int col)
-{ if (len > 0) _comments.append(QmlJS::AST::SourceLocation(pos, len, line, col)); }
+{ if (len > 0) _comments.append(QmlJS::SourceLocation(pos, len, line, col)); }
 
-QList<QmlJS::AST::SourceLocation> Engine::comments() const
+QList<QmlJS::SourceLocation> Engine::comments() const
 { return _comments; }
 
 Lexer *Engine::lexer() const

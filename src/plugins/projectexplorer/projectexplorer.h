@@ -43,18 +43,25 @@ class IMode;
 class Id;
 } // namespace Core
 
-namespace Utils { class ProcessHandle; }
+namespace Utils {
+class ProcessHandle;
+class FilePath;
+}
 
 namespace ProjectExplorer {
+class BuildPropertiesSettings;
 class RunControl;
 class RunConfiguration;
-class IRunControlFactory;
 class Project;
 class Node;
 class FolderNode;
 class FileNode;
 
-namespace Internal { class ProjectExplorerSettings; }
+namespace Internal {
+class AppOutputSettings;
+class MiniProjectTargetSelector;
+class ProjectExplorerSettings;
+}
 
 class PROJECTEXPLORER_EXPORT ProjectExplorerPlugin : public ExtensionSystem::IPlugin
 {
@@ -121,18 +128,26 @@ public:
     //PluginInterface
     bool initialize(const QStringList &arguments, QString *errorMessage) override;
     void extensionsInitialized() override;
-    bool delayedInitialize() override;
+    void restoreKits();
     ShutdownFlag aboutToShutdown() override;
 
     static void setProjectExplorerSettings(const Internal::ProjectExplorerSettings &pes);
-    static Internal::ProjectExplorerSettings projectExplorerSettings();
+    static const Internal::ProjectExplorerSettings &projectExplorerSettings();
+
+    static void setAppOutputSettings(const Internal::AppOutputSettings &settings);
+    static const Internal::AppOutputSettings &appOutputSettings();
+
+    static void setBuildPropertiesSettings(const BuildPropertiesSettings &settings);
+    static const BuildPropertiesSettings &buildPropertiesSettings();
+    static void showQtSettings();
 
     static void startRunControl(RunControl *runControl);
-    static void showRunErrorMessage(const QString &errorMessage);
+    static void showOutputPaneForRunControl(RunControl *runControl);
 
     // internal public for FlatModel
     static void renameFile(Node *node, const QString &newFilePath);
     static QStringList projectFilePatterns();
+    static bool isProjectFile(const Utils::FilePath &filePath);
     static QList<QPair<QString, QString> > recentProjects();
 
     static bool canRunStartupProject(Core::Id runMode, QString *whyNot = nullptr);
@@ -141,24 +156,31 @@ public:
     static void runRunConfiguration(RunConfiguration *rc, Core::Id runMode,
                              const bool forceSkipDeploy = false);
     static QList<QPair<Runnable, Utils::ProcessHandle>> runningRunControlProcesses();
+    static QList<RunControl *> allRunControls();
 
     static void addExistingFiles(FolderNode *folderNode, const QStringList &filePaths);
 
-    static void buildProject(Project *p);
-
     static void initiateInlineRenaming();
 
-    static QString displayNameForStepId(Core::Id stepId);
-
-    static QString directoryFor(Node *node);
     static QStringList projectFileGlobs();
 
-    static void updateContextMenuActions();
-
     static QThreadPool *sharedThreadPool();
+    static Internal::MiniProjectTargetSelector *targetSelector();
 
+    static void showSessionManager();
     static void openNewProjectDialog();
     static void openOpenProjectDialog();
+
+    static QString buildDirectoryTemplate();
+    static QString defaultBuildDirectoryTemplate();
+
+    static void updateActions();
+
+    static void activateProjectPanel(Core::Id panelId);
+    static void clearRecentProjects();
+    static void removeFromRecentProjects(const QString &fileName, const QString &displayName);
+
+    static void updateRunActions();
 
 signals:
     void finishedInitialization();
@@ -167,18 +189,27 @@ signals:
     // or the file list of a specific project has changed.
     void fileListChanged();
 
-    void aboutToExecuteProject(ProjectExplorer::Project *project, Core::Id runMode);
     void recentProjectsChanged();
 
     void settingsChanged();
 
-    void updateRunActions();
+    void runActionsUpdated();
 
 private:
     static bool coreAboutToClose();
+    void handleCommandLineArguments(const QStringList &arguments);
 
 #ifdef WITH_TESTS
 private slots:
+    void testJsonWizardsEmptyWizard();
+    void testJsonWizardsEmptyPage();
+    void testJsonWizardsUnusedKeyAtFields_data();
+    void testJsonWizardsUnusedKeyAtFields();
+    void testJsonWizardsCheckBox();
+    void testJsonWizardsLineEdit();
+    void testJsonWizardsComboBox();
+    void testJsonWizardsIconList();
+
     void testAnsiFilterOutputParser_data();
     void testAnsiFilterOutputParser();
 
@@ -196,7 +227,6 @@ private slots:
 
     void testGnuMakeParserParsing_data();
     void testGnuMakeParserParsing();
-    void testGnuMakeParserTaskMangling_data();
     void testGnuMakeParserTaskMangling();
 
     void testXcodebuildParserParsing_data();
@@ -211,16 +241,35 @@ private slots:
     void testGccAbiGuessing_data();
     void testGccAbiGuessing();
 
+    void testAbiRoundTrips();
     void testAbiOfBinary_data();
     void testAbiOfBinary();
-    void testFlavorForOs();
     void testAbiFromTargetTriplet_data();
     void testAbiFromTargetTriplet();
+    void testAbiUserOsFlavor_data();
+    void testAbiUserOsFlavor();
 
     void testDeviceManager();
 
-    void testToolChainManager_data();
-    void testToolChainManager();
+    void testToolChainMerging_data();
+    void testToolChainMerging();
+    void deleteTestToolchains();
+
+    void testUserFileAccessor_prepareToReadSettings();
+    void testUserFileAccessor_prepareToReadSettingsObsoleteVersion();
+    void testUserFileAccessor_prepareToReadSettingsObsoleteVersionNewVersion();
+    void testUserFileAccessor_prepareToWriteSettings();
+    void testUserFileAccessor_mergeSettings();
+    void testUserFileAccessor_mergeSettingsEmptyUser();
+    void testUserFileAccessor_mergeSettingsEmptyShared();
+
+    void testProject_setup();
+    void testProject_changeDisplayName();
+    void testProject_parsingSuccess();
+    void testProject_parsingFail();
+    void testProject_projectTree();
+
+    void testSessionSwitch();
 #endif // WITH_TESTS
 };
 

@@ -294,7 +294,7 @@ void f12b()
 
 #define foreach2 FOREACH
 
-#include <initializer_list>
+
 
 void f13()
 {
@@ -331,7 +331,7 @@ void f14()
 
 using IntegerAlias = int;
 using SecondIntegerAlias = IntegerAlias;
-using IntegerTypedef = int;
+typedef int IntegerTypedef;
 using Function = void (*)();
 
 
@@ -482,12 +482,12 @@ void f25()
     NonConstPointerArgument(x);
 }
 
-void ConstPointerArgument(const int *argument);
-
+void PointerToConstArgument(const int *argument);
+void ConstPointerArgument(int *const argument);
 void f26()
 {
     int *x;
-
+    PointerToConstArgument(x);
     ConstPointerArgument(x);
 }
 
@@ -559,3 +559,139 @@ using N::goo;
 #endif
 
 #include <new>
+
+struct OtherOperator { void operator()(int); };
+void g(OtherOperator o, int var)
+{
+    o(var);
+}
+
+void NonConstPointerArgument(int &argument);
+
+struct PointerGetterClass
+{
+    int &getter();
+};
+
+void f32()
+{
+    PointerGetterClass x;
+
+    NonConstPointerArgument(x.getter());
+}
+
+namespace N { template <typename T> void SizeIs(); }
+using N::SizeIs;
+
+void BaseClass::VirtualFunction() {}
+
+class WithVirtualFunctionDefined {
+  virtual void VirtualFunctionDefinition() {};
+};
+
+namespace NFoo { namespace NBar { namespace NTest { class NamespaceTypeSpelling; } } }
+
+Undeclared u;
+#define Q_PROPERTY(arg) static_assert("Q_PROPERTY", #arg); // Keep these in sync with wrappedQtHeaders/QtCore/qobjectdefs.h
+#define SIGNAL(arg) #arg
+#define SLOT(arg) #arg
+class Property {
+    Q_PROPERTY(const volatile unsigned long long * prop READ getProp WRITE setProp NOTIFY propChanged)
+    Q_PROPERTY(const QString str READ getStr)
+};
+
+struct X {
+    void operator*(int) {}
+};
+
+void operator*(X, float) {}
+
+void CallSite() {
+    X x;
+    int y = 10;
+    float z = 10;
+    x * y;
+    x * z;
+}
+
+struct Dummy {
+    Dummy operator<<=(int key);
+    Dummy operator()(int a);
+    int& operator[] (unsigned index);
+    void* operator new(unsigned size);
+    void operator delete(void* ptr);
+    void* operator new[](unsigned size);
+    void operator delete[](void* ptr);
+};
+
+void TryOverloadedOperators(Dummy object)
+{
+    object <<= 3;
+
+    Dummy stacked;
+    stacked(4);
+    stacked[1];
+    int *i = new int;
+    Dummy* use_new = new Dummy();
+    delete use_new;
+    Dummy* many = new Dummy[10];
+    delete [] many;
+}
+
+enum {
+    Test = 0
+};
+
+namespace {
+class B {
+    struct {
+        int a;
+    };
+};
+}
+
+struct Dummy2 {
+    Dummy2 operator()();
+    int operator*();
+    Dummy2 operator=(int foo);
+};
+
+void TryOverloadedOperators2(Dummy object)
+{
+    Dummy2 dummy2;
+    dummy2();
+    *dummy2;
+    dummy2 = 3;
+}
+
+int OperatorTest() {
+    return 1 < 2 ? 20 : 30;
+}
+
+int signalSlotTest() {
+    SIGNAL(something(QString));
+    SLOT(something(QString));
+    SIGNAL(something(QString (*func1)(QString)));
+    1 == 2;
+}
+
+class NonConstParameterConstructor
+{
+    NonConstParameterConstructor() = default;
+    NonConstParameterConstructor(NonConstParameterConstructor &buildDependenciesStorage);
+
+    void Call()
+    {
+        NonConstParameterConstructor foo;
+        NonConstParameterConstructor bar(foo);
+    }
+};
+
+class StaticMembersAccess
+{
+protected:
+    static int protectedValue;
+
+private:
+    static int privateValue;
+};

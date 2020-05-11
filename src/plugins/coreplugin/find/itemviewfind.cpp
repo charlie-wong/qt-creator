@@ -35,6 +35,12 @@
 
 namespace Core {
 
+/*!
+    \class Core::ItemViewFind
+    \inmodule QtCreator
+    \internal
+*/
+
 class ItemModelFindPrivate
 {
 public:
@@ -139,7 +145,7 @@ static QFrame *createHelper(QAbstractItemView *treeView,
     placeHolder->setLightColored(colorOption);
 
     auto vbox = new QVBoxLayout(widget);
-    vbox->setMargin(0);
+    vbox->setContentsMargins(0, 0, 0, 0);
     vbox->setSpacing(0);
     vbox->addWidget(treeView);
     vbox->addWidget(placeHolder);
@@ -230,7 +236,7 @@ IFindSupport::Result ItemViewFind::find(const QString &searchTxt,
         d->m_view->setCurrentIndex(resultIndex);
         d->m_view->scrollTo(resultIndex);
         if (resultIndex.parent().isValid())
-            if (QTreeView *treeView = qobject_cast<QTreeView *>(d->m_view))
+            if (auto treeView = qobject_cast<QTreeView *>(d->m_view))
                 treeView->expand(resultIndex.parent());
         if (wrapped)
             *wrapped = anyWrapped;
@@ -261,7 +267,7 @@ QModelIndex ItemViewFind::nextIndex(const QModelIndex &idx, bool *wrapped) const
     if (d->m_option == FetchMoreWhileSearching && model->canFetchMore(current))
         model->fetchMore(current);
     if (model->rowCount(current) > 0)
-        return current.child(0, 0);
+        return model->index(0, 0, current);
 
     // no more children, go up and look for parent with more children
     QModelIndex nextIndex;

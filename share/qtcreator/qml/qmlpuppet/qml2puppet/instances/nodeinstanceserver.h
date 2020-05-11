@@ -35,6 +35,18 @@
 #include "servernodeinstance.h"
 #include "debugoutputcommand.h"
 
+namespace QtHelpers {
+template <class T>
+QList<T>toList(const QSet<T> &set)
+{
+#if (QT_VERSION < QT_VERSION_CHECK(5, 14, 0))
+    return set.toList();
+#else
+    return QList<T>(set.begin(), set.end());
+#endif
+}
+} //QtHelpers
+
 QT_BEGIN_NAMESPACE
 class QFileSystemWatcher;
 class QQmlView;
@@ -48,6 +60,7 @@ namespace QmlDesigner {
 
 class NodeInstanceClientInterface;
 class ValuesChangedCommand;
+class ValuesModifiedCommand;
 class PixmapChangedCommand;
 class InformationChangedCommand;
 class ChildrenChangedCommand;
@@ -56,6 +69,7 @@ class ComponentCompletedCommand;
 class AddImportContainer;
 class MockupTypeContainer;
 class IdContainer;
+class ChangeSelectionCommand;
 
 namespace Internal {
     class ChildrenChangeEventFilter;
@@ -65,30 +79,39 @@ class NodeInstanceServer : public NodeInstanceServerInterface
 {
     Q_OBJECT
 public:
-    typedef QPair<QPointer<QObject>, PropertyName> ObjectPropertyPair;
-    typedef QPair<qint32, QString>  IdPropertyPair;
-    typedef QPair<ServerNodeInstance, PropertyName> InstancePropertyPair;
-    typedef QPair<QString, QPointer<QObject> > DummyPair;
+    using ObjectPropertyPair = QPair<QPointer<QObject>, PropertyName>;
+    using IdPropertyPair = QPair<qint32, QString>;
+    using InstancePropertyPair= QPair<ServerNodeInstance, PropertyName>;
+    using DummyPair = QPair<QString, QPointer<QObject> >;
+    using InstancePropertyValueTriple = struct {
+        ServerNodeInstance instance;
+        PropertyName propertyName;
+        QVariant propertyValue;
+    };
+
 
     explicit NodeInstanceServer(NodeInstanceClientInterface *nodeInstanceClient);
-    ~NodeInstanceServer();
 
-    void createInstances(const CreateInstancesCommand &command);
-    void changeFileUrl(const ChangeFileUrlCommand &command);
-    void changePropertyValues(const ChangeValuesCommand &command);
-    void changePropertyBindings(const ChangeBindingsCommand &command);
-    void changeAuxiliaryValues(const ChangeAuxiliaryCommand &command);
-    void changeIds(const ChangeIdsCommand &command);
-    void createScene(const CreateSceneCommand &command);
-    void clearScene(const ClearSceneCommand &command);
-    void removeInstances(const RemoveInstancesCommand &command);
-    void removeProperties(const RemovePropertiesCommand &command);
-    void reparentInstances(const ReparentInstancesCommand &command);
-    void changeState(const ChangeStateCommand &command);
-    void completeComponent(const CompleteComponentCommand &command);
-    void changeNodeSource(const ChangeNodeSourceCommand &command);
-    void token(const TokenCommand &command);
-    void removeSharedMemory(const RemoveSharedMemoryCommand &command);
+    void createInstances(const CreateInstancesCommand &command) override;
+    void changeFileUrl(const ChangeFileUrlCommand &command) override;
+    void changePropertyValues(const ChangeValuesCommand &command) override;
+    void changePropertyBindings(const ChangeBindingsCommand &command) override;
+    void changeAuxiliaryValues(const ChangeAuxiliaryCommand &command) override;
+    void changeIds(const ChangeIdsCommand &command) override;
+    void createScene(const CreateSceneCommand &command) override;
+    void clearScene(const ClearSceneCommand &command) override;
+    void update3DViewState(const Update3dViewStateCommand &command) override;
+    void removeInstances(const RemoveInstancesCommand &command) override;
+    void removeProperties(const RemovePropertiesCommand &command) override;
+    void reparentInstances(const ReparentInstancesCommand &command) override;
+    void changeState(const ChangeStateCommand &command) override;
+    void completeComponent(const CompleteComponentCommand &command) override;
+    void changeNodeSource(const ChangeNodeSourceCommand &command) override;
+    void token(const TokenCommand &command) override;
+    void removeSharedMemory(const RemoveSharedMemoryCommand &command) override;
+    void changeSelection(const ChangeSelectionCommand &command) override;
+    void inputEvent(const InputEventCommand &command) override;
+    void view3DAction(const View3DActionCommand &command) override;
 
     ServerNodeInstance instanceForId(qint32 id) const;
     bool hasInstanceForId(qint32 id) const;
@@ -133,7 +156,7 @@ public slots:
     void emitParentChanged(QObject *child);
 
 protected:
-    QList<ServerNodeInstance> createInstances(const QVector<InstanceContainer> &container);
+    virtual QList<ServerNodeInstance> createInstances(const QVector<InstanceContainer> &container);
     void reparentInstances(const QVector<ReparentContainer> &containerVector);
 
     Internal::ChildrenChangeEventFilter *childrenChangeEventFilter();
@@ -148,16 +171,18 @@ protected:
 
     NodeInstanceClientInterface *nodeInstanceClient() const;
 
-    void timerEvent(QTimerEvent *);
+    void timerEvent(QTimerEvent *) override;
 
     virtual void collectItemChangesAndSendChangeCommands() = 0;
 
     ValuesChangedCommand createValuesChangedCommand(const QList<ServerNodeInstance> &instanceList) const;
     ValuesChangedCommand createValuesChangedCommand(const QVector<InstancePropertyPair> &propertyList) const;
+    ValuesModifiedCommand createValuesModifiedCommand(const QVector<InstancePropertyValueTriple> &propertyList) const;
     PixmapChangedCommand createPixmapChangedCommand(const QList<ServerNodeInstance> &instanceList) const;
     InformationChangedCommand createAllInformationChangedCommand(const QList<ServerNodeInstance> &instanceList, bool initial = false) const;
     ChildrenChangedCommand createChildrenChangedCommand(const ServerNodeInstance &parentInstance, const QList<ServerNodeInstance> &instanceList) const;
     ComponentCompletedCommand createComponentCompletedCommand(const QList<ServerNodeInstance> &instanceList);
+    ChangeSelectionCommand createChangeSelectionCommand(const QList<ServerNodeInstance> &instanceList);
 
     void addChangedProperty(const InstancePropertyPair &property);
 
@@ -214,10 +239,10 @@ private:
     QPointer<Internal::ChildrenChangeEventFilter> m_childrenChangeEventFilter;
     QUrl m_fileUrl;
     NodeInstanceClientInterface *m_nodeInstanceClient;
-    int m_timer;
-    int m_renderTimerInterval;
-    bool m_slowRenderTimer;
-    int m_slowRenderTimerInterval;
+    int m_timer = 0;
+    int m_renderTimerInterval = 16;
+    bool m_slowRenderTimer = false;
+    int m_slowRenderTimerInterval = 200;
     QVector<InstancePropertyPair> m_changedPropertyList;
     QByteArray m_importCode;
     QPointer<QObject> m_dummyContextObject;

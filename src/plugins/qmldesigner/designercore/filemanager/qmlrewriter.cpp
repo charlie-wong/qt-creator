@@ -34,7 +34,7 @@
 #include <typeinfo>
 
 
-static Q_LOGGING_CATEGORY(qmlRewriter, "qtc.rewriter.qmlrewriter")
+static Q_LOGGING_CATEGORY(qmlRewriter, "qtc.rewriter.qmlrewriter", QtWarningMsg)
 
 using namespace QmlDesigner::Internal;
 
@@ -68,12 +68,12 @@ QString QMLRewriter::textBetween(int startPosition, int endPosition) const
     return m_textModifier->text().mid(startPosition, endPosition - startPosition);
 }
 
-QString QMLRewriter::textAt(const QmlJS::AST::SourceLocation &location) const
+QString QMLRewriter::textAt(const QmlJS::SourceLocation &location) const
 {
     return m_textModifier->text().mid(location.offset, location.length);
 }
 
-unsigned QMLRewriter::calculateIndentDepth(const QmlJS::AST::SourceLocation &position) const
+unsigned QMLRewriter::calculateIndentDepth(const QmlJS::SourceLocation &position) const
 {
     QTextDocument *doc = m_textModifier->textDocument();
     QTextCursor tc(doc);
@@ -151,25 +151,25 @@ QString QMLRewriter::removeIndentation(const QString &text, unsigned depth)
     return result;
 }
 
-QmlJS::AST::SourceLocation QMLRewriter::calculateLocation(QmlJS::AST::UiQualifiedId *id)
+QmlJS::SourceLocation QMLRewriter::calculateLocation(QmlJS::AST::UiQualifiedId *id)
 {
-    Q_ASSERT(id != 0);
+    Q_ASSERT(id != nullptr);
 
-    const QmlJS::AST::SourceLocation startLocation = id->identifierToken;
+    const QmlJS::SourceLocation startLocation = id->identifierToken;
 
     QmlJS::AST::UiQualifiedId *nextId = id;
     while (nextId->next) {
         nextId = nextId->next;
     }
 
-    const QmlJS::AST::SourceLocation endLocation = nextId->identifierToken;
+    const QmlJS::SourceLocation endLocation = nextId->identifierToken;
 
-    return QmlJS::AST::SourceLocation(startLocation.offset, endLocation.end() - startLocation.offset);
+    return QmlJS::SourceLocation(startLocation.offset, endLocation.end() - startLocation.offset);
 }
 
 bool QMLRewriter::isMissingSemicolon(QmlJS::AST::UiObjectMember *member)
 {
-    QmlJS::AST::UiScriptBinding *binding = QmlJS::AST::cast<QmlJS::AST::UiScriptBinding *>(member);
+    auto binding = QmlJS::AST::cast<QmlJS::AST::UiScriptBinding *>(member);
     if (binding)
         return isMissingSemicolon(binding->statement);
     else
@@ -178,14 +178,14 @@ bool QMLRewriter::isMissingSemicolon(QmlJS::AST::UiObjectMember *member)
 
 bool QMLRewriter::isMissingSemicolon(QmlJS::AST::Statement *stmt)
 {
-    if (QmlJS::AST::ExpressionStatement *eStmt = QmlJS::AST::cast<QmlJS::AST::ExpressionStatement *>(stmt)) {
+    if (auto eStmt = QmlJS::AST::cast<QmlJS::AST::ExpressionStatement *>(stmt)) {
         return !eStmt->semicolonToken.isValid();
-    } else if (QmlJS::AST::IfStatement *iStmt = QmlJS::AST::cast<QmlJS::AST::IfStatement *>(stmt)) {
+    } else if (auto iStmt = QmlJS::AST::cast<QmlJS::AST::IfStatement *>(stmt)) {
         if (iStmt->elseToken.isValid())
             return isMissingSemicolon(iStmt->ko);
         else
             return isMissingSemicolon(iStmt->ok);
-    } else if (QmlJS::AST::DebuggerStatement *dStmt = QmlJS::AST::cast<QmlJS::AST::DebuggerStatement *>(stmt)) {
+    } else if (auto dStmt = QmlJS::AST::cast<QmlJS::AST::DebuggerStatement *>(stmt)) {
         return !dStmt->semicolonToken.isValid();
     } else {
         return false;
@@ -263,8 +263,8 @@ QmlJS::AST::UiObjectMemberList *QMLRewriter::searchMemberToInsertAfter(QmlJS::AS
 {
     const int objectDefinitionInsertionPoint = propertyOrder.indexOf(PropertyName()); // XXX ????
 
-    QmlJS::AST::UiObjectMemberList *lastObjectDef = 0;
-    QmlJS::AST::UiObjectMemberList *lastNonObjectDef = 0;
+    QmlJS::AST::UiObjectMemberList *lastObjectDef = nullptr;
+    QmlJS::AST::UiObjectMemberList *lastNonObjectDef = nullptr;
 
     for (QmlJS::AST::UiObjectMemberList *iter = members; iter; iter = iter->next) {
         QmlJS::AST::UiObjectMember *member = iter->member;
@@ -272,11 +272,11 @@ QmlJS::AST::UiObjectMemberList *QMLRewriter::searchMemberToInsertAfter(QmlJS::AS
 
         if (QmlJS::AST::cast<QmlJS::AST::UiObjectDefinition*>(member))
             lastObjectDef = iter;
-        else if (QmlJS::AST::UiArrayBinding *arrayBinding = QmlJS::AST::cast<QmlJS::AST::UiArrayBinding*>(member))
+        else if (auto arrayBinding = QmlJS::AST::cast<QmlJS::AST::UiArrayBinding*>(member))
             idx = propertyOrder.indexOf(toString(arrayBinding->qualifiedId).toUtf8());
-        else if (QmlJS::AST::UiObjectBinding *objectBinding = QmlJS::AST::cast<QmlJS::AST::UiObjectBinding*>(member))
+        else if (auto objectBinding = QmlJS::AST::cast<QmlJS::AST::UiObjectBinding*>(member))
             idx = propertyOrder.indexOf(toString(objectBinding->qualifiedId).toUtf8());
-        else if (QmlJS::AST::UiScriptBinding *scriptBinding = QmlJS::AST::cast<QmlJS::AST::UiScriptBinding*>(member))
+        else if (auto scriptBinding = QmlJS::AST::cast<QmlJS::AST::UiScriptBinding*>(member))
             idx = propertyOrder.indexOf(toString(scriptBinding->qualifiedId).toUtf8());
         else if (QmlJS::AST::cast<QmlJS::AST::UiPublicMember*>(member))
             idx = propertyOrder.indexOf("property");
@@ -297,20 +297,20 @@ QmlJS::AST::UiObjectMemberList *QMLRewriter::searchMemberToInsertAfter(QmlJS::AS
                                                            const QmlDesigner::PropertyNameList &propertyOrder)
 {
     if (!members)
-        return 0; // empty members
+        return nullptr; // empty members
 
     QHash<QString, QmlJS::AST::UiObjectMemberList *> orderedMembers;
 
     for (QmlJS::AST::UiObjectMemberList *iter = members; iter; iter = iter->next) {
         QmlJS::AST::UiObjectMember *member = iter->member;
 
-        if (QmlJS::AST::UiArrayBinding *arrayBinding = QmlJS::AST::cast<QmlJS::AST::UiArrayBinding*>(member))
+        if (auto arrayBinding = QmlJS::AST::cast<QmlJS::AST::UiArrayBinding*>(member))
             orderedMembers[toString(arrayBinding->qualifiedId)] = iter;
-        else if (QmlJS::AST::UiObjectBinding *objectBinding = QmlJS::AST::cast<QmlJS::AST::UiObjectBinding*>(member))
+        else if (auto objectBinding = QmlJS::AST::cast<QmlJS::AST::UiObjectBinding*>(member))
             orderedMembers[toString(objectBinding->qualifiedId)] = iter;
         else if (QmlJS::AST::cast<QmlJS::AST::UiObjectDefinition*>(member))
-            orderedMembers[QString::null] = iter;
-        else if (QmlJS::AST::UiScriptBinding *scriptBinding = QmlJS::AST::cast<QmlJS::AST::UiScriptBinding*>(member))
+            orderedMembers[QString()] = iter;
+        else if (auto scriptBinding = QmlJS::AST::cast<QmlJS::AST::UiScriptBinding*>(member))
             orderedMembers[toString(scriptBinding->qualifiedId)] = iter;
         else if (QmlJS::AST::cast<QmlJS::AST::UiPublicMember*>(member))
             orderedMembers[QStringLiteral("property")] = iter;
@@ -325,11 +325,11 @@ QmlJS::AST::UiObjectMemberList *QMLRewriter::searchMemberToInsertAfter(QmlJS::AS
     for (; idx > 0; --idx) {
         const QString prop = QString::fromLatin1(propertyOrder.at(idx - 1));
         QmlJS::AST::UiObjectMemberList *candidate = orderedMembers.value(prop, 0);
-        if (candidate != 0)
+        if (candidate != nullptr)
             return candidate;
     }
 
-    return 0;
+    return nullptr;
 }
 
 void QMLRewriter::dump(const ASTPath &path)
@@ -339,4 +339,9 @@ void QMLRewriter::dump(const ASTPath &path)
         auto node = path.at(i);
         qCDebug(qmlRewriter).noquote() << QString(i + 1, QLatin1Char('-')) << typeid(*node).name();
     }
+}
+
+void QMLRewriter::throwRecursionDepthError()
+{
+    qCWarning(qmlRewriter) << "Warning: Hit maximum recursion level while visiting AST in QMLRewriter";
 }

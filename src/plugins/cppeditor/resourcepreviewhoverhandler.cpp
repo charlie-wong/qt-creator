@@ -26,13 +26,15 @@
 #include "resourcepreviewhoverhandler.h"
 
 #include <coreplugin/icore.h>
-#include <utils/tooltip/tooltip.h>
-#include <utils/fileutils.h>
-#include <utils/qtcassert.h>
-#include <utils/mimetypes/mimedatabase.h>
-#include <projectexplorer/projecttree.h>
 #include <projectexplorer/project.h>
+#include <projectexplorer/projectnodes.h>
+#include <projectexplorer/projecttree.h>
 #include <texteditor/texteditor.h>
+#include <utils/executeondestruction.h>
+#include <utils/fileutils.h>
+#include <utils/mimetypes/mimedatabase.h>
+#include <utils/qtcassert.h>
+#include <utils/tooltip/tooltip.h>
 
 #include <QPoint>
 #include <QTextBlock>
@@ -142,14 +144,13 @@ static QString findResourceInProject(const QString &resName)
         return QString();
 
     if (auto *project = ProjectExplorer::ProjectTree::currentProject()) {
-        const QStringList files = project->files(ProjectExplorer::Project::AllFiles);
-        for (const QString &file : files) {
-            if (!file.endsWith(".qrc"))
-                continue;
-            const QFileInfo fi(file);
+        const Utils::FilePaths files = project->files(
+            [](const ProjectExplorer::Node *n) { return n->filePath().endsWith(".qrc"); });
+        for (const Utils::FilePath &file : files) {
+            const QFileInfo fi = file.toFileInfo();
             if (!fi.isReadable())
                 continue;
-            const QString fileName = findResourceInFile(s, file);
+            const QString fileName = findResourceInFile(s, file.toString());
             if (fileName.isEmpty())
                 continue;
 
@@ -164,8 +165,12 @@ static QString findResourceInProject(const QString &resName)
     return QString();
 }
 
-void ResourcePreviewHoverHandler::identifyMatch(TextEditorWidget *editorWidget, int pos)
+void ResourcePreviewHoverHandler::identifyMatch(TextEditorWidget *editorWidget,
+                                                int pos,
+                                                ReportPriority report)
 {
+    Utils::ExecuteOnDestruction reportPriority([this, report](){ report(priority()); });
+
     if (editorWidget->extraSelectionTooltip(pos).isEmpty()) {
         const QTextBlock tb = editorWidget->document()->findBlock(pos);
         const int tbpos = pos - tb.position();
@@ -195,14 +200,11 @@ QString ResourcePreviewHoverHandler::makeTooltip() const
     QString ret;
 
     const Utils::MimeType mimeType = Utils::mimeTypeForFile(m_resPath);
-    if (mimeType.isValid()) {
-        if (mimeType.name().startsWith("image", Qt::CaseInsensitive))
-            ret += QString("<img src=\"file:///%1\" /><br/>").arg(m_resPath);
+    if (mimeType.name().startsWith("image", Qt::CaseInsensitive))
+        ret += QString("<img src=\"file:///%1\" /><br/>").arg(m_resPath);
 
-        ret += QString("<a href=\"file:///%1\">%2</a>")
-                .arg(m_resPath)
-                .arg(QDir::toNativeSeparators(m_resPath));
-    }
+    ret += QString("<a href=\"file:///%1\">%2</a>")
+               .arg(m_resPath, QDir::toNativeSeparators(m_resPath));
     return ret;
 }
 

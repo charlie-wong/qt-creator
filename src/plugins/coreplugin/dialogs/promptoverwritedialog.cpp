@@ -39,7 +39,9 @@
 enum { FileNameRole = Qt::UserRole + 1 };
 
 /*!
-    \class Core::Internal::PromptOverwriteDialog
+    \class Core::PromptOverwriteDialog
+    \inmodule QtCreator
+    \internal
     \brief The PromptOverwriteDialog class implements a dialog that asks
     users whether they want to overwrite files.
 
@@ -62,8 +64,7 @@ PromptOverwriteDialog::PromptOverwriteDialog(QWidget *parent) :
 {
     setWindowTitle(tr("Overwrite Existing Files"));
     setModal(true);
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
-    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    auto mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(m_label);
     m_view->setRootIsDecorated(false);
     m_view->setUniformRowHeights(true);
@@ -105,7 +106,7 @@ QStandardItem *PromptOverwriteDialog::itemForFile(const QString &f) const
         if (fileNameOfItem(item) == f)
             return item;
     }
-    return 0;
+    return nullptr;
 }
 
 QStringList PromptOverwriteDialog::files(Qt::CheckState cs) const

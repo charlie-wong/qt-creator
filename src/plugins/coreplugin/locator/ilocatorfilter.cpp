@@ -26,6 +26,7 @@
 #include "ilocatorfilter.h"
 
 #include <coreplugin/coreconstants.h>
+#include <utils/fuzzymatcher.h>
 
 #include <QBoxLayout>
 #include <QCheckBox>
@@ -34,12 +35,13 @@
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QRegularExpression>
 
 using namespace Core;
 
 /*!
     \class Core::ILocatorFilter
-    \inmodule Qt Creator
+    \inmodule QtCreator
 
     \brief The ILocatorFilter class adds a locator filter.
 
@@ -47,11 +49,39 @@ using namespace Core;
 */
 
 /*!
+    \class Core::LocatorFilterEntry
+    \inmodule QtCreator
+    \internal
+*/
+
+/*!
+    \class Core::LocatorFilterEntry::HighlightInfo
+    \inmodule QtCreator
+    \internal
+*/
+
+static QList<ILocatorFilter *> g_locatorFilters;
+
+/*!
     Constructs a locator filter with \a parent. Call from subclasses.
 */
 ILocatorFilter::ILocatorFilter(QObject *parent):
     QObject(parent)
 {
+    g_locatorFilters.append(this);
+}
+
+ILocatorFilter::~ILocatorFilter()
+{
+    g_locatorFilters.removeOne(this);
+}
+
+/*!
+    Returns the list of all locator filters.
+*/
+const QList<ILocatorFilter *> ILocatorFilter::allLocatorFilters()
+{
+    return g_locatorFilters;
 }
 
 /*!
@@ -152,8 +182,8 @@ bool ILocatorFilter::openConfigDialog(QWidget *parent, bool &needsRefresh)
     QDialog dialog(parent, Qt::WindowTitleHint | Qt::WindowSystemMenuHint);
     dialog.setWindowTitle(msgConfigureDialogTitle());
 
-    QVBoxLayout *vlayout = new QVBoxLayout(&dialog);
-    QHBoxLayout *hlayout = new QHBoxLayout;
+    auto vlayout = new QVBoxLayout(&dialog);
+    auto hlayout = new QHBoxLayout;
     QLineEdit *shortcutEdit = new QLineEdit(shortcutString());
     QCheckBox *includeByDefault = new QCheckBox(msgIncludeByDefault());
     includeByDefault->setToolTip(msgIncludeByDefaultToolTip());
@@ -193,12 +223,25 @@ Qt::CaseSensitivity ILocatorFilter::caseSensitivity(const QString &str)
 }
 
 /*!
-    Returns whether the search term \a str contains wildcard characters.
-    Can be used for choosing an optimal matching strategy.
+    Creates the search term \a text as a regular expression with case
+    sensitivity set to \a caseSensitivity.
 */
-bool ILocatorFilter::containsWildcard(const QString &str)
+QRegularExpression ILocatorFilter::createRegExp(const QString &text, Qt::CaseSensitivity caseSensitivity)
 {
-    return str.contains(QLatin1Char('*')) || str.contains(QLatin1Char('?'));
+    return FuzzyMatcher::createRegExp(text, caseSensitivity);
+}
+
+/*!
+    Returns information for highlighting the results of matching the regular
+    expression, specified by \a match, for the data of the type \a dataType.
+*/
+LocatorFilterEntry::HighlightInfo ILocatorFilter::highlightInfo(
+        const QRegularExpressionMatch &match, LocatorFilterEntry::HighlightInfo::DataType dataType)
+{
+    const FuzzyMatcher::HighlightingPositions positions =
+            FuzzyMatcher::highlightingPositions(match);
+
+    return LocatorFilterEntry::HighlightInfo(positions.starts, positions.lengths, dataType);
 }
 
 /*!
@@ -268,7 +311,9 @@ bool ILocatorFilter::isIncludedByDefault() const
 }
 
 /*!
-    Sets whether using the shortcut string is required to use this filter.
+    Sets whether using the shortcut string is required to use this filter
+    to \a includedByDefault.
+
     Call from the constructor of subclasses to change the default.
 
     \sa isIncludedByDefault()
@@ -292,8 +337,8 @@ bool ILocatorFilter::isHidden() const
 }
 
 /*!
-    Hides the filter in the \uicontrol {Locator filters} filter,
-    menus, and locator settings. Call in the constructor of subclasses.
+    Sets the filter in the \uicontrol {Locator filters} filter, menus, and
+    locator settings to \a hidden. Call in the constructor of subclasses.
 */
 void ILocatorFilter::setHidden(bool hidden)
 {
@@ -325,6 +370,14 @@ Id ILocatorFilter::id() const
 }
 
 /*!
+    Returns the filter's action ID.
+*/
+Id ILocatorFilter::actionId() const
+{
+    return m_id.withPrefix("Locator.");
+}
+
+/*!
     Returns the filter's translated display name.
 
     \sa setDisplayName()
@@ -348,7 +401,7 @@ ILocatorFilter::Priority ILocatorFilter::priority() const
 }
 
 /*!
-    Sets whether the filter is currently available.
+    Sets whether the filter is currently available to \a enabled.
 
     \sa isEnabled()
 */
@@ -358,7 +411,7 @@ void ILocatorFilter::setEnabled(bool enabled)
 }
 
 /*!
-    Sets the filter's unique ID.
+    Sets the filter's unique \a id.
     Subclasses must set the ID in their constructor.
 
     \sa id()
@@ -369,7 +422,7 @@ void ILocatorFilter::setId(Id id)
 }
 
 /*!
-    Sets the priority of results of this filter in the result list.
+    Sets the \a priority of results of this filter in the result list.
 
     \sa priority()
 */
@@ -379,7 +432,7 @@ void ILocatorFilter::setPriority(Priority priority)
 }
 
 /*!
-    Sets the translated display name of this filter.
+    Sets the translated display name of this filter to \a displayString.
 
     Subclasses must set the display name in their constructor.
 
@@ -391,7 +444,7 @@ void ILocatorFilter::setDisplayName(const QString &displayString)
 }
 
 /*!
-    Sets whether the filter provides a configuration dialog.
+    Sets whether the filter provides a configuration dialog to \a configurable.
     Most filters should at least provide the default dialog.
 
     \sa isConfigurable()
@@ -402,7 +455,7 @@ void ILocatorFilter::setConfigurable(bool configurable)
 }
 
 /*!
-    \fn QList<LocatorFilterEntry> ILocatorFilter::matchesFor(QFutureInterface<LocatorFilterEntry> &future, const QString &entry)
+    \fn QList<Core::LocatorFilterEntry> Core::ILocatorFilter::matchesFor(QFutureInterface<Core::LocatorFilterEntry> &future, const QString &entry)
 
     Returns the list of results of this filter for the search term \a entry.
     This is run in a separate thread, but is guaranteed to only run in a single
@@ -415,11 +468,10 @@ void ILocatorFilter::setConfigurable(bool configurable)
 
     \sa prepareSearch()
     \sa caseSensitivity()
-    \sa containsWildcard()
 */
 
 /*!
-    \fn void ILocatorFilter::accept(LocatorFilterEntry selection, QString *newText, int *selectionStart, int *selectionLength) const
+    \fn void Core::ILocatorFilter::accept(Core::LocatorFilterEntry selection, QString *newText, int *selectionStart, int *selectionLength) const
 
     Called with the entry specified by \a selection when the user activates it
     in the result list.
@@ -428,7 +480,7 @@ void ILocatorFilter::setConfigurable(bool configurable)
 */
 
 /*!
-    \fn void ILocatorFilter::refresh(QFutureInterface<void> &future)
+    \fn void Core::ILocatorFilter::refresh(QFutureInterface<void> &future)
 
     Refreshes cached data asynchronously.
 
@@ -436,7 +488,7 @@ void ILocatorFilter::setConfigurable(bool configurable)
 */
 
 /*!
-    \enum ILocatorFilter::Priority
+    \enum Core::ILocatorFilter::Priority
 
     This enum value holds the priority that is used for ordering the results
     when multiple filters are used.
@@ -450,4 +502,20 @@ void ILocatorFilter::setConfigurable(bool configurable)
     \value  Low
             The results for this filter are placed below the results for filters
             that have other priorities.
+*/
+
+/*!
+    \enum Core::ILocatorFilter::MatchLevel
+
+    This enum value holds the level for ordering the results based on how well
+    they match the search criteria.
+
+    \value Best
+           The result is the best match for the regular expression.
+    \value Better
+    \value Good
+    \value Normal
+    \value Count
+           The result has the highest number of matches for the regular
+           expression.
 */

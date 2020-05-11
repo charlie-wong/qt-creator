@@ -26,6 +26,7 @@
 #include "formclasswizarddialog.h"
 #include "formclasswizardpage.h"
 #include "formclasswizardparameters.h"
+#include <cpptools/abstracteditorsupport.h>
 #include <designer/formtemplatewizardpage.h>
 #include <qtsupport/codegenerator.h>
 
@@ -46,7 +47,8 @@ FormClassWizardDialog::FormClassWizardDialog(const Core::BaseFileWizardFactory *
     setPage(FormPageId, m_formPage);
     setPage(ClassPageId, m_classPage);
 
-    foreach (QWizardPage *p, extensionPages())
+    const auto pages = extensionPages();
+    for (QWizardPage *p : pages)
         addPage(p);
 }
 
@@ -87,6 +89,7 @@ FormClassWizardParameters FormClassWizardDialog::parameters() const
     m_classPage->getParameters(&rc);
     // Name the ui class in the Ui namespace after the class specified
     rc.uiTemplate = QtSupport::CodeGenerator::changeUiClassName(m_rawFormTemplate, rc.className);
+    rc.usePragmaOnce = CppTools::AbstractEditorSupport::usePragmaOnce();
     return rc;
 }
 

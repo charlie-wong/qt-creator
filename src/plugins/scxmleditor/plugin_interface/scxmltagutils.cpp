@@ -112,7 +112,7 @@ QVector<TagType> allowedChildTypes(TagType tagType)
     case State:
         childTags << Initial;
         childTags << Final;
-        // FALL THROUGH
+        Q_FALLTHROUGH();
     case Parallel:
         childTags << OnEntry;
         childTags << OnExit;
@@ -135,7 +135,7 @@ QVector<TagType> allowedChildTypes(TagType tagType)
     case If:
         childTags << ElseIf;
         childTags << Else;
-        // FALL THROUGH
+        Q_FALLTHROUGH();
     case Transition:
     case OnEntry:
     case OnExit:
@@ -169,7 +169,7 @@ QVector<TagType> allowedChildTypes(TagType tagType)
         break;
     case Invoke:
         childTags << Finalize;
-        // FALL THROUGH
+        Q_FALLTHROUGH();
     case Donedata:
     case Send:
         childTags << Param;
@@ -211,7 +211,7 @@ QVector<TagType> childTypes(TagType tagType)
     case If:
         childTags << ElseIf;
         childTags << Else;
-        // FALL THROUGH
+        Q_FALLTHROUGH();
     case Transition:
     case OnEntry:
     case OnExit:
@@ -245,7 +245,7 @@ QVector<TagType> childTypes(TagType tagType)
         break;
     case Invoke:
         childTags << Finalize;
-        // FALL THROUGH
+        Q_FALLTHROUGH();
     case Donedata:
     case Send:
         childTags << Param;
@@ -264,7 +264,7 @@ void initChildMenu(TagType tagType, QMenu *menu)
 
     QVector<TagType> childTags = childTypes(tagType);
 
-    if (childTags.count() > 0) {
+    if (!childTags.isEmpty()) {
         for (int i = 0; i < childTags.count(); ++i) {
             if (childTags[i] == OnEntry || childTags[i] == OnExit)
                 initChildMenu(childTags[i], menu->addMenu(QLatin1String(scxml_tags[childTags[i]].name)));

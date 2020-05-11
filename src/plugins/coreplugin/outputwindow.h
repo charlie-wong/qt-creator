@@ -30,11 +30,14 @@
 
 #include <utils/outputformat.h>
 
+#include <QElapsedTimer>
 #include <QPlainTextEdit>
 #include <QTimer>
-#include <QTime>
 
-namespace Utils { class OutputFormatter; }
+namespace Utils {
+class OutputFormatter;
+class OutputLineParser;
+}
 
 namespace Core {
 
@@ -45,30 +48,43 @@ class CORE_EXPORT OutputWindow : public QPlainTextEdit
     Q_OBJECT
 
 public:
-    OutputWindow(Context context, QWidget *parent = 0);
-    ~OutputWindow();
+    enum class FilterModeFlag {
+        Default       = 0x00, // Plain text, non case sensitive, for initialization
+        RegExp        = 0x01,
+        CaseSensitive = 0x02,
+        Inverted      = 0x04,
+    };
+    Q_DECLARE_FLAGS(FilterModeFlags, FilterModeFlag)
 
-    Utils::OutputFormatter *formatter() const;
-    void setFormatter(Utils::OutputFormatter *formatter);
+    OutputWindow(Context context, const QString &settingsKey, QWidget *parent = nullptr);
+    ~OutputWindow() override;
+
+    void setLineParsers(const QList<Utils::OutputLineParser *> &parsers);
+    Utils::OutputFormatter *outputFormatter() const;
 
     void appendMessage(const QString &out, Utils::OutputFormat format);
-    /// appends a \p text using \p format without using formater
-    void appendText(const QString &text, const QTextCharFormat &format = QTextCharFormat());
 
     void grayOutOldContent();
     void clear();
-
-    void showEvent(QShowEvent *) override;
+    void flush();
+    void reset();
 
     void scrollToBottom();
 
-    void setMaxLineCount(int count);
-    int maxLineCount() const;
+    void setMaxCharCount(int count);
+    int maxCharCount() const;
 
     void setBaseFont(const QFont &newFont);
     float fontZoom() const;
     void setFontZoom(float zoom);
+    void resetZoom() { setFontZoom(0); }
     void setWheelZoomEnabled(bool enabled);
+
+    void updateFilterProperties(
+            const QString &filterText,
+            Qt::CaseSensitivity caseSensitivity,
+            bool regexp,
+            bool isInverted);
 
 signals:
     void wheelZoom();
@@ -79,21 +95,25 @@ public slots:
 protected:
     bool isScrollbarAtBottom() const;
 
+private:
+    QMimeData *createMimeDataFromSelection() const override;
+    void keyPressEvent(QKeyEvent *ev) override;
     void mousePressEvent(QMouseEvent *e) override;
     void mouseReleaseEvent(QMouseEvent *e) override;
     void mouseMoveEvent(QMouseEvent *e) override;
     void resizeEvent(QResizeEvent *e) override;
-    void keyPressEvent(QKeyEvent *ev) override;
+    void showEvent(QShowEvent *) override;
     void wheelEvent(QWheelEvent *e) override;
 
-private:
     using QPlainTextEdit::setFont; // call setBaseFont instead, which respects the zoom factor
     QTimer m_scrollTimer;
-    QTime m_lastMessage;
+    QElapsedTimer m_lastMessage;
     void enableUndoRedo();
-    QString doNewlineEnforcement(const QString &out);
+    void filterNewContent();
+    void handleNextOutputChunk();
+    void handleOutputChunk(const QString &output, Utils::OutputFormat format);
 
-    Internal::OutputWindowPrivate *d;
+    Internal::OutputWindowPrivate *d = nullptr;
 };
 
 } // namespace Core

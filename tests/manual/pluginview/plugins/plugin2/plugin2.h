@@ -27,24 +27,24 @@
 
 #include <extensionsystem/iplugin.h>
 
-#include <QObject>
-#include <QString>
-
 namespace Plugin2 {
 
-class MyPlugin2 : public ExtensionSystem::IPlugin
+class MyPlugin2 final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "plugin" FILE "plugin2.json")
 
 public:
-    MyPlugin2();
+    MyPlugin2() = default;
+    ~MyPlugin2() final;
 
-    bool initialize(const QStringList &arguments, QString *errorString);
-    void extensionsInitialized();
+    bool initialize(const QStringList &arguments, QString *errorString) final;
+    void extensionsInitialized() final;
 
 private:
-    bool initializeCalled;
+    bool initializeCalled = false;
+    QObject *object1 = nullptr;
+    QObject *object2 = nullptr;
 };
 
 } // namespace Plugin2

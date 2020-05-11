@@ -28,7 +28,10 @@
 #include "core_global.h"
 #include "id.h"
 
+#include <QList>
+#include <QMainWindow>
 #include <QObject>
+#include <QRect>
 #include <QSettings>
 
 #include <functional>
@@ -37,16 +40,14 @@ QT_BEGIN_NAMESPACE
 class QPrinter;
 class QStatusBar;
 class QWidget;
-template <typename T> class QList;
 QT_END_NAMESPACE
 
 namespace Core {
-class IWizardFactory;
 class Context;
 class IContext;
-class ProgressManager;
+class InfoBar;
+class IWizardFactory;
 class SettingsDatabase;
-class VcsManager;
 
 namespace Internal { class MainWindow; }
 
@@ -58,7 +59,7 @@ class CORE_EXPORT ICore : public QObject
     friend class IWizardFactory;
 
     explicit ICore(Internal::MainWindow *mw);
-    ~ICore();
+    ~ICore() override;
 
 public:
     enum class ContextPriority {
@@ -78,14 +79,14 @@ public:
                                   const QString &defaultLocation = QString(),
                                   const QVariantMap &extraVariables = QVariantMap());
 
-    static bool showOptionsDialog(Id page, QWidget *parent = 0);
+    static bool showOptionsDialog(Id page, QWidget *parent = nullptr);
     static QString msgShowOptionsDialog();
     static QString msgShowOptionsDialogToolTip();
 
     static bool showWarningWithOptions(const QString &title, const QString &text,
                                        const QString &details = QString(),
                                        Id settingsId = Id(),
-                                       QWidget *parent = 0);
+                                       QWidget *parent = nullptr);
 
     static QSettings *settings(QSettings::Scope scope = QSettings::UserScope);
     static SettingsDatabase *settingsDatabase();
@@ -94,19 +95,31 @@ public:
 
     static QString resourcePath();
     static QString userResourcePath();
-    static QString documentationPath();
+    static QString cacheResourcePath();
+    static QString installerResourcePath();
+    static QString pluginPath();
+    static QString userPluginPath();
     static QString libexecPath();
+    static QString clangExecutable(const QString &clangBinDirectory);
+    static QString clangTidyExecutable(const QString &clangBinDirectory);
+    static QString clazyStandaloneExecutable(const QString &clangBinDirectory);
+    static QString clangIncludeDirectory(const QString &clangVersion,
+                                         const QString &clangResourceDirectory);
 
     static QString versionString();
     static QString buildCompatibilityString();
 
-    static QWidget *mainWindow();
+    static QMainWindow *mainWindow();
     static QWidget *dialogParent();
     static QStatusBar *statusBar();
+    static InfoBar *infoBar();
+
     /* Raises and activates the window for the widget. This contains workarounds for X11. */
     static void raiseWindow(QWidget *widget);
 
     static IContext *currentContextObject();
+    static QWidget *currentContextWidget();
+    static IContext *contextObject(QWidget *widget);
     // Adds and removes additional active contexts, these contexts are appended
     // to the currently active contexts.
     static void updateAdditionalContexts(const Context &remove, const Context &add,
@@ -125,23 +138,33 @@ public:
         SwitchMode = 1,
         CanContainLineAndColumnNumbers = 2,
          /// Stop loading once the first file fails to load
-        StopOnLoadFail = 4
+        StopOnLoadFail = 4,
+        SwitchSplitIfAlreadyVisible = 8
     };
     static void openFiles(const QStringList &fileNames, OpenFilesFlags flags = None);
 
     static void addPreCloseListener(const std::function<bool()> &listener);
 
     static QString systemInformation();
+    static void setupScreenShooter(const QString &name, QWidget *w, const QRect &rc = QRect());
+
+    enum SaveSettingsReason {
+        InitializationDone,
+        SettingsDialogDone,
+        ModeChanged,
+        MainWindowClosing,
+    };
+
+    static void restart();
 
 public slots:
-    static void saveSettings();
+    static void saveSettings(SaveSettingsReason reason);
 
 signals:
     void coreAboutToOpen();
     void coreOpened();
     void newItemDialogStateChanged();
-    void saveSettingsRequested();
-    void optionsDialogRequested();
+    void saveSettingsRequested(SaveSettingsReason reason);
     void coreAboutToClose();
     void contextAboutToChange(const QList<Core::IContext *> &context);
     void contextChanged(const Core::Context &context);

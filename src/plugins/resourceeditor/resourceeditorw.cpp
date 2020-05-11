@@ -95,6 +95,7 @@ ResourceEditorW::ResourceEditorW(const Core::Context &context,
                                               &ResourceEditorW::renameCurrentFile);
     m_copyFileNameAction = m_contextMenu->addAction(tr("Copy Resource Path to Clipboard"),
                                                     this, &ResourceEditorW::copyCurrentResourcePath);
+    m_orderList = m_contextMenu->addAction(tr("Sort Alphabetically"), this, &ResourceEditorW::orderList);
 
     connect(m_resourceDocument, &ResourceEditorDocument::loaded,
             m_resourceEditor, &QrcEditor::loaded);
@@ -137,7 +138,7 @@ Core::IDocument::OpenResult ResourceEditorDocument::open(QString *errorString,
         return openResult;
     }
 
-    setFilePath(FileName::fromString(fileName));
+    setFilePath(FilePath::fromString(fileName));
     setBlockDirtyChanged(false);
     m_model->setDirty(fileName != realFileName);
     m_shouldAutoSave = false;
@@ -151,8 +152,8 @@ bool ResourceEditorDocument::save(QString *errorString, const QString &name, boo
     if (debugResourceEditorW)
         qDebug(">ResourceEditorW::save: %s", qPrintable(name));
 
-    const FileName oldFileName = filePath();
-    const FileName actualName = name.isEmpty() ? oldFileName : FileName::fromString(name);
+    const FilePath oldFileName = filePath();
+    const FilePath actualName = name.isEmpty() ? oldFileName : FilePath::fromString(name);
     if (actualName.isEmpty())
         return false;
 
@@ -208,7 +209,7 @@ bool ResourceEditorDocument::setContents(const QByteArray &contents)
     return success;
 }
 
-void ResourceEditorDocument::setFilePath(const FileName &newName)
+void ResourceEditorDocument::setFilePath(const FilePath &newName)
 {
     m_model->setFileName(newName.toString());
     IDocument::setFilePath(newName);
@@ -227,6 +228,24 @@ RelativeResourceModel *ResourceEditorDocument::model() const
 void ResourceEditorDocument::setShouldAutoSave(bool save)
 {
     m_shouldAutoSave = save;
+}
+
+QByteArray ResourceEditorW::saveState() const
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream << m_resourceEditor->saveState();
+    return bytes;
+}
+
+bool ResourceEditorW::restoreState(const QByteArray &state)
+{
+    QDataStream stream(state);
+    QByteArray splitterState;
+    stream >> splitterState;
+    if (!m_resourceEditor->restoreState(splitterState))
+        return false;
+    return true;
 }
 
 QWidget *ResourceEditorW::toolBar()
@@ -311,6 +330,11 @@ void ResourceEditorW::renameCurrentFile()
 void ResourceEditorW::copyCurrentResourcePath()
 {
     QApplication::clipboard()->setText(m_resourceEditor->currentResourcePath());
+}
+
+void ResourceEditorW::orderList()
+{
+    m_resourceDocument->model()->orderList();
 }
 
 void ResourceEditorW::onUndo()

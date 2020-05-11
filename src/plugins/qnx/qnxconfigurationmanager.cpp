@@ -36,16 +36,15 @@ const QLatin1String QNXConfigDataKey("QNXConfiguration.");
 const QLatin1String QNXConfigCountKey("QNXConfiguration.Count");
 const QLatin1String QNXConfigsFileVersionKey("Version");
 
-static Utils::FileName qnxConfigSettingsFileName()
+static Utils::FilePath qnxConfigSettingsFileName()
 {
-    return Utils::FileName::fromString(Core::ICore::userResourcePath() + QLatin1String("/qnx/")
+    return Utils::FilePath::fromString(Core::ICore::userResourcePath() + QLatin1String("/qnx/")
                                 + QLatin1String(Constants::QNX_CONFIGS_FILENAME));
 }
 
-QnxConfigurationManager *QnxConfigurationManager::m_instance = 0;
+static QnxConfigurationManager *m_instance = nullptr;
 
-QnxConfigurationManager::QnxConfigurationManager(QObject *parent)
-    : QObject(parent)
+QnxConfigurationManager::QnxConfigurationManager()
 {
     m_instance = this;
     m_writer = new Utils::PersistentSettingsWriter(qnxConfigSettingsFileName(),
@@ -62,7 +61,7 @@ QnxConfigurationManager *QnxConfigurationManager::instance()
 
 QnxConfigurationManager::~QnxConfigurationManager()
 {
-    m_instance = 0;
+    m_instance = nullptr;
     qDeleteAll(m_configurations);
     delete m_writer;
 }
@@ -95,14 +94,14 @@ bool QnxConfigurationManager::addConfiguration(QnxConfiguration *config)
     return true;
 }
 
-QnxConfiguration *QnxConfigurationManager::configurationFromEnvFile(const Utils::FileName &envFile) const
+QnxConfiguration *QnxConfigurationManager::configurationFromEnvFile(const Utils::FilePath &envFile) const
 {
     foreach (QnxConfiguration *c, m_configurations) {
         if (c->envFile() == envFile)
             return c;
     }
 
-    return 0;
+    return nullptr;
 }
 
 void QnxConfigurationManager::saveConfigs()
@@ -139,7 +138,7 @@ void QnxConfigurationManager::restoreConfigurations()
             continue;
 
         const QVariantMap dMap = data.value(key).toMap();
-        QnxConfiguration *configuration = new QnxConfiguration(dMap);
+        auto configuration = new QnxConfiguration(dMap);
         addConfiguration(configuration);
     }
 }

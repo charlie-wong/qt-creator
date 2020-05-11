@@ -70,7 +70,7 @@ void GraphicsScene::unselectAll()
     foreach (QGraphicsItem *it, selectedItems)
         it->setSelected(false);
     if (m_document)
-        m_document->setCurrentTag(0);
+        m_document->setCurrentTag(nullptr);
 }
 
 void GraphicsScene::unhighlightAll()
@@ -201,15 +201,15 @@ void GraphicsScene::cut()
 void GraphicsScene::removeSelectedItems()
 {
     QVector<ScxmlTag*> tags = SceneUtils::findRemovedTags(m_baseItems);
-    if (tags.count() > 0) {
-        m_document->undoStack()->beginMacro(tr("Remove item(s)"));
+    if (!tags.isEmpty()) {
+        m_document->undoStack()->beginMacro(tr("Remove items"));
 
         // Then remove found tags
         for (int i = tags.count(); i--;) {
             m_document->setCurrentTag(tags[i]);
             m_document->removeTag(tags[i]);
         }
-        m_document->setCurrentTag(0);
+        m_document->setCurrentTag(nullptr);
         m_document->undoStack()->endMacro();
     }
 }
@@ -235,7 +235,7 @@ void GraphicsScene::copy()
     if (tags.isEmpty() && m_document->currentTag())
         tags << m_document->currentTag();
 
-    if (tags.count() > 0) {
+    if (!tags.isEmpty()) {
         auto mime = new QMimeData;
         QByteArray result = m_document->content(tags);
         mime->setText(QLatin1String(result));
@@ -305,7 +305,7 @@ void GraphicsScene::setEditorInfo(const QString &key, const QString &value)
 void GraphicsScene::setDocument(ScxmlDocument *document)
 {
     if (m_document)
-        disconnect(m_document, 0, this, 0);
+        disconnect(m_document, nullptr, this, nullptr);
 
     m_document = document;
 
@@ -361,14 +361,14 @@ void GraphicsScene::init()
     }
 
     m_initializing = false;
-    warningVisibilityChanged(0, 0);
+    warningVisibilityChanged(0, nullptr);
     emit selectedStateCountChanged(0);
     emit selectedBaseItemCountChanged(0);
 }
 
 void GraphicsScene::runLayoutToSelectedStates()
 {
-    m_document->undoStack()->beginMacro(tr("Relayout"));
+    m_document->undoStack()->beginMacro(tr("Re-layout"));
 
     QVector<BaseItem*> selectedItems;
     foreach (BaseItem *node, m_baseItems) {
@@ -465,7 +465,6 @@ void GraphicsScene::beginTagChange(ScxmlDocument::TagChange change, ScxmlTag *ta
 void GraphicsScene::endTagChange(ScxmlDocument::TagChange change, ScxmlTag *tag, const QVariant &value)
 {
     Q_UNUSED(value)
-    QTC_ASSERT(tag, return);
 
     switch (change) {
     case ScxmlDocument::TagAttributesChanged: {
@@ -494,6 +493,7 @@ void GraphicsScene::endTagChange(ScxmlDocument::TagChange change, ScxmlTag *tag,
         auto childItem = qobject_cast<ConnectableItem*>(findItem(tag));
 
         if (childItem) {
+            QTC_ASSERT(tag, break);
             BaseItem *newParentItem = findItem(tag->parentTag());
             BaseItem *oldParentItem = childItem->parentBaseItem();
 
@@ -530,6 +530,9 @@ void GraphicsScene::endTagChange(ScxmlDocument::TagChange change, ScxmlTag *tag,
     }
     case ScxmlDocument::TagAddTags: {
         // Finalize transitions
+        if (!tag)
+            break;
+
         QVector<ScxmlTag*> childTransitionTags;
         if (tag->tagName(false) == "transition")
             childTransitionTags << tag;
@@ -541,9 +544,9 @@ void GraphicsScene::endTagChange(ScxmlDocument::TagChange change, ScxmlTag *tag,
                 item->finalizeCreation();
         }
     }
-    // FIXME: intended fallthrough?
+    break;
     case ScxmlDocument::TagAddChild: {
-        ScxmlTag *childTag = tag->child(value.toInt());
+        ScxmlTag *childTag = tag ? tag->child(value.toInt()) : nullptr;
         if (childTag) {
             // Check that there is no any item with this tag
             BaseItem *childItem = findItem(childTag);
@@ -553,7 +556,7 @@ void GraphicsScene::endTagChange(ScxmlDocument::TagChange change, ScxmlTag *tag,
                     auto transition = new TransitionItem;
                     addItem(transition);
                     transition->setStartItem(qgraphicsitem_cast<ConnectableItem*>(parentItem));
-                    transition->init(childTag, 0, false, false);
+                    transition->init(childTag, nullptr, false, false);
                     transition->updateAttributes();
                 } else {
                     childItem = SceneUtils::createItemByTagType(childTag->tagType(), QPointF());
@@ -578,21 +581,26 @@ void GraphicsScene::endTagChange(ScxmlDocument::TagChange change, ScxmlTag *tag,
         break;
     }
     case ScxmlDocument::TagRemoveChild: {
-        BaseItem *parentItem = findItem(tag);
-        if (parentItem) {
-            parentItem->updateAttributes();
-            parentItem->checkInitial();
-        } else {
-            checkInitialState();
+        if (tag) {
+            BaseItem *parentItem = findItem(tag);
+            if (parentItem) {
+                parentItem->updateAttributes();
+                parentItem->checkInitial();
+            } else {
+                checkInitialState();
+            }
         }
         break;
     }
     case ScxmlDocument::TagChangeOrder: {
-        BaseItem *parentItem = findItem(tag->parentTag());
-        if (parentItem)
-            parentItem->updateAttributes();
-        else
-            checkInitialState();
+        if (tag) {
+            BaseItem *parentItem = findItem(tag->parentTag());
+            if (parentItem)
+                parentItem->updateAttributes();
+            else
+                checkInitialState();
+        }
+        break;
     }
     default:
         break;
@@ -671,7 +679,7 @@ void GraphicsScene::keyPressEvent(QKeyEvent *event)
 {
     QGraphicsItem *focusItem = this->focusItem();
     if (!focusItem || focusItem->type() != TextType) {
-        if (event->key() == Qt::Key_Delete)
+        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
             removeSelectedItems();
     }
     QGraphicsScene::keyPressEvent(event);
@@ -737,7 +745,7 @@ void GraphicsScene::removeItems(const ScxmlTag *tag)
 
         // Then delete them
         for (int i = items.count(); i--;) {
-            items[i]->setTag(0);
+            items[i]->setTag(nullptr);
             delete items[i];
         }
     }
@@ -862,7 +870,7 @@ void GraphicsScene::highlightWarningItem(const ScxmlEditor::OutputPane::Warning 
     ScxmlTag *tag = tagByWarning(w);
 
     if (tag)
-        highlightItems(QVector<ScxmlTag*>() << tag);
+        highlightItems({tag});
     else
         unhighlightAll();
 }
@@ -894,7 +902,7 @@ void GraphicsScene::addChild(BaseItem *item)
     if (!m_baseItems.contains(item)) {
         connect(item, &BaseItem::selectedStateChanged, this, &GraphicsScene::selectionChanged);
         connect(item, &BaseItem::openToDifferentView, this, [=](BaseItem *item){
-            openStateView(item);
+            emit openStateView(item);
         }, Qt::QueuedConnection);
         m_baseItems << item;
     }
@@ -903,7 +911,7 @@ void GraphicsScene::addChild(BaseItem *item)
 void GraphicsScene::removeChild(BaseItem *item)
 {
     if (item)
-        disconnect(item, 0, this, 0);
+        disconnect(item, nullptr, this, nullptr);
     m_baseItems.removeAll(item);
 
     selectionChanged(false);
@@ -935,7 +943,7 @@ void GraphicsScene::checkInitialState()
 void GraphicsScene::clearAllTags()
 {
     foreach (BaseItem *it, m_baseItems) {
-        it->setTag(0);
+        it->setTag(nullptr);
     }
 }
 

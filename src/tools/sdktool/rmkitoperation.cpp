@@ -57,7 +57,7 @@ QString RmKitOperation::name() const
 
 QString RmKitOperation::helpText() const
 {
-    return QString("remove a Kit from Qt Creator");
+    return QString("remove a Kit");
 }
 
 QString RmKitOperation::argumentsHelpText() const
@@ -105,7 +105,7 @@ bool RmKitOperation::test() const
 
     QVariantMap qtMap = AddQtOperation::initializeQtVersions();
     qtMap = AddQtOperation::addQt(qtMap, "{qt-id}", "Qt", "desktop-qt", "/usr/bin/qmake",
-                                  KeyValuePairList());
+                                  KeyValuePairList(), QStringList());
 
     QVariantMap devMap = AddDeviceOperation::initializeDevices();
     devMap = AddDeviceOperation::addDevice(devMap, "{dev-id}", "Dev", 0, 0,

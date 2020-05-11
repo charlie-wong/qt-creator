@@ -43,18 +43,16 @@ QT_END_NAMESPACE
 
 namespace QmlJS {
     class ModelManagerInterface;
-    class IContextPane;
 namespace AST { class UiObjectMember; }
 }
 
 namespace QmlJSEditor {
 
 class QmlJSEditorDocument;
+class QuickToolBar;
 class FindReferences;
 
-namespace Internal {
-
-class QmlJSEditorWidget : public TextEditor::TextEditorWidget
+class QMLJSEDITOR_EXPORT QmlJSEditorWidget : public TextEditor::TextEditorWidget
 {
     Q_OBJECT
 
@@ -62,6 +60,7 @@ public:
     QmlJSEditorWidget();
 
     void finalizeInitialization() override;
+    bool restoreState(const QByteArray &state) override;
 
     QmlJSEditorDocument *qmlJsEditorDocument() const;
 
@@ -74,7 +73,7 @@ public:
 
     void inspectElementUnderCursor() const;
 
-    void findUsages();
+    void findUsages() override;
     void renameUsages();
     void showContextPane();
 
@@ -94,6 +93,7 @@ private:
     void semanticInfoUpdated(const QmlJSTools::SemanticInfo &semanticInfo);
 
     void updateCodeWarnings(QmlJS::Document::Ptr doc);
+    void foldAuxiliaryData();
 
 protected:
     void contextMenuEvent(QContextMenuEvent *e) override;
@@ -103,11 +103,11 @@ protected:
     void scrollContentsBy(int dx, int dy) override;
     void applyFontSettings() override;
     void createToolBar();
-    TextEditor::TextEditorWidget::Link findLinkAt(const QTextCursor &cursor,
-                                                      bool resolveTarget = true,
-                                                      bool inNextSplit = false) override;
+    void findLinkAt(const QTextCursor &cursor,
+                    Utils::ProcessLinkCallback &&processLinkCallback,
+                    bool resolveTarget = true,
+                    bool inNextSplit = false) override;
     QString foldReplacementText(const QTextBlock &block) const override;
-    void onRefactorMarkerClicked(const TextEditor::RefactorMarker &marker) override;
 
 private:
     void setSelectedElements();
@@ -122,35 +122,33 @@ private:
     QTimer m_contextPaneTimer;
     QComboBox *m_outlineCombo;
     QModelIndex m_outlineModelIndex;
-    bool m_blockOutLineCursorChanges = false;
     QmlJS::ModelManagerInterface *m_modelManager = nullptr;
 
-    QmlJS::IContextPane *m_contextPane = nullptr;
+    QuickToolBar *m_contextPane = nullptr;
     int m_oldCursorPosition = -1;
 
     FindReferences *m_findReferences;
 };
 
 
-class QmlJSEditor : public TextEditor::BaseTextEditor
+class QMLJSEDITOR_EXPORT QmlJSEditor : public TextEditor::BaseTextEditor
 {
     Q_OBJECT
 
 public:
     QmlJSEditor();
 
+    QmlJSEditorDocument *qmlJSDocument() const;
     bool isDesignModePreferred() const override;
 };
 
-class QmlJSEditorFactory : public TextEditor::TextEditorFactory
+class QMLJSEDITOR_EXPORT QmlJSEditorFactory : public TextEditor::TextEditorFactory
 {
-    Q_OBJECT
-
 public:
     QmlJSEditorFactory();
+    QmlJSEditorFactory(Core::Id id);
 
     static void decorateEditor(TextEditor::TextEditorWidget *editor);
 };
 
-} // namespace Internal
 } // namespace QmlJSEditor

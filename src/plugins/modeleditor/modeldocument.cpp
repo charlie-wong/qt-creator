@@ -48,7 +48,7 @@ namespace Internal {
 
 class ModelDocument::ModelDocumentPrivate {
 public:
-    ExtDocumentController *documentController = 0;
+    ExtDocumentController *documentController = nullptr;
 };
 
 ModelDocument::ModelDocument(QObject *parent)
@@ -69,7 +69,7 @@ ModelDocument::~ModelDocument()
 Core::IDocument::OpenResult ModelDocument::open(QString *errorString, const QString &fileName,
                                                 const QString &realFileName)
 {
-    Q_UNUSED(fileName);
+    Q_UNUSED(fileName)
 
     OpenResult result = load(errorString, realFileName);
     return result;
@@ -96,7 +96,7 @@ bool ModelDocument::save(QString *errorString, const QString &name, bool autoSav
     if (autoSave) {
         d->documentController->projectController()->setModified();
     } else {
-        setFilePath(Utils::FileName::fromString(d->documentController->projectController()->project()->fileName()));
+        setFilePath(Utils::FilePath::fromString(d->documentController->projectController()->project()->fileName()));
         emit changed();
     }
 
@@ -127,8 +127,17 @@ bool ModelDocument::reload(QString *errorString, Core::IDocument::ReloadFlag fla
         emit changed();
         return true;
     }
-    *errorString = tr("Cannot reload model file.");
-    return false;
+    try {
+        d->documentController->loadProject(filePath().toString());
+    } catch (const qmt::FileNotFoundException &ex) {
+        *errorString = ex.errorMessage();
+        return false;
+    } catch (const qmt::Exception &ex) {
+        *errorString = tr("Could not open \"%1\" for reading: %2.").arg(filePath().toString()).arg(ex.errorMessage());
+        return false;
+    }
+    emit contentSet();
+    return true;
 }
 
 ExtDocumentController *ModelDocument::documentController() const
@@ -143,7 +152,7 @@ Core::IDocument::OpenResult ModelDocument::load(QString *errorString, const QStr
 
     try {
         d->documentController->loadProject(fileName);
-        setFilePath(Utils::FileName::fromString(d->documentController->projectController()->project()->fileName()));
+        setFilePath(Utils::FilePath::fromString(d->documentController->projectController()->project()->fileName()));
     } catch (const qmt::FileNotFoundException &ex) {
         *errorString = ex.errorMessage();
         return OpenResult::ReadError;

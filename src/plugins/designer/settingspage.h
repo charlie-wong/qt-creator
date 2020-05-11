@@ -60,10 +60,10 @@ class SettingsPageProvider : public Core::IOptionsPageProvider
     Q_OBJECT
 
 public:
-    SettingsPageProvider(QObject *parent = 0);
+    SettingsPageProvider();
 
     QList<Core::IOptionsPage *> pages() const override;
-    bool matches(const QString &searchKeyWord) const override;
+    bool matches(const QRegularExpression &regex) const override;
 
 private:
     mutable bool m_initialized = false;

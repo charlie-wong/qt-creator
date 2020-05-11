@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2016 The Qt Company Ltd.
+** Copyright (C) 2020 The Qt Company Ltd.
 ** Contact: https://www.qt.io/licensing/
 **
 ** This file is part of Qt Creator.
@@ -28,10 +28,11 @@
 #include <coreplugin/fileiconprovider.h>
 #include <coreplugin/fileutils.h>
 #include <coreplugin/icore.h>
-#include <coreplugin/removefiledialog.h>
 #include <coreplugin/vcsmanager.h>
 #include <projectexplorer/projectexplorerconstants.h>
 #include <utils/fileutils.h>
+#include <utils/removefiledialog.h>
+#include <utils/theme/theme.h>
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -174,7 +175,7 @@ Core::IDocument::OpenResult ResourceFile::load()
         const QString language = relt.attribute(QLatin1String("lang"));
 
         const int idx = indexOfPrefix(prefix, language);
-        Prefix * p = 0;
+        Prefix *p = nullptr;
         if (idx == -1) {
             p = new Prefix(prefix, language);
             m_prefix_list.append(p);
@@ -447,6 +448,18 @@ QString ResourceFile::absolutePath(const QString &rel_path) const
     return QDir::cleanPath(rc);
 }
 
+void ResourceFile::orderList()
+{
+    for (Prefix *p : m_prefix_list) {
+        std::sort(p->file_list.begin(), p->file_list.end(), [&](File *f1, File *f2) {
+            return *f1 < *f2;
+        });
+    }
+
+    if (!save())
+        m_error_message = tr("Cannot save file.");
+}
+
 bool ResourceFile::contains(const QString &prefix, const QString &lang, const QString &file) const
 {
     int pref_idx = indexOfPrefix(prefix, lang);
@@ -473,8 +486,7 @@ bool ResourceFile::contains(int pref_idx, const QString &file) const
 {
     const QChar slash = QLatin1Char('/');
     QString result = QString(slash);
-    for (int i = 0; i < prefix.size(); ++i) {
-        const QChar c = prefix.at(i);
+    for (const QChar c : prefix) {
         if (c == slash && result.at(result.size() - 1) == slash)
             continue;
         result.append(c);
@@ -564,8 +576,8 @@ void ResourceFile::clearPrefixList()
 ResourceModel::ResourceModel(QObject *parent)
     : QAbstractItemModel(parent), m_dirty(false)
 {
-    m_prefixIcon = Core::FileIconProvider::overlayIcon(QStyle::SP_DirIcon,
-        QIcon(QLatin1String(ProjectExplorer::Constants::FILEOVERLAY_QRC)), QSize(16, 16));
+    static QIcon resourceFolderIcon = Core::FileIconProvider::directoryIcon(QLatin1String(ProjectExplorer::Constants::FILEOVERLAY_QRC));
+    m_prefixIcon = resourceFolderIcon;
 }
 
 void ResourceModel::setDirty(bool b)
@@ -584,10 +596,10 @@ QModelIndex ResourceModel::index(int row, int column, const QModelIndex &parent)
     if (column != 0)
         return QModelIndex();
 
-    void * internalPointer = 0;
+    void *internalPointer = nullptr;
     if (parent.isValid()) {
         void * const pip = parent.internalPointer();
-        if (pip == 0)
+        if (!pip)
             return QModelIndex();
 
         // File node
@@ -615,7 +627,7 @@ QModelIndex ResourceModel::parent(const QModelIndex &index) const
         return QModelIndex();
 
     void * const internalPointer = index.internalPointer();
-    if (internalPointer == 0)
+    if (!internalPointer)
         return QModelIndex();
     Node * const node = reinterpret_cast<Node *>(internalPointer);
     Prefix * const prefix = node->prefix();
@@ -686,6 +698,11 @@ QList<QModelIndex> ResourceModel::nonExistingFiles() const
         }
     }
     return files;
+}
+
+void ResourceModel::orderList()
+{
+    m_resource_file.orderList();
 }
 
 Qt::ItemFlags ResourceModel::flags(const QModelIndex &index) const
@@ -797,7 +814,7 @@ QVariant ResourceModel::data(const QModelIndex &index, int role) const
             // File node
             Q_ASSERT(file);
             if (!file->exists())
-                result = QBrush(QColor(Qt::red));
+                result = Utils::creatorTheme()->color(Utils::Theme::TextColorError);
         }
         break;
     default:
@@ -814,7 +831,7 @@ bool ResourceModel::setData(const QModelIndex &index, const QVariant &value, int
         return false;
 
     const QDir baseDir = QFileInfo(fileName()).absoluteDir();
-    Utils::FileName newFileName = Utils::FileName::fromUserInput(
+    Utils::FilePath newFileName = Utils::FilePath::fromUserInput(
                 baseDir.absoluteFilePath(value.toString()));
 
     if (newFileName.isEmpty())
@@ -1121,12 +1138,12 @@ QString ResourceModel::resourcePath(const QString &prefix, const QString &file)
 QMimeData *ResourceModel::mimeData(const QModelIndexList &indexes) const
 {
     if (indexes.size() != 1)
-        return 0;
+        return nullptr;
 
     QString prefix, file;
     getItem(indexes.front(), prefix, file);
     if (prefix.isEmpty() || file.isEmpty())
-        return 0;
+        return nullptr;
 
     // DnD format of Designer 4.4
     QDomDocument doc;
@@ -1135,7 +1152,7 @@ QMimeData *ResourceModel::mimeData(const QModelIndexList &indexes) const
     elem.setAttribute(QLatin1String("file"), resourcePath(prefix, file));
     doc.appendChild(elem);
 
-    QMimeData *rc = new QMimeData;
+    auto rc = new QMimeData;
     rc->setText(doc.toString());
     return rc;
 }
@@ -1157,7 +1174,7 @@ public:
             const QString &fileName, const QString &alias)
             : EntryBackup(model, prefixIndex, fileName), m_fileIndex(fileIndex),
             m_alias(alias) { }
-    void restore() const;
+    void restore() const override;
 };
 
 void FileEntryBackup::restore() const
@@ -1180,7 +1197,7 @@ public:
     PrefixEntryBackup(ResourceModel &model, int prefixIndex, const QString &prefix,
             const QString &language, const QList<FileEntryBackup> &files)
             : EntryBackup(model, prefixIndex, prefix), m_language(language), m_files(files) { }
-    void restore() const;
+    void restore() const override;
 };
 
 void PrefixEntryBackup::restore() const
@@ -1234,12 +1251,12 @@ EntryBackup * RelativeResourceModel::removeEntry(const QModelIndex &index)
             deleteItem(index);
             return new FileEntryBackup(*this, prefixIndex.row(), index.row(), fileNameBackup, aliasBackup);
         }
-        Core::RemoveFileDialog removeFileDialog(fileNameBackup, Core::ICore::mainWindow());
+        Utils::RemoveFileDialog removeFileDialog(fileNameBackup, Core::ICore::mainWindow());
         if (removeFileDialog.exec() == QDialog::Accepted) {
             deleteItem(index);
             Core::FileUtils::removeFile(fileNameBackup, removeFileDialog.isDeleteFileChecked());
             return new FileEntryBackup(*this, prefixIndex.row(), index.row(), fileNameBackup, aliasBackup);
         }
-        return 0;
+        return nullptr;
     }
 }

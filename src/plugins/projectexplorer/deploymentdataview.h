@@ -25,26 +25,21 @@
 
 #pragma once
 
-#include "namedwidget.h"
-#include "projectexplorer_export.h"
+#include <QWidget>
 
 namespace ProjectExplorer {
-class Target;
 
-namespace Internal { class DeploymentDataViewPrivate; }
+class DeployConfiguration;
 
-class PROJECTEXPLORER_EXPORT DeploymentDataView : public NamedWidget
+namespace Internal {
+
+class DeploymentDataView : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit DeploymentDataView(Target *target, QWidget *parent = nullptr);
-    ~DeploymentDataView() override;
-
-private:
-    void updateDeploymentDataModel();
-
-    Internal::DeploymentDataViewPrivate * const d;
+    explicit DeploymentDataView(DeployConfiguration *dc);
 };
 
-} // namespace ProjectExplorer
+} // Internal
+} // ProjectExplorer

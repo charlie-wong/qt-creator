@@ -25,14 +25,12 @@
 
 #include "proxyaction.h"
 
+#include "stringutils.h"
+
 using namespace Utils;
 
 ProxyAction::ProxyAction(QObject *parent) :
-    QAction(parent),
-    m_action(0),
-    m_attributes(0),
-    m_showShortcut(false),
-    m_block(false)
+    QAction(parent)
 {
     connect(this, &QAction::changed, this, &ProxyAction::updateToolTipWithKeySequence);
     updateState();
@@ -46,6 +44,7 @@ void ProxyAction::setAction(QAction *action)
     m_action = action;
     connectAction();
     updateState();
+    emit currentActionChanged(action);
 }
 
 void ProxyAction::updateState()
@@ -170,15 +169,14 @@ void ProxyAction::updateToolTipWithKeySequence()
 
 QString ProxyAction::stringWithAppendedShortcut(const QString &str, const QKeySequence &shortcut)
 {
-    QString s = str;
-    s.replace(QLatin1String("&&"), QLatin1String("&"));
-    return QString::fromLatin1("%1 <span style=\"color: gray; font-size: small\">%2</span>").
-            arg(s, shortcut.toString(QKeySequence::NativeText));
+    const QString s = stripAccelerator(str);
+    return QString::fromLatin1("%1 <span style=\"color: gray; font-size: small\">%2</span>")
+        .arg(s, shortcut.toString(QKeySequence::NativeText));
 }
 
 ProxyAction *ProxyAction::proxyActionWithIcon(QAction *original, const QIcon &newIcon)
 {
-    ProxyAction *proxyAction = new ProxyAction(original);
+    auto proxyAction = new ProxyAction(original);
     proxyAction->setAction(original);
     proxyAction->setIcon(newIcon);
     proxyAction->setAttribute(UpdateText);

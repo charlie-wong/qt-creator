@@ -52,8 +52,8 @@ public:
         OnlySummary
     };
 
-    explicit DetailsWidget(QWidget *parent = 0);
-    virtual ~DetailsWidget();
+    explicit DetailsWidget(QWidget *parent = nullptr);
+    ~DetailsWidget() override;
 
     void setSummaryText(const QString &text);
     QString summaryText() const;
@@ -78,6 +78,8 @@ public:
 
     bool useCheckBox();
     void setUseCheckBox(bool b);
+    void setCheckable(bool b);
+    void setExpandable(bool b);
     void setIcon(const QIcon &icon);
 
     static QPixmap createBackground(const QSize &size, int topHeight, QWidget *widget);
@@ -91,9 +93,9 @@ private:
     void setExpanded(bool);
 
 protected:
-    virtual void paintEvent(QPaintEvent *paintEvent);
-    virtual void enterEvent(QEvent *event);
-    virtual void leaveEvent(QEvent *event);
+    void paintEvent(QPaintEvent *paintEvent) override;
+    void enterEvent(QEvent *event) override;
+    void leaveEvent(QEvent *event) override;
 
 private:
     DetailsWidgetPrivate *d;

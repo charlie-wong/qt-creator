@@ -33,16 +33,15 @@ namespace Internal {
 
 class QnxToolChain : public ProjectExplorer::GccToolChain
 {
+    Q_DECLARE_TR_FUNCTIONS(Qnx::Internal::QnxToolChain)
+
 public:
-    explicit QnxToolChain(Detection d);
-    explicit QnxToolChain(Core::Id l, Detection d);
+    QnxToolChain();
 
-    QString typeDisplayName() const override;
-
-    ProjectExplorer::ToolChainConfigWidget *configurationWidget() override;
+    std::unique_ptr<ProjectExplorer::ToolChainConfigWidget> createConfigurationWidget() override;
 
     void addToEnvironment(Utils::Environment &env) const override;
-    Utils::FileNameList suggestedMkspecList() const override;
+    QStringList suggestedMkspecList() const override;
 
     QVariantMap toMap() const override;
     bool fromMap(const QVariantMap &data) override;
@@ -55,7 +54,7 @@ public:
     bool operator ==(const ToolChain &) const override;
 
 protected:
-    virtual DetectedAbisResult detectSupportedAbis() const override;
+    DetectedAbisResult detectSupportedAbis() const override;
 
 private:
     QString m_sdpPath;
@@ -68,21 +67,11 @@ private:
 
 class QnxToolChainFactory : public ProjectExplorer::ToolChainFactory
 {
-    Q_OBJECT
-
 public:
     QnxToolChainFactory();
 
     QList<ProjectExplorer::ToolChain *> autoDetect(
             const QList<ProjectExplorer::ToolChain *> &alreadyKnown) override;
-
-    QSet<Core::Id> supportedLanguages() const override;
-
-    bool canRestore(const QVariantMap &data) override;
-    ProjectExplorer::ToolChain *restore(const QVariantMap &data) override;
-
-    bool canCreate() override;
-    ProjectExplorer::ToolChain *create(Core::Id l) override;
 };
 
 //----------------------------------------------------------------------------

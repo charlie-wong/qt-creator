@@ -39,7 +39,6 @@ WaitForStopDialog::WaitForStopDialog(QList<ProjectExplorer::RunControl *> runCon
     m_runControls(runControls)
 {
     setWindowTitle(tr("Waiting for Applications to Stop"));
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
     auto layout = new QVBoxLayout();
     setLayout(layout);
@@ -55,7 +54,7 @@ WaitForStopDialog::WaitForStopDialog(QList<ProjectExplorer::RunControl *> runCon
     updateProgressText();
 
     foreach (RunControl *rc, runControls)
-        connect(rc, &RunControl::finished, this, &WaitForStopDialog::runControlFinished);
+        connect(rc, &RunControl::stopped, this, &WaitForStopDialog::runControlFinished);
 
     m_timer.start();
 }

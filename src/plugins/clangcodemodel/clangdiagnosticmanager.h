@@ -29,11 +29,12 @@
 
 #include <texteditor/refactoroverlay.h>
 
-#include <clangbackendipc/diagnosticcontainer.h>
+#include <clangsupport/diagnosticcontainer.h>
 
 #include <QList>
 #include <QSet>
 #include <QTextEdit>
+#include <QTimer>
 #include <QVector>
 
 #include <vector>
@@ -49,16 +50,20 @@ public:
     ClangDiagnosticManager(TextEditor::TextDocument *textDocument);
     ~ClangDiagnosticManager();
 
-    void processNewDiagnostics(const QVector<ClangBackEnd::DiagnosticContainer> &allDiagnostics);
+    void processNewDiagnostics(const QVector<ClangBackEnd::DiagnosticContainer> &allDiagnostics,
+                               bool fullVisualization);
 
     const QVector<ClangBackEnd::DiagnosticContainer> &diagnosticsWithFixIts() const;
     QList<QTextEdit::ExtraSelection> takeExtraSelections();
     TextEditor::RefactorMarkers takeFixItAvailableMarkers();
 
-    bool hasDiagnosticsAt(uint line, uint column) const;
-    QVector<ClangBackEnd::DiagnosticContainer> diagnosticsAt(uint line, uint column) const;
+    QList<TextEditor::TextMark *> diagnosticTextMarksAt(uint line, uint column) const;
 
+    void invalidateDiagnostics();
     void clearDiagnosticsWithFixIts();
+
+    static void clearTaskHubIssues();
+    void generateTaskHubIssues();
 
 private:
     void cleanMarks();
@@ -80,6 +85,10 @@ private:
     QList<QTextEdit::ExtraSelection> m_extraSelections;
     TextEditor::RefactorMarkers m_fixItAvailableMarkers;
     std::vector<ClangTextMark *> m_clangTextMarks;
+    bool m_firstDiagnostics = true;
+    bool m_diagnosticsInvalidated = false;
+    bool m_fullVisualization = false;
+    QTimer m_textMarkDelay;
 };
 
 } // namespace Internal

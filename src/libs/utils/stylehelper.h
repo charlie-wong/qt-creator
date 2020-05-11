@@ -93,9 +93,15 @@ public:
     static void tintImage(QImage &img, const QColor &tintColor);
     static QLinearGradient statusBarGradient(const QRect &statusBarRect);
 
+    static QIcon getIconFromIconFont(const QString &fontName, const QString &iconSymbol, int fontSize, int iconSize, QColor color);
+    static QIcon getIconFromIconFont(const QString &fontName, const QString &iconSymbol, int fontSize, int iconSize);
+
     static QString dpiSpecificImageFile(const QString &fileName);
     static QString imageFileWithResolution(const QString &fileName, int dpr);
     static QList<int> availableImageResolutions(const QString &fileName);
+
+    static double luminance(const QColor &color);
+    static bool isReadableOn(const QColor &background, const QColor &foreground);
 
 private:
     static QColor m_baseColor;

@@ -36,8 +36,10 @@
 #include "positionernodeinstance.h"
 #include "layoutnodeinstance.h"
 #include "debugoutputcommand.h"
+#include "qt3dpresentationnodeinstance.h"
 
 #include "quickitemnodeinstance.h"
+#include "quick3dnodeinstance.h"
 
 #include "nodeinstanceserver.h"
 #include "instancecontainer.h"
@@ -127,6 +129,11 @@ bool ServerNodeInstance::isSubclassOf(QObject *object, const QByteArray &superTy
     return  Internal::QmlPrivateGate::isSubclassOf(object, superTypeName);
 }
 
+void ServerNodeInstance::setModifiedFlag(bool b)
+{
+    m_nodeInstance->setModifiedFlag(b);
+}
+
 void ServerNodeInstance::setNodeSource(const QString &source)
 {
     m_nodeInstance->setNodeSource(source);
@@ -159,14 +166,18 @@ Internal::ObjectNodeInstance::Pointer ServerNodeInstance::createInstance(QObject
 {
     Internal::ObjectNodeInstance::Pointer instance;
 
-    if (objectToBeWrapped == 0)
+    if (objectToBeWrapped == nullptr)
         instance = Internal::DummyNodeInstance::create();
+    else if (isSubclassOf(objectToBeWrapped, "Q3DSPresentationItem"))
+        instance = Internal::Qt3DPresentationNodeInstance::create(objectToBeWrapped);
     else if (isSubclassOf(objectToBeWrapped, "QQuickBasePositioner"))
         instance = Internal::PositionerNodeInstance::create(objectToBeWrapped);
     else if (isSubclassOf(objectToBeWrapped, "QQuickLayout"))
         instance = Internal::LayoutNodeInstance::create(objectToBeWrapped);
     else if (isSubclassOf(objectToBeWrapped, "QQuickItem"))
         instance = Internal::QuickItemNodeInstance::create(objectToBeWrapped);
+    else if (isSubclassOf(objectToBeWrapped, "QQuick3DNode"))
+        instance = Internal::Quick3DNodeInstance::create(objectToBeWrapped);
     else if (isSubclassOf(objectToBeWrapped, "QQmlComponent"))
         instance = Internal::ComponentNodeInstance::create(objectToBeWrapped);
     else if (objectToBeWrapped->inherits("QQmlAnchorChanges"))
@@ -188,33 +199,50 @@ Internal::ObjectNodeInstance::Pointer ServerNodeInstance::createInstance(QObject
     return instance;
 }
 
-ServerNodeInstance ServerNodeInstance::create(NodeInstanceServer *nodeInstanceServer, const InstanceContainer &instanceContainer, ComponentWrap componentWrap)
+QString static getErrorString(QQmlEngine *engine, const QString &componentPath)
+{
+    QQmlComponent component(engine, componentPath);
+
+    QObject *o = component.create(nullptr);
+    delete o;
+    QString s;
+    for (const QQmlError &error : component.errors())
+        s.append(error.toString());
+    return s;
+}
+
+ServerNodeInstance ServerNodeInstance::create(NodeInstanceServer *nodeInstanceServer,
+                                              const InstanceContainer &instanceContainer,
+                                              ComponentWrap componentWrap)
 {
     Q_ASSERT(instanceContainer.instanceId() != -1);
     Q_ASSERT(nodeInstanceServer);
 
-    QObject *object = 0;
+    QObject *object = nullptr;
     if (componentWrap == WrapAsComponent) {
         object = Internal::ObjectNodeInstance::createComponentWrap(instanceContainer.nodeSource(), nodeInstanceServer->importCode(), nodeInstanceServer->context());
     } else if (!instanceContainer.nodeSource().isEmpty()) {
         object = Internal::ObjectNodeInstance::createCustomParserObject(instanceContainer.nodeSource(), nodeInstanceServer->importCode(), nodeInstanceServer->context());
-        if (object == 0)
+        if (object == nullptr)
             nodeInstanceServer->sendDebugOutput(DebugOutputCommand::ErrorType, QLatin1String("Custom parser object could not be created."), instanceContainer.instanceId());
     } else if (!instanceContainer.componentPath().isEmpty()) {
         object = Internal::ObjectNodeInstance::createComponent(instanceContainer.componentPath(), nodeInstanceServer->context());
-        if (object == 0)
-            nodeInstanceServer->sendDebugOutput(DebugOutputCommand::ErrorType, QString("Component with path %1 could not be created.").arg(instanceContainer.componentPath()), instanceContainer.instanceId());
+        if (object == nullptr) {
+            const QString errors = getErrorString(nodeInstanceServer->engine(), instanceContainer.componentPath());
+            const QString message = QString("Component with path %1 could not be created.\n\n").arg(instanceContainer.componentPath());
+            nodeInstanceServer->sendDebugOutput(DebugOutputCommand::ErrorType, message + errors, instanceContainer.instanceId());
+        }
     } else {
         object = Internal::ObjectNodeInstance::createPrimitive(QString::fromUtf8(instanceContainer.type()), instanceContainer.majorNumber(), instanceContainer.minorNumber(), nodeInstanceServer->context());
-        if (object == 0)
+        if (object == nullptr)
             nodeInstanceServer->sendDebugOutput(DebugOutputCommand::ErrorType, QLatin1String("Item could not be created."), instanceContainer.instanceId());
     }
 
-    if (object == 0) {
+    if (object == nullptr) {
         if (instanceContainer.metaType() == InstanceContainer::ItemMetaType) { //If we cannot instanciate the object but we know it has to be an Ttem, we create an Item instead.
             object = Internal::ObjectNodeInstance::createPrimitive("QtQuick/Item", 2, 0, nodeInstanceServer->context());
 
-            if (object == 0)
+            if (object == nullptr)
                 object = new QQuickItem;
         } else {
             object = Internal::ObjectNodeInstance::createPrimitive("QtQml/QtObject", 2, 0, nodeInstanceServer->context());
@@ -229,7 +257,7 @@ ServerNodeInstance ServerNodeInstance::create(NodeInstanceServer *nodeInstanceSe
 
     instance.internalInstance()->setInstanceId(instanceContainer.instanceId());
 
-    instance.internalInstance()->initialize(instance.m_nodeInstance);
+    instance.internalInstance()->initialize(instance.m_nodeInstance, instanceContainer.metaFlags());
 
     return instance;
 }
@@ -305,6 +333,11 @@ void ServerNodeInstance::setPropertyVariant(const PropertyName &name, const QVar
 void ServerNodeInstance::setPropertyBinding(const PropertyName &name, const QString &expression)
 {
     m_nodeInstance->setPropertyBinding(name, expression);
+}
+
+void ServerNodeInstance::setHideInEditor(bool b)
+{
+    m_nodeInstance->setHideInEditor(b);
 }
 
 void ServerNodeInstance::resetProperty(const PropertyName &name)
@@ -544,7 +577,7 @@ void ServerNodeInstance::paintUpdate()
 QObject *ServerNodeInstance::internalObject() const
 {
     if (m_nodeInstance.isNull())
-        return 0;
+        return nullptr;
 
     return m_nodeInstance->object();
 }
@@ -609,21 +642,31 @@ QList<QQuickItem *> ServerNodeInstance::allItemsRecursive() const
 
 QString ServerNodeInstance::id() const
 {
-    return m_nodeInstance->id();
+    if (isValid())
+        return m_nodeInstance->id();
+
+    return {};
 }
 
 qint32 ServerNodeInstance::instanceId() const
 {
-    if (isValid()) {
+    if (isValid())
         return m_nodeInstance->instanceId();
-    } else {
-        return -1;
-    }
+
+    return -1;
 }
 
 QList<ServerNodeInstance> ServerNodeInstance::stateInstances() const
 {
     return m_nodeInstance->stateInstances();
+}
+
+QStringList ServerNodeInstance::allStates() const
+{
+    if (isValid())
+        return m_nodeInstance->allStates();
+
+    return {};
 }
 
 Internal::ObjectNodeInstance::Pointer ServerNodeInstance::internalInstance() const

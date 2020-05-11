@@ -36,7 +36,10 @@
 #define _WIN32_WINNT 0x0501
 #endif
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+
 #include <windows.h>
 #include <shellapi.h>
 #include <wchar.h>
@@ -45,15 +48,16 @@
 
 const wchar_t szTitle[] = L"qtcctrlcstub";
 const wchar_t szWindowClass[] = L"wcqtcctrlcstub";
+const wchar_t szNice[] = L"-nice ";
 UINT uiShutDownWindowMessage;
 UINT uiInterruptMessage;
-HWND hwndMain = 0;
+HWND hwndMain = nullptr;
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 BOOL WINAPI shutdownHandler(DWORD dwCtrlType);
 BOOL WINAPI interruptHandler(DWORD dwCtrlType);
 bool isSpaceOrTab(const wchar_t c);
-bool startProcess(wchar_t pCommandLine[]);
+bool startProcess(wchar_t pCommandLine[], bool lowerPriority);
 
 int main(int argc, char **)
 {
@@ -68,7 +72,7 @@ int main(int argc, char **)
     WNDCLASSEX wcex = {0};
     wcex.cbSize = sizeof(wcex);
     wcex.lpfnWndProc = WndProc;
-    wcex.hInstance = GetModuleHandle(0);
+    wcex.hInstance = GetModuleHandle(nullptr);
     wcex.lpszClassName = szWindowClass;
     if (!RegisterClassEx(&wcex))
         return 1;
@@ -93,7 +97,14 @@ int main(int argc, char **)
         ++pos;
     }
 
-    bool bSuccess = startProcess(strCommandLine + pos);
+    const size_t niceLen = wcslen(szNice);
+    bool lowerPriority = !wcsncmp(strCommandLine + pos, szNice, niceLen);
+    if (lowerPriority) {
+        pos += niceLen - 1; // reach the space, then the following line skips all spaces.
+        while (isSpaceOrTab(strCommandLine[++pos]))
+            ;
+    }
+    bool bSuccess = startProcess(strCommandLine + pos, lowerPriority);
     free(strCommandLine);
 
     if (!bSuccess)
@@ -156,7 +167,7 @@ BOOL WINAPI interruptHandler(DWORD /*dwCtrlType*/)
 
 DWORD WINAPI processWatcherThread(LPVOID lpParameter)
 {
-    HANDLE hProcess = reinterpret_cast<HANDLE>(lpParameter);
+    auto hProcess = reinterpret_cast<HANDLE>(lpParameter);
     WaitForSingleObject(hProcess, INFINITE);
     DWORD dwExitCode;
     if (!GetExitCodeProcess(hProcess, &dwExitCode))
@@ -166,7 +177,7 @@ DWORD WINAPI processWatcherThread(LPVOID lpParameter)
     return 0;
 }
 
-bool startProcess(wchar_t *pCommandLine)
+bool startProcess(wchar_t *pCommandLine, bool lowerPriority)
 {
     SECURITY_ATTRIBUTES sa = {0};
     sa.nLength = sizeof(sa);
@@ -176,7 +187,7 @@ bool startProcess(wchar_t *pCommandLine)
     si.cb = sizeof(si);
 
     PROCESS_INFORMATION pi;
-    DWORD dwCreationFlags = 0;
+    DWORD dwCreationFlags = lowerPriority ? BELOW_NORMAL_PRIORITY_CLASS : 0;
     BOOL bSuccess = CreateProcess(NULL, pCommandLine, &sa, &sa, TRUE, dwCreationFlags, NULL, NULL, &si, &pi);
     if (!bSuccess) {
         fwprintf(stderr, L"qtcreator_ctrlc_stub: Command line failed: %s\n", pCommandLine);

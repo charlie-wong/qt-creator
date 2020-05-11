@@ -75,7 +75,7 @@ public:
 
 public:
     RewriterView(DifferenceHandling differenceHandling, QObject *parent);
-    ~RewriterView();
+    ~RewriterView() override;
 
     void modelAttached(Model *model) override;
     void modelAboutToBeDetached(Model *model) override;
@@ -109,6 +109,8 @@ public:
     void reactivateTextMofifierChangeSignals();
     void deactivateTextMofifierChangeSignals();
 
+    void auxiliaryDataChanged(const ModelNode &node, const PropertyName &name, const QVariant &data) override;
+
     Internal::ModelNodePositionStorage *positionStorage() const;
 
     QList<DocumentMessage> warnings() const;
@@ -132,7 +134,6 @@ public:
     int firstDefinitionInsideLength(const ModelNode &node) const;
     bool modificationGroupActive();
     ModelNode nodeAtTextCursorPosition(int cursorPosition) const;
-    bool nodeContainsCursor(const ModelNode &node, int cursorPosition) const;
 
     bool renameId(const QString& oldId, const QString& newId);
 
@@ -164,6 +165,14 @@ public:
     void qmlTextChanged();
     void delayedSetup();
 
+    void writeAuxiliaryData();
+    void restoreAuxiliaryData();
+
+    QString getRawAuxiliaryData() const;
+    QString auxiliaryDataAsQML() const;
+
+    ModelNode getNodeForCanonicalIndex(int index);
+
 protected: // functions
     void importAdded(const Import &import);
     void importRemoved(const Import &import);
@@ -178,7 +187,8 @@ protected: // functions
     void notifyErrorsAndWarnings(const QList<DocumentMessage> &errors);
 
 private: //variables
-    ModelNode nodeAtTextCursorPositionRekursive(const ModelNode &root, int cursorPosition) const;
+    ModelNode nodeAtTextCursorPositionHelper(const ModelNode &root, int cursorPosition) const;
+    void setupCanonicalHashes() const;
 
     TextModifier *m_textModifier = nullptr;
     int transactionLevel = 0;
@@ -198,6 +208,10 @@ private: //variables
     bool m_instantQmlTextUpdate = false;
     std::function<void(bool)> m_setWidgetStatusCallback;
     bool m_hasIncompleteTypeInformation = false;
+    bool m_restoringAuxData = false;
+
+    mutable QHash<int, ModelNode> m_canonicalIntModelNode;
+    mutable QHash<ModelNode, int> m_canonicalModelNodeInt;
 };
 
 } //QmlDesigner

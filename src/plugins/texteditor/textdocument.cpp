@@ -25,10 +25,9 @@
 
 #include "textdocument.h"
 
-#include "convenience.h"
 #include "extraencodingsettings.h"
 #include "fontsettings.h"
-#include "indenter.h"
+#include "textindenter.h"
 #include "storagesettings.h"
 #include "syntaxhighlighter.h"
 #include "tabsettings.h"
@@ -36,12 +35,15 @@
 #include "texteditor.h"
 #include "texteditorconstants.h"
 #include "typingsettings.h"
-#include <texteditor/generichighlighter/highlighter.h>
+#include <coreplugin/diffservice.h>
 #include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/editormanager/documentmodel.h>
+#include <extensionsystem/pluginmanager.h>
+#include <utils/textutils.h>
 #include <utils/guard.h>
 #include <utils/mimetypes/mimedatabase.h>
 
+#include <QAction>
 #include <QApplication>
 #include <QDir>
 #include <QFileInfo>
@@ -74,18 +76,15 @@ namespace TextEditor {
 class TextDocumentPrivate
 {
 public:
-    TextDocumentPrivate() :
-        m_fontSettingsNeedsApply(false),
-        m_highlighter(0),
-        m_completionAssistProvider(0),
-        m_indenter(new Indenter),
-        m_fileIsReadOnly(false),
-        m_autoSaveRevision(-1)
+    TextDocumentPrivate()
+        : m_indenter(new TextIndenter(&m_document))
     {
     }
 
     QTextCursor indentOrUnindent(const QTextCursor &textCursor, bool doIndent,
-                                 bool blockSelection = false, int column = 0, int *offset = 0);
+                                 const TabSettings &tabSettings,
+                                 bool blockSelection = false, int column = 0,
+                                 int *offset = nullptr);
     void resetRevisions();
     void updateRevisions();
 
@@ -97,38 +96,40 @@ public:
     TabSettings m_tabSettings;
     ExtraEncodingSettings m_extraEncodingSettings;
     FontSettings m_fontSettings;
-    bool m_fontSettingsNeedsApply; // for applying font settings delayed till an editor becomes visible
+    bool m_fontSettingsNeedsApply = false; // for applying font settings delayed till an editor becomes visible
     QTextDocument m_document;
-    SyntaxHighlighter *m_highlighter;
-    CompletionAssistProvider *m_completionAssistProvider;
+    SyntaxHighlighter *m_highlighter = nullptr;
+    CompletionAssistProvider *m_completionAssistProvider = nullptr;
+    CompletionAssistProvider *m_functionHintAssistProvider = nullptr;
+    IAssistProvider *m_quickFixProvider = nullptr;
     QScopedPointer<Indenter> m_indenter;
+    QScopedPointer<Formatter> m_formatter;
 
-    bool m_fileIsReadOnly;
-    int m_autoSaveRevision;
+    bool m_fileIsReadOnly = false;
+    int m_autoSaveRevision = -1;
 
     TextMarks m_marksCache; // Marks not owned
     Utils::Guard m_modificationChangedGuard;
 };
 
 QTextCursor TextDocumentPrivate::indentOrUnindent(const QTextCursor &textCursor, bool doIndent,
+                                                  const TabSettings &tabSettings,
                                                   bool blockSelection, int columnIn, int *offset)
 {
     QTextCursor cursor = textCursor;
     cursor.beginEditBlock();
 
-    TabSettings &ts = m_tabSettings;
-
     // Indent or unindent the selected lines
     int pos = cursor.position();
     int column = blockSelection ? columnIn
-               : ts.columnAt(cursor.block().text(), cursor.positionInBlock());
+               : tabSettings.columnAt(cursor.block().text(), cursor.positionInBlock());
     int anchor = cursor.anchor();
     int start = qMin(anchor, pos);
     int end = qMax(anchor, pos);
     bool modified = true;
 
     QTextBlock startBlock = m_document.findBlock(start);
-    QTextBlock endBlock = m_document.findBlock(blockSelection ? end : end - 1).next();
+    QTextBlock endBlock = m_document.findBlock(blockSelection ? end : qMax(end - 1, 0)).next();
     const bool cursorAtBlockStart = (textCursor.position() == startBlock.position());
     const bool anchorAtBlockStart = (textCursor.anchor() == startBlock.position());
     const bool oneLinePartial = (startBlock.next() == endBlock)
@@ -141,12 +142,13 @@ QTextCursor TextDocumentPrivate::indentOrUnindent(const QTextCursor &textCursor,
     if (cursor.hasSelection() && !blockSelection && !oneLinePartial) {
         for (QTextBlock block = startBlock; block != endBlock; block = block.next()) {
             const QString text = block.text();
-            int indentPosition = ts.lineIndentPosition(text);
+            int indentPosition = tabSettings.lineIndentPosition(text);
             if (!doIndent && !indentPosition)
-                indentPosition = ts.firstNonSpace(text);
-            int targetColumn = ts.indentedColumn(ts.columnAt(text, indentPosition), doIndent);
+                indentPosition = tabSettings.firstNonSpace(text);
+            int targetColumn = tabSettings.indentedColumn(
+                        tabSettings.columnAt(text, indentPosition), doIndent);
             cursor.setPosition(block.position() + indentPosition);
-            cursor.insertText(ts.indentationString(0, targetColumn, 0, block));
+            cursor.insertText(tabSettings.indentationString(0, targetColumn, 0, block));
             cursor.setPosition(block.position());
             cursor.setPosition(block.position() + indentPosition, QTextCursor::KeepAnchor);
             cursor.removeSelectedText();
@@ -168,32 +170,82 @@ QTextCursor TextDocumentPrivate::indentOrUnindent(const QTextCursor &textCursor,
         cursor.removeSelectedText();
     } else {
         // Indent or unindent at cursor position
+        int maxTargetColumn = -1;
+
+        class BlockIndenter
+        {
+        public:
+            BlockIndenter(const QTextBlock &_block,
+                          const int column,
+                          const TabSettings &_tabSettings)
+                : block(_block)
+                , text(block.text())
+                , tabSettings(_tabSettings)
+            {
+                indentPosition = tabSettings.positionAtColumn(text, column, nullptr, true);
+                spaces = tabSettings.spacesLeftFromPosition(text, indentPosition);
+            }
+
+            void indent(const int targetColumn) const
+            {
+                const int startColumn = tabSettings.columnAt(text, indentPosition - spaces);
+                QTextCursor cursor(block);
+                cursor.setPosition(block.position() + indentPosition);
+                cursor.setPosition(block.position() + indentPosition - spaces, QTextCursor::KeepAnchor);
+                cursor.removeSelectedText();
+                cursor.insertText(tabSettings.indentationString(startColumn, targetColumn, 0, block));
+            }
+
+            int targetColumn(bool doIndent) const
+            {
+                const int optimumTargetColumn
+                    = tabSettings.indentedColumn(tabSettings.columnAt(block.text(), indentPosition),
+                                                 doIndent);
+                const int minimumTargetColumn = tabSettings.columnAt(text, indentPosition - spaces);
+                return std::max(optimumTargetColumn, minimumTargetColumn);
+            }
+
+            const QTextBlock &textBlock() { return block; }
+
+        private:
+            QTextBlock block;
+            const QString text;
+            int indentPosition;
+            int spaces;
+            const TabSettings &tabSettings;
+        };
+
+        std::vector<BlockIndenter> blocks;
+
         for (QTextBlock block = startBlock; block != endBlock; block = block.next()) {
             QString text = block.text();
 
-            int blockColumn = ts.columnAt(text, text.size());
+            const int blockColumn = tabSettings.columnAt(text, text.size());
             if (blockColumn < column) {
                 cursor.setPosition(block.position() + text.size());
-                cursor.insertText(ts.indentationString(blockColumn, column, 0, block));
+                cursor.insertText(tabSettings.indentationString(blockColumn, column, 0, block));
                 text = block.text();
             }
 
-            int indentPosition = ts.positionAtColumn(text, column, 0, true);
-            int spaces = ts.spacesLeftFromPosition(text, indentPosition);
-            int startColumn = ts.columnAt(text, indentPosition - spaces);
-            int targetColumn = ts.indentedColumn(ts.columnAt(text, indentPosition), doIndent);
-            cursor.setPosition(block.position() + indentPosition);
-            cursor.setPosition(block.position() + indentPosition - spaces, QTextCursor::KeepAnchor);
-            cursor.removeSelectedText();
-            cursor.insertText(ts.indentationString(startColumn, targetColumn, 0, block));
+            blocks.emplace_back(BlockIndenter(block, column, tabSettings));
+            maxTargetColumn = std::max(maxTargetColumn, blocks.back().targetColumn(doIndent));
         }
+        for (const BlockIndenter &blockIndenter : blocks)
+            blockIndenter.indent(maxTargetColumn);
+
         // Preserve initial anchor of block selection
         if (blockSelection) {
-            end = cursor.position();
             if (offset)
-                *offset = ts.columnAt(cursor.block().text(), cursor.positionInBlock()) - column;
-            cursor.setPosition(start);
-            cursor.setPosition(end, QTextCursor::KeepAnchor);
+                *offset = maxTargetColumn - column;
+            startBlock = pos < anchor ? blocks.front().textBlock() : blocks.back().textBlock();
+            start = startBlock.position()
+                    + tabSettings.positionAtColumn(startBlock.text(), maxTargetColumn);
+            endBlock = pos > anchor ? blocks.front().textBlock() : blocks.back().textBlock();
+            end = endBlock.position()
+                  + tabSettings.positionAtColumn(endBlock.text(), maxTargetColumn);
+
+            cursor.setPosition(end);
+            cursor.setPosition(start, QTextCursor::KeepAnchor);
         }
     }
 
@@ -204,7 +256,7 @@ QTextCursor TextDocumentPrivate::indentOrUnindent(const QTextCursor &textCursor,
 
 void TextDocumentPrivate::resetRevisions()
 {
-    TextDocumentLayout *documentLayout = qobject_cast<TextDocumentLayout*>(m_document.documentLayout());
+    auto documentLayout = qobject_cast<TextDocumentLayout*>(m_document.documentLayout());
     QTC_ASSERT(documentLayout, return);
     documentLayout->lastSaveRevision = m_document.revision();
 
@@ -214,7 +266,7 @@ void TextDocumentPrivate::resetRevisions()
 
 void TextDocumentPrivate::updateRevisions()
 {
-    TextDocumentLayout *documentLayout = qobject_cast<TextDocumentLayout*>(m_document.documentLayout());
+    auto documentLayout = qobject_cast<TextDocumentLayout*>(m_document.documentLayout());
     QTC_ASSERT(documentLayout, return);
     int oldLastSaveRevision = documentLayout->lastSaveRevision;
     documentLayout->lastSaveRevision = m_document.revision();
@@ -269,7 +321,7 @@ QMap<QString, QString> TextDocument::openedTextDocumentContents()
 {
     QMap<QString, QString> workingCopy;
     foreach (IDocument *document, DocumentModel::openedDocuments()) {
-        TextDocument *textEditorDocument = qobject_cast<TextDocument *>(document);
+        auto textEditorDocument = qobject_cast<TextDocument *>(document);
         if (!textEditorDocument)
             continue;
         QString fileName = textEditorDocument->filePath().toString();
@@ -282,7 +334,7 @@ QMap<QString, QTextCodec *> TextDocument::openedTextDocumentEncodings()
 {
     QMap<QString, QTextCodec *> workingCopy;
     foreach (IDocument *document, DocumentModel::openedDocuments()) {
-        TextDocument *textEditorDocument = qobject_cast<TextDocument *>(document);
+        auto textEditorDocument = qobject_cast<TextDocument *>(document);
         if (!textEditorDocument)
             continue;
         QString fileName = textEditorDocument->filePath().toString();
@@ -296,6 +348,11 @@ TextDocument *TextDocument::currentTextDocument()
     return qobject_cast<TextDocument *>(EditorManager::currentDocument());
 }
 
+TextDocument *TextDocument::textDocumentForFilePath(const Utils::FilePath &filePath)
+{
+    return qobject_cast<TextDocument *>(DocumentModel::documentForFilePath(filePath.toString()));
+}
+
 QString TextDocument::plainText() const
 {
     return document()->toPlainText();
@@ -303,7 +360,7 @@ QString TextDocument::plainText() const
 
 QString TextDocument::textAt(int pos, int length) const
 {
-    return Convenience::textAt(QTextCursor(document()), pos, length);
+    return Utils::Text::textAt(QTextCursor(document()), pos, length);
 }
 
 QChar TextDocument::characterAt(int pos) const
@@ -331,19 +388,16 @@ const StorageSettings &TextDocument::storageSettings() const
     return d->m_storageSettings;
 }
 
-void TextDocument::setTabSettings(const TabSettings &tabSettings)
+void TextDocument::setTabSettings(const TabSettings &newTabSettings)
 {
-    if (tabSettings == d->m_tabSettings)
+    if (newTabSettings == d->m_tabSettings)
         return;
-    d->m_tabSettings = tabSettings;
-
-    if (Highlighter *highlighter = qobject_cast<Highlighter *>(d->m_highlighter))
-        highlighter->setTabSettings(tabSettings);
+    d->m_tabSettings = newTabSettings;
 
     emit tabSettingsChanged();
 }
 
-const TabSettings &TextDocument::tabSettings() const
+TabSettings TextDocument::tabSettings() const
 {
     return d->m_tabSettings;
 }
@@ -355,6 +409,22 @@ void TextDocument::setFontSettings(const FontSettings &fontSettings)
     d->m_fontSettings = fontSettings;
     d->m_fontSettingsNeedsApply = true;
     emit fontSettingsChanged();
+}
+
+QAction *TextDocument::createDiffAgainstCurrentFileAction(
+    QObject *parent, const std::function<Utils::FilePath()> &filePath)
+{
+    const auto diffAgainstCurrentFile = [filePath]() {
+        auto diffService = DiffService::instance();
+        auto textDocument = TextEditor::TextDocument::currentTextDocument();
+        const QString leftFilePath = textDocument ? textDocument->filePath().toString() : QString();
+        const QString rightFilePath = filePath().toString();
+        if (diffService && !leftFilePath.isEmpty() && !rightFilePath.isEmpty())
+            diffService->diffFiles(leftFilePath, rightFilePath);
+    };
+    auto diffAction = new QAction(tr("Diff Against Current File"), parent);
+    QObject::connect(diffAction, &QAction::triggered, parent, diffAgainstCurrentFile);
+    return diffAction;
 }
 
 void TextDocument::triggerPendingUpdates()
@@ -373,9 +443,24 @@ CompletionAssistProvider *TextDocument::completionAssistProvider() const
     return d->m_completionAssistProvider;
 }
 
-QuickFixAssistProvider *TextDocument::quickFixAssistProvider() const
+void TextDocument::setFunctionHintAssistProvider(CompletionAssistProvider *provider)
 {
-    return 0;
+    d->m_functionHintAssistProvider = provider;
+}
+
+CompletionAssistProvider *TextDocument::functionHintAssistProvider() const
+{
+    return d->m_functionHintAssistProvider;
+}
+
+void TextDocument::setQuickFixAssistProvider(IAssistProvider *provider) const
+{
+    d->m_quickFixProvider = provider;
+}
+
+IAssistProvider *TextDocument::quickFixAssistProvider() const
+{
+    return d->m_quickFixProvider;
 }
 
 void TextDocument::applyFontSettings()
@@ -397,26 +482,50 @@ void TextDocument::setExtraEncodingSettings(const ExtraEncodingSettings &extraEn
     d->m_extraEncodingSettings = extraEncodingSettings;
 }
 
-void TextDocument::autoIndent(const QTextCursor &cursor, QChar typedChar)
+void TextDocument::autoIndent(const QTextCursor &cursor, QChar typedChar, int currentCursorPosition)
 {
-    d->m_indenter->indent(&d->m_document, cursor, typedChar, d->m_tabSettings);
+    d->m_indenter->indent(cursor, typedChar, tabSettings(), currentCursorPosition);
 }
 
-void TextDocument::autoReindent(const QTextCursor &cursor)
+void TextDocument::autoReindent(const QTextCursor &cursor, int currentCursorPosition)
 {
-    d->m_indenter->reindent(&d->m_document, cursor, d->m_tabSettings);
+    d->m_indenter->reindent(cursor, tabSettings(), currentCursorPosition);
+}
+
+void TextDocument::autoFormatOrIndent(const QTextCursor &cursor)
+{
+    d->m_indenter->autoIndent(cursor, tabSettings());
 }
 
 QTextCursor TextDocument::indent(const QTextCursor &cursor, bool blockSelection, int column,
                                  int *offset)
 {
-    return d->indentOrUnindent(cursor, true, blockSelection, column, offset);
+    return d->indentOrUnindent(cursor, true, tabSettings(), blockSelection, column, offset);
 }
 
 QTextCursor TextDocument::unindent(const QTextCursor &cursor, bool blockSelection, int column,
                                    int *offset)
 {
-    return d->indentOrUnindent(cursor, false, blockSelection, column, offset);
+    return d->indentOrUnindent(cursor, false, tabSettings(), blockSelection, column, offset);
+}
+
+void TextDocument::setFormatter(Formatter *formatter)
+{
+    d->m_formatter.reset(formatter);
+}
+
+void TextDocument::autoFormat(const QTextCursor &cursor)
+{
+    using namespace Utils::Text;
+    if (!d->m_formatter)
+        return;
+    if (QFutureWatcher<Replacements> *watcher = d->m_formatter->format(cursor, tabSettings())) {
+        connect(watcher, &QFutureWatcher<Replacements>::finished, this, [this, watcher]() {
+            if (!watcher->isCanceled())
+                Utils::Text::applyReplacements(document(), watcher->result());
+            delete watcher;
+        });
+    }
 }
 
 const ExtraEncodingSettings &TextDocument::extraEncodingSettings() const
@@ -428,9 +537,9 @@ void TextDocument::setIndenter(Indenter *indenter)
 {
     // clear out existing code formatter data
     for (QTextBlock it = document()->begin(); it.isValid(); it = it.next()) {
-        TextBlockUserData *userData = TextDocumentLayout::testUserData(it);
+        TextBlockUserData *userData = TextDocumentLayout::textUserData(it);
         if (userData)
-            userData->setCodeFormatterData(0);
+            userData->setCodeFormatterData(nullptr);
     }
     d->m_indenter.reset(indenter);
 }
@@ -487,7 +596,7 @@ bool TextDocument::save(QString *errorString, const QString &saveFileName, bool 
     QTextCursor cursor(&d->m_document);
 
     // When autosaving, we don't want to modify the document/location under the user's fingers.
-    TextEditorWidget *editorWidget = 0;
+    TextEditorWidget *editorWidget = nullptr;
     int savedPosition = 0;
     int savedAnchor = 0;
     int savedVScrollBarValue = 0;
@@ -513,7 +622,7 @@ bool TextDocument::save(QString *errorString, const QString &saveFileName, bool 
         cursor.movePosition(QTextCursor::Start);
 
         if (d->m_storageSettings.m_cleanWhitespace)
-          cleanWhitespace(cursor, d->m_storageSettings.m_cleanIndentation, d->m_storageSettings.m_inEntireDocument);
+          cleanWhitespace(cursor, d->m_storageSettings);
         if (d->m_storageSettings.m_addFinalNewLine)
           ensureFinalNewLine(cursor);
         cursor.endEditBlock();
@@ -562,7 +671,7 @@ bool TextDocument::save(QString *errorString, const QString &saveFileName, bool 
     // inform about the new filename
     const QFileInfo fi(fName);
     d->m_document.setModified(false); // also triggers update of the block revisions
-    setFilePath(Utils::FileName::fromUserInput(fi.absoluteFilePath()));
+    setFilePath(Utils::FilePath::fromUserInput(fi.absoluteFilePath()));
     emit changed();
     return true;
 }
@@ -582,11 +691,11 @@ bool TextDocument::shouldAutoSave() const
     return d->m_autoSaveRevision != d->m_document.revision();
 }
 
-void TextDocument::setFilePath(const Utils::FileName &newName)
+void TextDocument::setFilePath(const Utils::FilePath &newName)
 {
     if (newName == filePath())
         return;
-    IDocument::setFilePath(Utils::FileName::fromUserInput(newName.toFileInfo().absoluteFilePath()));
+    IDocument::setFilePath(Utils::FilePath::fromUserInput(newName.toFileInfo().absoluteFilePath()));
 }
 
 bool TextDocument::isFileReadOnly() const
@@ -677,13 +786,13 @@ Core::IDocument::OpenResult TextDocument::openImpl(QString *errorString, const Q
         if (!reload || fileName == realFileName)
             d->m_document.setUndoRedoEnabled(true);
 
-        TextDocumentLayout *documentLayout =
+        auto documentLayout =
             qobject_cast<TextDocumentLayout*>(d->m_document.documentLayout());
         QTC_ASSERT(documentLayout, return OpenResult::CannotHandle);
         documentLayout->lastSaveRevision = d->m_autoSaveRevision = d->m_document.revision();
         d->updateRevisions();
         d->m_document.setModified(fileName != realFileName);
-        setFilePath(Utils::FileName::fromUserInput(fi.absoluteFilePath()));
+        setFilePath(Utils::FilePath::fromUserInput(fi.absoluteFilePath()));
     }
     if (readResult == Utils::TextFileFormat::ReadIOError)
         return OpenResult::ReadError;
@@ -705,7 +814,7 @@ bool TextDocument::reload(QString *errorString)
 bool TextDocument::reload(QString *errorString, const QString &realFileName)
 {
     emit aboutToReload();
-    TextDocumentLayout *documentLayout =
+    auto documentLayout =
         qobject_cast<TextDocumentLayout*>(d->m_document.documentLayout());
     TextMarks marks;
     if (documentLayout)
@@ -774,15 +883,23 @@ void TextDocument::cleanWhitespace(const QTextCursor &cursor)
     QTextCursor copyCursor = cursor;
     copyCursor.setVisualNavigation(false);
     copyCursor.beginEditBlock();
-    cleanWhitespace(copyCursor, true, true);
+
+    cleanWhitespace(copyCursor, d->m_storageSettings);
+
     if (!hasSelection)
         ensureFinalNewLine(copyCursor);
+
     copyCursor.endEditBlock();
 }
 
-void TextDocument::cleanWhitespace(QTextCursor &cursor, bool cleanIndentation, bool inEntireDocument)
+void TextDocument::cleanWhitespace(QTextCursor &cursor, const StorageSettings &storageSettings)
 {
-    TextDocumentLayout *documentLayout = qobject_cast<TextDocumentLayout*>(d->m_document.documentLayout());
+    if (!d->m_storageSettings.m_cleanWhitespace)
+        return;
+
+    const QString fileName(filePath().fileName());
+
+    auto documentLayout = qobject_cast<TextDocumentLayout*>(d->m_document.documentLayout());
     Q_ASSERT(cursor.visualNavigation() == false);
 
     QTextBlock block = d->m_document.findBlock(cursor.selectionStart());
@@ -792,30 +909,34 @@ void TextDocument::cleanWhitespace(QTextCursor &cursor, bool cleanIndentation, b
 
     QVector<QTextBlock> blocks;
     while (block.isValid() && block != end) {
-        if (inEntireDocument || block.revision() != documentLayout->lastSaveRevision)
+        if (storageSettings.m_inEntireDocument || block.revision() != documentLayout->lastSaveRevision)
             blocks.append(block);
         block = block.next();
     }
     if (blocks.isEmpty())
         return;
 
-    const IndentationForBlock &indentations =
-            d->m_indenter->indentationForBlocks(blocks, d->m_tabSettings);
+    const TabSettings currentTabSettings = tabSettings();
+    const IndentationForBlock &indentations
+        = d->m_indenter->indentationForBlocks(blocks, currentTabSettings);
 
     foreach (block, blocks) {
         QString blockText = block.text();
-        d->m_tabSettings.removeTrailingWhitespace(cursor, block);
+
+        if (storageSettings.removeTrailingWhitespace(fileName))
+            currentTabSettings.removeTrailingWhitespace(cursor, block);
+
         const int indent = indentations[block.blockNumber()];
-        if (cleanIndentation && !d->m_tabSettings.isIndentationClean(block, indent)) {
+        if (storageSettings.m_cleanIndentation && !currentTabSettings.isIndentationClean(block, indent)) {
             cursor.setPosition(block.position());
-            int firstNonSpace = d->m_tabSettings.firstNonSpace(blockText);
+            int firstNonSpace = currentTabSettings.firstNonSpace(blockText);
             if (firstNonSpace == blockText.length()) {
                 cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
                 cursor.removeSelectedText();
             } else {
-                int column = d->m_tabSettings.columnAt(blockText, firstNonSpace);
+                int column = currentTabSettings.columnAt(blockText, firstNonSpace);
                 cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, firstNonSpace);
-                QString indentationString = d->m_tabSettings.indentationString(0, column, column - indent, block);
+                QString indentationString = currentTabSettings.indentationString(0, column, column - indent, block);
                 cursor.insertText(indentationString);
             }
         }
@@ -824,6 +945,9 @@ void TextDocument::cleanWhitespace(QTextCursor &cursor, bool cleanIndentation, b
 
 void TextDocument::ensureFinalNewLine(QTextCursor& cursor)
 {
+    if (!d->m_storageSettings.m_addFinalNewLine)
+        return;
+
     cursor.movePosition(QTextCursor::End, QTextCursor::MoveAnchor);
     bool emptyFile = !cursor.movePosition(QTextCursor::PreviousCharacter, QTextCursor::KeepAnchor);
 
@@ -843,6 +967,13 @@ void TextDocument::modificationChanged(bool modified)
     if (!modified)
         d->updateRevisions();
     emit changed();
+}
+
+void TextDocument::updateLayout() const
+{
+    auto documentLayout = qobject_cast<TextDocumentLayout*>(d->m_document.documentLayout());
+    QTC_ASSERT(documentLayout, return);
+    documentLayout->requestUpdate();
 }
 
 TextMarks TextDocument::marks() const
@@ -891,7 +1022,7 @@ TextMarks TextDocument::marksAt(int line) const
     QTextBlock block = d->m_document.findBlockByNumber(blockNumber);
 
     if (block.isValid()) {
-        if (TextBlockUserData *userData = TextDocumentLayout::testUserData(block))
+        if (TextBlockUserData *userData = TextDocumentLayout::textUserData(block))
             return userData->marks();
     }
     return TextMarks();
@@ -946,32 +1077,38 @@ void TextDocument::removeMarkFromMarksCache(TextMark *mark)
 void TextDocument::removeMark(TextMark *mark)
 {
     QTextBlock block = d->m_document.findBlockByNumber(mark->lineNumber() - 1);
-    if (TextBlockUserData *data = static_cast<TextBlockUserData *>(block.userData())) {
+    if (auto data = static_cast<TextBlockUserData *>(block.userData())) {
         if (!data->removeMark(mark))
             qDebug() << "Could not find mark" << mark << "on line" << mark->lineNumber();
     }
 
     removeMarkFromMarksCache(mark);
-    mark->setBaseTextDocument(0);
+    emit markRemoved(mark);
+    mark->setBaseTextDocument(nullptr);
+    updateLayout();
 }
 
 void TextDocument::updateMark(TextMark *mark)
 {
-    Q_UNUSED(mark)
-    auto documentLayout = qobject_cast<TextDocumentLayout*>(d->m_document.documentLayout());
-    QTC_ASSERT(documentLayout, return);
-    documentLayout->requestUpdate();
+    QTextBlock block = d->m_document.findBlockByNumber(mark->lineNumber() - 1);
+    if (block.isValid()) {
+        TextBlockUserData *userData = TextDocumentLayout::userData(block);
+        // re-evaluate priority
+        userData->removeMark(mark);
+        userData->addMark(mark);
+    }
+    updateLayout();
 }
 
 void TextDocument::moveMark(TextMark *mark, int previousLine)
 {
     QTextBlock block = d->m_document.findBlockByNumber(previousLine - 1);
-    if (TextBlockUserData *data = TextDocumentLayout::testUserData(block)) {
+    if (TextBlockUserData *data = TextDocumentLayout::textUserData(block)) {
         if (!data->removeMark(mark))
             qDebug() << "Could not find mark" << mark << "on line" << previousLine;
     }
     removeMarkFromMarksCache(mark);
-    mark->setBaseTextDocument(0);
+    mark->setBaseTextDocument(nullptr);
     addMark(mark);
 }
 

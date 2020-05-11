@@ -66,6 +66,7 @@ protected:
 
     bool visit(AST::UiProgram *ast) override;
     bool visit(AST::Program *ast) override;
+    void endVisit(AST::UiProgram *) override;
 
     // Ui
     bool visit(AST::UiImport *ast) override;
@@ -78,10 +79,12 @@ protected:
     // QML/JS
     bool visit(AST::FunctionDeclaration *ast) override;
     bool visit(AST::FunctionExpression *ast) override;
-    bool visit(AST::VariableDeclaration *ast) override;
+    bool visit(AST::PatternElement *ast) override;
 
     ObjectValue *switchObjectValue(ObjectValue *newObjectValue);
     ObjectValue *bindObject(AST::UiQualifiedId *qualifiedTypeNameId, AST::UiObjectInitializer *initializer);
+
+    void throwRecursionDepthError() override;
 
 private:
     Document *_doc;

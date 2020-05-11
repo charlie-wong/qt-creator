@@ -26,16 +26,16 @@
 #pragma once
 
 #include "qmakeprojectmanager_global.h"
-#include "qmakeprojectmanager.h"
+
 #include "qmakenodes.h"
 #include "qmakeparsernodes.h"
 
+#include <projectexplorer/deploymentdata.h>
 #include <projectexplorer/project.h>
-#include <projectexplorer/runconfiguration.h>
+#include <projectexplorer/toolchain.h>
 
 #include <QStringList>
 #include <QFutureInterface>
-#include <QTimer>
 #include <QFuture>
 
 QT_BEGIN_NAMESPACE
@@ -48,42 +48,88 @@ namespace ProjectExplorer { class DeploymentData; }
 namespace QtSupport { class ProFileReader; }
 
 namespace QmakeProjectManager {
+
 class QmakeBuildConfiguration;
 
-namespace Internal {
-class CentralizedFolderWatcher;
-class QmakeProjectFiles;
-}
+namespace Internal { class CentralizedFolderWatcher; }
 
-class  QMAKEPROJECTMANAGER_EXPORT QmakeProject : public ProjectExplorer::Project
+class  QMAKEPROJECTMANAGER_EXPORT QmakeProject final : public ProjectExplorer::Project
 {
     Q_OBJECT
 
 public:
-    explicit QmakeProject(const Utils::FileName &proFile);
+    explicit QmakeProject(const Utils::FilePath &proFile);
     ~QmakeProject() final;
 
-    QmakeProFile *rootProFile() const;
+    ProjectExplorer::Tasks projectIssues(const ProjectExplorer::Kit *k) const final;
 
-    bool supportsKit(ProjectExplorer::Kit *k, QString *errorMesage) const final;
+    void configureAsExampleProject() final;
 
-    QmakeProFileNode *rootProjectNode() const final;
-    bool validParse(const Utils::FileName &proFilePath) const;
-    bool parseInProgress(const Utils::FileName &proFilePath) const;
+    ProjectExplorer::ProjectImporter *projectImporter() const final;
 
-    virtual QStringList filesGeneratedFrom(const QString &file) const final;
+protected:
+    RestoreResult fromMap(const QVariantMap &map, QString *errorMessage) final;
 
-    enum Parsing {ExactParse, ExactAndCumulativeParse };
-    QList<QmakeProFile *> allProFiles(const QList<ProjectType> &projectTypes = QList<ProjectType>(),
-                                      Parsing parse = ExactParse) const;
-    QList<QmakeProFile *> applicationProFiles(Parsing parse = ExactParse) const;
-    bool hasApplicationProFile(const Utils::FileName &path) const;
+private:
+    ProjectExplorer::DeploymentKnowledge deploymentKnowledge() const override;
 
-    QList<Core::Id> creationIds(Core::Id base,
-                                ProjectExplorer::IRunConfigurationFactory::CreationMode mode,
-                                const QList<ProjectType> &projectTypes = {});
+    mutable ProjectExplorer::ProjectImporter *m_projectImporter = nullptr;
+};
 
-    static void notifyChanged(const Utils::FileName &name);
+// FIXME: This export here is only there to appease the current version
+// of the appman plugin. This _will_ go away, one way or the other.
+class QMAKEPROJECTMANAGER_EXPORT QmakeBuildSystem : public ProjectExplorer::BuildSystem
+{
+    Q_OBJECT
+
+public:
+    explicit QmakeBuildSystem(QmakeBuildConfiguration *bc);
+    ~QmakeBuildSystem();
+
+    bool supportsAction(ProjectExplorer::Node *context,
+                        ProjectExplorer::ProjectAction action,
+                        const ProjectExplorer::Node *node) const override;
+
+    bool addFiles(ProjectExplorer::Node *context,
+                  const QStringList &filePaths,
+                  QStringList *notAdded = nullptr) override;
+    ProjectExplorer::RemovedFilesFromProject removeFiles(ProjectExplorer::Node *context,
+                                                         const QStringList &filePaths,
+                                                         QStringList *notRemoved = nullptr) override;
+    bool deleteFiles(ProjectExplorer::Node *context,
+                     const QStringList &filePaths) override;
+    bool canRenameFile(ProjectExplorer::Node *context,
+                       const QString &filePath, const QString &newFilePath) override;
+    bool renameFile(ProjectExplorer::Node *context,
+                    const QString &filePath, const QString &newFilePath) override;
+    bool addDependencies(ProjectExplorer::Node *context,
+                         const QStringList &dependencies) override;
+    void triggerParsing() final;
+
+    QStringList filesGeneratedFrom(const QString &file) const final;
+    QVariant additionalData(Core::Id id) const final;
+
+    void asyncUpdate();
+    void buildFinished(bool success);
+    void activeTargetWasChanged(ProjectExplorer::Target *);
+
+    QString executableFor(const QmakeProFile *file);
+
+    void updateCppCodeModel();
+    void updateQmlJSCodeModel();
+
+    static bool equalFileList(const QStringList &a, const QStringList &b);
+
+    void updateBuildSystemData();
+    void collectData(const QmakeProFile *file, ProjectExplorer::DeploymentData &deploymentData);
+    void collectApplicationData(const QmakeProFile *file,
+                                ProjectExplorer::DeploymentData &deploymentData);
+    void collectLibraryData(const QmakeProFile *file,
+            ProjectExplorer::DeploymentData &deploymentData);
+    void startAsyncTimer(QmakeProFile::AsyncUpdateDelay delay);
+
+    void warnOnToolChainMismatch(const QmakeProFile *pro) const;
+    void testToolChain(ProjectExplorer::ToolChain *tc, const Utils::FilePath &path) const;
 
     /// \internal
     QtSupport::ProFileReader *createProFileReader(const QmakeProFile *qmakeProFile);
@@ -95,10 +141,11 @@ public:
     QString qmakeSysroot();
     /// \internal
     void destroyProFileReader(QtSupport::ProFileReader *reader);
+    void deregisterFromCacheManager();
 
     /// \internal
-    void scheduleAsyncUpdate(QmakeProFile *file,
-                             QmakeProFile::AsyncUpdateDelay delay = QmakeProFile::ParseLater);
+    void scheduleAsyncUpdateFile(QmakeProFile *file,
+                                 QmakeProFile::AsyncUpdateDelay delay = QmakeProFile::ParseLater);
     /// \internal
     void incrementPendingEvaluateFutures();
     /// \internal
@@ -107,75 +154,35 @@ public:
     bool wasEvaluateCanceled();
 
     void updateCodeModels();
+    void updateDocuments();
 
     void watchFolders(const QStringList &l, QmakePriFile *file);
     void unwatchFolders(const QStringList &l, QmakePriFile *file);
 
-    bool needsConfiguration() const final;
-
-    void configureAsExampleProject(const QSet<Core::Id> &platforms) final;
-
-    bool requiresTargetPanel() const final;
-
-    /// \internal
-    QString disabledReasonForRunConfiguration(const Utils::FileName &proFilePath);
-
-    /// used by the default implementation of shadowBuildDirectory
-    static QString buildNameFor(const ProjectExplorer::Kit *k);
-
-    void emitBuildDirectoryInitialized();
     static void proFileParseError(const QString &errorMessage);
-
-    ProjectExplorer::ProjectImporter *projectImporter() const final;
 
     enum AsyncUpdateState { Base, AsyncFullUpdatePending, AsyncPartialUpdatePending, AsyncUpdateInProgress, ShuttingDown };
     AsyncUpdateState asyncUpdateState() const;
 
-    QString mapProFilePathToTarget(const Utils::FileName &proFilePath);
+    QmakeProFile *rootProFile() const;
 
-signals:
-    void proFileUpdated(QmakeProjectManager::QmakeProFile *pro, bool, bool);
-    void buildDirectoryInitialized();
-    void proFilesEvaluated();
+    void notifyChanged(const Utils::FilePath &name);
 
-public:
-    void scheduleAsyncUpdate(QmakeProFile::AsyncUpdateDelay delay = QmakeProFile::ParseLater);
-    void scheduleAsyncUpdateLater() { scheduleAsyncUpdate(); }
+    enum Action { BUILD, REBUILD, CLEAN };
+    void buildHelper(Action action, bool isFileBuild,
+                     QmakeProFileNode *profile,
+                     ProjectExplorer::FileNode *buildableFile);
 
-protected:
-    RestoreResult fromMap(const QVariantMap &map, QString *errorMessage) final;
+    Utils::FilePath buildDir(const Utils::FilePath &proFilePath) const;
+    QmakeBuildConfiguration *qmakeBuildConfiguration() const;
+
+    void scheduleUpdateAllNowOrLater();
 
 private:
-    void asyncUpdate();
-    void buildFinished(bool success);
-    void activeTargetWasChanged();
+    void scheduleUpdateAll(QmakeProFile::AsyncUpdateDelay delay);
+    void scheduleUpdateAllLater() { scheduleUpdateAll(QmakeProFile::ParseLater); }
 
-    void setAllBuildConfigurationsEnabled(bool enabled);
-
-    QString executableFor(const QmakeProFile *file);
-    void updateRunConfigurations();
-
-    void updateCppCodeModel();
-    void updateQmlJSCodeModel();
-
-    static QList<QmakeProFile *> collectAllProFiles(QmakeProFile *file, Parsing parse,
-                                                    const QList<ProjectType> &projectTypes);
-
-    static bool equalFileList(const QStringList &a, const QStringList &b);
-
-    void updateBuildSystemData();
-    void collectData(const QmakeProFile *file, ProjectExplorer::DeploymentData &deploymentData);
-    void collectApplicationData(const QmakeProFile *file,
-                                ProjectExplorer::DeploymentData &deploymentData);
-    void collectLibraryData(const QmakeProFile *file,
-            ProjectExplorer::DeploymentData &deploymentData);
-    void startAsyncTimer(QmakeProFile::AsyncUpdateDelay delay);
-    bool matchesKit(const ProjectExplorer::Kit *kit);
-
-    void warnOnToolChainMismatch(const QmakeProFile *pro) const;
-    void testToolChain(ProjectExplorer::ToolChain *tc, const Utils::FileName &path) const;
-
-    mutable QSet<const QPair<Utils::FileName, Utils::FileName>> m_toolChainWarnings;
+    mutable QSet<const QPair<Utils::FilePath, Utils::FilePath>> m_toolChainWarnings;
 
     // Current configuration
     QString m_oldQtIncludePath;
@@ -186,13 +193,13 @@ private:
     QMakeVfs *m_qmakeVfs = nullptr;
 
     // cached data during project rescan
-    QMakeGlobals *m_qmakeGlobals = nullptr;
+    std::unique_ptr<QMakeGlobals> m_qmakeGlobals;
     int m_qmakeGlobalsRefCnt = 0;
+    bool m_invalidateQmakeVfsContents = false;
 
     QString m_qmakeSysroot;
 
-    QTimer m_asyncUpdateTimer;
-    QFutureInterface<void> *m_asyncUpdateFutureInterface = nullptr;
+    QFutureInterface<void> m_asyncUpdateFutureInterface;
     int m_pendingEvaluateFuturesCount = 0;
     AsyncUpdateState m_asyncUpdateState = Base;
     bool m_cancelEvaluate = false;
@@ -202,8 +209,8 @@ private:
 
     Internal::CentralizedFolderWatcher *m_centralizedFolderWatcher = nullptr;
 
-    ProjectExplorer::Target *m_activeTarget = nullptr;
-    mutable ProjectExplorer::ProjectImporter *m_projectImporter = nullptr;
+    ProjectExplorer::BuildSystem::ParseGuard m_guard;
+    bool m_firstParseNeeded = true;
 };
 
 } // namespace QmakeProjectManager

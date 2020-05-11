@@ -27,11 +27,13 @@
 
 #include <formeditorscene.h>
 
+#include <utils/qtcassert.h>
+
+#include <QGraphicsView>
 
 namespace QmlDesigner {
 
 LayerItem::LayerItem(FormEditorScene* scene)
-            : QGraphicsObject()
 {
     scene->addItem(this);
     setZValue(1);
@@ -39,9 +41,7 @@ LayerItem::LayerItem(FormEditorScene* scene)
     setAcceptedMouseButtons(Qt::NoButton);
 }
 
-LayerItem::~LayerItem()
-{
-}
+LayerItem::~LayerItem() = default;
 
 void LayerItem::paint(QPainter * /*painter*/, const QStyleOptionGraphicsItem * /*option*/, QWidget * /*widget*/)
 {
@@ -55,6 +55,14 @@ QRectF LayerItem::boundingRect() const
 QList<QGraphicsItem*> LayerItem::findAllChildItems() const
 {
     return findAllChildItems(this);
+}
+
+QTransform LayerItem::viewportTransform() const
+{
+    QTC_ASSERT(scene(), return {});
+    QTC_ASSERT(!scene()->views().isEmpty(), return {});
+
+    return scene()->views().first()->viewportTransform();
 }
 
 QList<QGraphicsItem*> LayerItem::findAllChildItems(const QGraphicsItem *item) const

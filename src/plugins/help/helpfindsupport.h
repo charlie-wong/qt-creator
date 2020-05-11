@@ -25,8 +25,6 @@
 
 #pragma once
 
-#include "centralwidget.h"
-
 #include <coreplugin/find/ifindsupport.h>
 
 namespace Help {
@@ -40,15 +38,15 @@ class HelpViewerFindSupport : public Core::IFindSupport
 public:
     HelpViewerFindSupport(HelpViewer *viewer);
 
-    bool supportsReplace() const { return false; }
-    Core::FindFlags supportedFindFlags() const;
-    void resetIncrementalSearch() {}
-    void clearHighlights() {}
-    QString currentFindString() const;
-    QString completedFindString() const { return QString(); }
+    bool supportsReplace() const override { return false; }
+    Core::FindFlags supportedFindFlags() const override;
+    void resetIncrementalSearch() override {}
+    void clearHighlights() override {}
+    QString currentFindString() const override;
+    QString completedFindString() const override { return QString(); }
 
-    Result findIncremental(const QString &txt, Core::FindFlags findFlags);
-    Result findStep(const QString &txt, Core::FindFlags findFlags);
+    Result findIncremental(const QString &txt, Core::FindFlags findFlags) override;
+    Result findStep(const QString &txt, Core::FindFlags findFlags) override;
 
 private:
     bool find(const QString &ttf, Core::FindFlags findFlags, bool incremental);

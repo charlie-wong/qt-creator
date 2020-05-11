@@ -67,10 +67,11 @@ void scanDir(const QString &dir)
 {
     QFutureInterface<void> result;
     PathsAndLanguages paths;
-    paths.maybeInsert(Utils::FileName::fromString(dir), Dialect::Qml);
+    paths.maybeInsert(Utils::FilePath::fromString(dir), Dialect::Qml);
     ModelManagerInterface::importScan(result, ModelManagerInterface::workingCopy(), paths,
                                       ModelManagerInterface::instance(), false);
-    ViewerContext vCtx = ViewerContext(QStringList(), QStringList(dir));
+    ViewerContext vCtx;
+    vCtx.paths.append(dir);
     Snapshot snap = ModelManagerInterface::instance()->snapshot();
 
     ImportDependencies *iDeps = snap.importDependencies();
@@ -100,7 +101,6 @@ QString resourcePath()
 
 void tst_ImportCheck::initTestCase()
 {
-    QLoggingCategory::setFilterRules(QLatin1String("qtc.*.debug=false"));
     if (!ModelManagerInterface::instance())
         new ModelManagerInterface;
 
@@ -120,8 +120,7 @@ void tst_ImportCheck::test_data()
     QTest::addColumn<QStringList>("expectedFiles");
     QTest::newRow("base") << QStringList(QString(TESTSRCDIR "/base"))
                           << QStringList({"QML 1.0", "QtQml 2.2", "QtQml 2.1", "QtQuick 2.0",
-                                          "QtQml 2.0", "QtQuick 2.-1", "QtQuick 2.1",
-                                          "QtQuick 2.2", "<cpp>"})
+                                          "QtQml 2.0", "QtQuick 2.1", "QtQuick 2.2", "<cpp>"})
                           << QStringList();
     QTest::newRow("001_flatQmlOnly") << QStringList(QString(TESTSRCDIR "/001_flatQmlOnly"))
                           << QStringList()
@@ -129,9 +128,9 @@ void tst_ImportCheck::test_data()
     QTest::newRow("002_nestedQmlOnly") << QStringList(QString(TESTSRCDIR "/002_nestedQmlOnly"))
                           << QStringList()
                           << QStringList();
-    /*QTest::newRow("003_packageQmlOnly") << QStringList(QString(TESTSRCDIR "/003_packageQmlOnly"))
-                          << QStringList("QtGraphicalEffects")
-                          << QStringList()
+    QTest::newRow("003_packageQmlOnly") << QStringList(QString(TESTSRCDIR "/003_packageQmlOnly"))
+                          << QStringList("QtGraphicalEffects 1.0")
+                          << (QStringList()
                               << QString(TESTSRCDIR "/003_packageQmlOnly/QtGraphicalEffects/ZoomBlur.qml")
                               << QString(TESTSRCDIR "/003_packageQmlOnly/QtGraphicalEffects/private/FastGlow.qml")
                               << QString(TESTSRCDIR "/003_packageQmlOnly/QtGraphicalEffects/private/GaussianInnerShadow.qml")
@@ -165,11 +164,10 @@ void tst_ImportCheck::test_data()
                               << QString(TESTSRCDIR "/003_packageQmlOnly/QtGraphicalEffects/ThresholdMask.qml")
                               << QString(TESTSRCDIR "/003_packageQmlOnly/QtGraphicalEffects/LevelAdjust.qml")
                               << QString(TESTSRCDIR "/003_packageQmlOnly/QtGraphicalEffects/FastBlur.qml"));
-    QTest::newRow("004_cppOnly copy") << QStringList(QString(TESTSRCDIR "004_cppOnly copy"))
+    QTest::newRow("004_cppOnly copy") << QStringList(QString(TESTSRCDIR "/004_cppOnly copy"))
                           << QStringList({ "QML 1.0", "QtQml 2.2", "QtQml 2.1", "QtQuick 2.0",
-                                           "QtQml 2.0", "QtQuick 2.-1", "QtQuick 2.1",
-                                           "QtQuick 2.2", "<cpp>" })
-                          << QStringList();*/
+                                           "QtQml 2.0", "QtQuick 2.1", "QtQuick 2.2", "<cpp>" })
+                          << QStringList();
 }
 
 void tst_ImportCheck::test()
@@ -181,10 +179,11 @@ void tst_ImportCheck::test()
     QFutureInterface<void> result;
     PathsAndLanguages lPaths;
     foreach (const QString &path, paths)
-        lPaths.maybeInsert(Utils::FileName::fromString(path), Dialect::Qml);
+        lPaths.maybeInsert(Utils::FilePath::fromString(path), Dialect::Qml);
     ModelManagerInterface::importScan(result, ModelManagerInterface::workingCopy(), lPaths,
                                       ModelManagerInterface::instance(), false);
-    ViewerContext vCtx(QStringList(), paths);
+    ViewerContext vCtx;
+    vCtx.paths.append(paths);
     Snapshot snap = ModelManagerInterface::instance()->snapshot();
 
     ImportDependencies *iDeps = snap.importDependencies();

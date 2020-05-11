@@ -22,6 +22,7 @@
 ** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ****************************************************************************/
+#line 223 "qmljs.g"
 
 
 //
@@ -47,12 +48,14 @@
 //    qlalr --no-debug --no-lines --qt qmljs.g
 //
 
-#pragma once
+#ifndef QMLJSPARSER_P_H
+#define QMLJSPARSER_P_H
 
-#include "qmljsglobal_p.h"
-#include "qmljsgrammar_p.h"
-#include "qmljsast_p.h"
-#include "qmljsengine_p.h"
+#include "qmljs/parser/qmljsglobal_p.h"
+#include "qmljs/parser/qmljsgrammar_p.h"
+#include "qmljs/parser/qmljsast_p.h"
+#include "qmljs/parser/qmljsengine_p.h"
+#include "qmljs/parser/qmljsdiagnosticmessage_p.h"
 
 #include <QtCore/qlist.h>
 #include <QtCore/qstring.h>
@@ -69,30 +72,45 @@ public:
     union Value {
       int ival;
       double dval;
+      AST::VariableScope scope;
+      AST::ForEachType forEachType;
       AST::ArgumentList *ArgumentList;
       AST::CaseBlock *CaseBlock;
       AST::CaseClause *CaseClause;
       AST::CaseClauses *CaseClauses;
       AST::Catch *Catch;
       AST::DefaultClause *DefaultClause;
-      AST::ElementList *ElementList;
       AST::Elision *Elision;
       AST::ExpressionNode *Expression;
+      AST::TemplateLiteral *Template;
       AST::Finally *Finally;
       AST::FormalParameterList *FormalParameterList;
-      AST::FunctionBody *FunctionBody;
       AST::FunctionDeclaration *FunctionDeclaration;
       AST::Node *Node;
       AST::PropertyName *PropertyName;
-      AST::PropertyAssignment *PropertyAssignment;
-      AST::PropertyAssignmentList *PropertyAssignmentList;
-      AST::SourceElement *SourceElement;
-      AST::SourceElements *SourceElements;
       AST::Statement *Statement;
       AST::StatementList *StatementList;
       AST::Block *Block;
-      AST::VariableDeclaration *VariableDeclaration;
       AST::VariableDeclarationList *VariableDeclarationList;
+      AST::Pattern *Pattern;
+      AST::PatternElement *PatternElement;
+      AST::PatternElementList *PatternElementList;
+      AST::PatternProperty *PatternProperty;
+      AST::PatternPropertyList *PatternPropertyList;
+      AST::ClassElementList *ClassElementList;
+      AST::ImportClause *ImportClause;
+      AST::FromClause *FromClause;
+      AST::NameSpaceImport *NameSpaceImport;
+      AST::ImportsList *ImportsList;
+      AST::NamedImports *NamedImports;
+      AST::ImportSpecifier *ImportSpecifier;
+      AST::ExportSpecifier *ExportSpecifier;
+      AST::ExportsList *ExportsList;
+      AST::ExportClause *ExportClause;
+      AST::ExportDeclaration *ExportDeclaration;
+      AST::TypeAnnotation *TypeAnnotation;
+      AST::TypeArgumentList *TypeArgumentList;
+      AST::Type *Type;
 
       AST::UiProgram *UiProgram;
       AST::UiHeaderItemList *UiHeaderItemList;
@@ -109,7 +127,10 @@ public:
       AST::UiObjectMemberList *UiObjectMemberList;
       AST::UiArrayMemberList *UiArrayMemberList;
       AST::UiQualifiedId *UiQualifiedId;
-      AST::UiQualifiedPragmaId *UiQualifiedPragmaId;
+      AST::UiEnumMemberList *UiEnumMemberList;
+      AST::UiVersionSpecifier *UiVersionSpecifier;
+      AST::UiAnnotation *UiAnnotation;
+      AST::UiAnnotationList *UiAnnotationList;
     };
 
 public:
@@ -117,12 +138,13 @@ public:
     ~Parser();
 
     // parse a UI program
-    bool parse() { return parse(T_FEED_UI_PROGRAM); }
+    bool parse() { ++functionNestingLevel; bool r = parse(T_FEED_UI_PROGRAM); --functionNestingLevel; return r; }
     bool parseStatement() { return parse(T_FEED_JS_STATEMENT); }
     bool parseExpression() { return parse(T_FEED_JS_EXPRESSION); }
-    bool parseSourceElement() { return parse(T_FEED_JS_SOURCE_ELEMENT); }
-    bool parseUiObjectMember() { return parse(T_FEED_UI_OBJECT_MEMBER); }
-    bool parseProgram() { return parse(T_FEED_JS_PROGRAM); }
+    bool parseUiObjectMember() { ++functionNestingLevel; bool r = parse(T_FEED_UI_OBJECT_MEMBER); --functionNestingLevel; return r; }
+    bool parseProgram() { return parse(T_FEED_JS_SCRIPT); }
+    bool parseScript() { return parse(T_FEED_JS_SCRIPT); }
+    bool parseModule() { return parse(T_FEED_JS_MODULE); }
 
     AST::UiProgram *ast() const
     { return AST::cast<AST::UiProgram *>(program); }
@@ -187,42 +209,80 @@ protected:
     inline QStringRef &stringRef(int index)
     { return string_stack [tos + index - 1]; }
 
-    inline AST::SourceLocation &loc(int index)
+    inline QStringRef &rawStringRef(int index)
+    { return rawString_stack [tos + index - 1]; }
+
+    inline SourceLocation &loc(int index)
     { return location_stack [tos + index - 1]; }
 
     AST::UiQualifiedId *reparseAsQualifiedId(AST::ExpressionNode *expr);
-    AST::UiQualifiedPragmaId *reparseAsQualifiedPragmaId(AST::ExpressionNode *expr);
+
+    void pushToken(int token);
+    int lookaheadToken(Lexer *lexer);
+
+    static DiagnosticMessage compileError(const SourceLocation &location,
+                                          const QString &message, QtMsgType kind = QtCriticalMsg)
+    {
+        DiagnosticMessage error;
+        error.loc = location;
+        error.message = message;
+        error.kind = DiagnosticMessage::qtMsgTypeToKind(kind);
+        return error;
+    }
+
+    void syntaxError(const SourceLocation &location, const char *message) {
+        diagnostic_messages.append(compileError(location, QLatin1String(message)));
+     }
+     void syntaxError(const SourceLocation &location, const QString &message) {
+        diagnostic_messages.append(compileError(location, message));
+      }
+
+    bool ensureNoFunctionTypeAnnotations(AST::TypeAnnotation *returnTypeAnnotation, AST::FormalParameterList *formals);
 
 protected:
     Engine *driver;
     MemoryPool *pool;
-    int tos;
-    int stack_size;
-    Value *sym_stack;
-    int *state_stack;
-    AST::SourceLocation *location_stack;
-    QStringRef *string_stack;
+    int tos = 0;
+    int stack_size = 0;
+    Value *sym_stack = nullptr;
+    int *state_stack = nullptr;
+    SourceLocation *location_stack = nullptr;
+    QVector<QStringRef> string_stack;
+    QVector<QStringRef> rawString_stack;
 
-    AST::Node *program;
+    AST::Node *program = nullptr;
 
-    // error recovery
-    enum { TOKEN_BUFFER_SIZE = 3 };
+    // error recovery and lookahead handling
+    enum { TOKEN_BUFFER_SIZE = 5 };
 
     struct SavedToken {
        int token;
        double dval;
-       AST::SourceLocation loc;
+       SourceLocation loc;
        QStringRef spell;
+       QStringRef raw;
     };
 
-    double yylval;
+    int yytoken = -1;
+    double yylval = 0.;
     QStringRef yytokenspell;
-    AST::SourceLocation yylloc;
-    AST::SourceLocation yyprevlloc;
+    QStringRef yytokenraw;
+    SourceLocation yylloc;
+    SourceLocation yyprevlloc;
 
     SavedToken token_buffer[TOKEN_BUFFER_SIZE];
-    SavedToken *first_token;
-    SavedToken *last_token;
+    SavedToken *first_token = nullptr;
+    SavedToken *last_token = nullptr;
+
+    int functionNestingLevel = 0;
+
+    enum CoverExpressionType {
+        CE_Invalid,
+        CE_ParenthesizedExpression,
+        CE_FormalParameterList
+    };
+    SourceLocation coverExpressionErrorLocation;
+    CoverExpressionType coverExpressionType = CE_Invalid;
 
     QList<DiagnosticMessage> diagnostic_messages;
 };
@@ -231,9 +291,30 @@ protected:
 
 
 
-#define J_SCRIPT_REGEXPLITERAL_RULE1 91
+#line 1828 "qmljs.g"
 
-#define J_SCRIPT_REGEXPLITERAL_RULE2 92
+#define J_SCRIPT_REGEXPLITERAL_RULE1 161
+
+#line 1840 "qmljs.g"
+
+#define J_SCRIPT_REGEXPLITERAL_RULE2 162
+
+#line 3389 "qmljs.g"
+
+#define J_SCRIPT_EXPRESSIONSTATEMENTLOOKAHEAD_RULE 460
+
+#line 4041 "qmljs.g"
+
+#define J_SCRIPT_CONCISEBODYLOOKAHEAD_RULE 530
+
+#line 4583 "qmljs.g"
+
+#define J_SCRIPT_EXPORTDECLARATIONLOOKAHEAD_RULE 599
+
+#line 4867 "qmljs.g"
 
 QT_QML_END_NAMESPACE
 
+
+
+#endif // QMLJSPARSER_P_H

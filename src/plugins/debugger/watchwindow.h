@@ -40,8 +40,8 @@ public:
     explicit WatchTreeView(WatchType type);
     WatchType type() const { return m_type; }
 
-    void setModel(QAbstractItemModel *model);
-    void reset();
+    void setModel(QAbstractItemModel *model) override;
+    void reset() override;
 
     static void reexpand(QTreeView *view, const QModelIndex &idx);
 
@@ -56,13 +56,14 @@ private:
     void resetHelper();
     void expandNode(const QModelIndex &idx);
     void collapseNode(const QModelIndex &idx);
+    void updateTimeColumn();
     void adjustSlider();
 
-    void doItemsLayout();
-    void currentChanged(const QModelIndex &current, const QModelIndex &previous);
+    void doItemsLayout() override;
+    void currentChanged(const QModelIndex &current, const QModelIndex &previous) override;
 
     WatchType m_type;
-    int m_sliderPosition;
+    int m_sliderPosition = 0;
 };
 
 } // namespace Internal

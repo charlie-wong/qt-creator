@@ -36,62 +36,51 @@ JavaParser::JavaParser() :
   m_javaRegExp(QLatin1String("^(.*\\[javac\\]\\s)(.*\\.java):(\\d+):(.*)$"))
 { }
 
-void JavaParser::stdOutput(const QString &line)
-{
-    parse(line);
-    IOutputParser::stdOutput(line);
-}
-
-void JavaParser::stdError(const QString &line)
-{
-    parse(line);
-    IOutputParser::stdError(line);
-}
-
 void JavaParser::setProjectFileList(const QStringList &fileList)
 {
     m_fileList = fileList;
 }
 
-void JavaParser::setBuildDirectory(const Utils::FileName &buildDirectory)
+void JavaParser::setBuildDirectory(const Utils::FilePath &buildDirectory)
 {
     m_buildDirectory = buildDirectory;
 }
 
-void JavaParser::setSourceDirectory(const Utils::FileName &sourceDirectory)
+void JavaParser::setSourceDirectory(const Utils::FilePath &sourceDirectory)
 {
     m_sourceDirectory = sourceDirectory;
 }
 
-void JavaParser::parse(const QString &line)
+Utils::OutputLineParser::Result JavaParser::handleLine(const QString &line,
+                                                       Utils::OutputFormat type)
 {
-    if (m_javaRegExp.indexIn(line) > -1) {
-        bool ok;
-        int lineno = m_javaRegExp.cap(3).toInt(&ok);
-        if (!ok)
-            lineno = -1;
-        Utils::FileName file = Utils::FileName::fromUserInput(m_javaRegExp.cap(2));
-        if (file.isChildOf(m_buildDirectory)) {
-            Utils::FileName relativePath = file.relativeChildPath(m_buildDirectory);
-            file = m_sourceDirectory;
-            file.appendPath(relativePath.toString());
-        }
+    Q_UNUSED(type);
+    if (m_javaRegExp.indexIn(line) == -1)
+        return Status::NotHandled;
 
-        if (file.toFileInfo().isRelative()) {
-            for (int i = 0; i < m_fileList.size(); i++)
-                if (m_fileList[i].endsWith(file.toString())) {
-                    file = Utils::FileName::fromString(m_fileList[i]);
-                    break;
-                }
-        }
-
-        Task task(Task::Error,
-                  m_javaRegExp.cap(4).trimmed(),
-                  file /* filename */,
-                  lineno,
-                  Constants::TASK_CATEGORY_COMPILE);
-        emit addTask(task, 1);
-        return;
+    bool ok;
+    int lineno = m_javaRegExp.cap(3).toInt(&ok);
+    if (!ok)
+        lineno = -1;
+    Utils::FilePath file = Utils::FilePath::fromUserInput(m_javaRegExp.cap(2));
+    if (file.isChildOf(m_buildDirectory)) {
+        Utils::FilePath relativePath = file.relativeChildPath(m_buildDirectory);
+        file = m_sourceDirectory.pathAppended(relativePath.toString());
+    }
+    if (file.toFileInfo().isRelative()) {
+        for (int i = 0; i < m_fileList.size(); i++)
+            if (m_fileList[i].endsWith(file.toString())) {
+                file = Utils::FilePath::fromString(m_fileList[i]);
+                break;
+            }
     }
 
+    CompileTask task(Task::Error,
+                     m_javaRegExp.cap(4).trimmed(),
+                     absoluteFilePath(file),
+                     lineno);
+    LinkSpecs linkSpecs;
+    addLinkSpecForAbsoluteFilePath(linkSpecs, task.file, task.line, m_javaRegExp, 2);
+    scheduleTask(task, 1);
+    return {Status::Done, linkSpecs};
 }

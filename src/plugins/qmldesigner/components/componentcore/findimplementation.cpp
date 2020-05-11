@@ -35,6 +35,8 @@
 #include <qmljs/qmljsscopebuilder.h>
 #include <qmljs/qmljsmodelmanagerinterface.h>
 
+#include <QDebug>
+
 namespace {
 
 using namespace QmlJS;
@@ -42,9 +44,9 @@ using namespace QmlJS;
 class FindImplementationVisitor: protected AST::Visitor
 {
 public:
-    typedef QList<AST::SourceLocation> Results;
+    using Results = QList<SourceLocation>;
 
-    FindImplementationVisitor(Document::Ptr doc, const ContextPtr &context)
+    FindImplementationVisitor(const Document::Ptr &doc, const ContextPtr &context)
         : m_document(doc)
         , m_context(context)
         , m_scopeChain(doc, context)
@@ -66,13 +68,13 @@ public:
     }
 
 protected:
-    QString textAt(const AST::SourceLocation &location)
+    QString textAt(const SourceLocation &location)
     {
         return m_document->source().mid(location.offset, location.length);
     }
 
-    QString textAt(const AST::SourceLocation &from,
-                   const AST::SourceLocation &to)
+    QString textAt(const SourceLocation &from,
+                   const SourceLocation &to)
     {
         return m_document->source().mid(from.offset, to.end() - from.begin());
     }
@@ -82,9 +84,9 @@ protected:
 
     using AST::Visitor::visit;
 
-    virtual bool visit(AST::UiPublicMember *node)
+    bool visit(AST::UiPublicMember *node) override
     {
-        if (node->memberTypeName() == m_typeName){
+        if (node->memberType && node->memberType->name == m_typeName){
             const ObjectValue * objectValue = m_context->lookupType(m_document.data(), QStringList(m_typeName));
             if (objectValue == m_typeValue)
                 m_implemenations.append(node->typeToken);
@@ -98,7 +100,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::UiObjectDefinition *node)
+    bool visit(AST::UiObjectDefinition *node) override
     {
         bool oldInside = m_insideObject;
         if (checkTypeName(node->qualifiedTypeNameId))
@@ -111,7 +113,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::UiObjectBinding *node)
+    bool visit(AST::UiObjectBinding *node) override
     {
         bool oldInside = m_insideObject;
         if (checkTypeName(node->qualifiedTypeNameId))
@@ -125,12 +127,12 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::UiScriptBinding *node)
+    bool visit(AST::UiScriptBinding *node) override
     {
         if (m_insideObject) {
             QStringList stringList = textAt(node->qualifiedId->firstSourceLocation(),
                                             node->qualifiedId->lastSourceLocation()).split(QLatin1String("."));
-            const QString itemid = stringList.isEmpty() ? QString() : stringList.first();
+            const QString itemid = stringList.isEmpty() ? QString() : stringList.constFirst();
 
             if (itemid == m_itemId) {
                 m_implemenations.append(node->statement->firstSourceLocation());
@@ -147,7 +149,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::IdentifierExpression *node)
+    bool visit(AST::IdentifierExpression *node) override
     {
         if (node->name != m_typeName)
             return false;
@@ -159,7 +161,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::FieldMemberExpression *node)
+    bool visit(AST::FieldMemberExpression *node) override
     {
         if (node->name != m_typeName)
             return true;
@@ -173,12 +175,12 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::FunctionDeclaration *node)
+    bool visit(AST::FunctionDeclaration *node) override
     {
         return visit(static_cast<AST::FunctionExpression *>(node));
     }
 
-    virtual bool visit(AST::FunctionExpression *node)
+    bool visit(AST::FunctionExpression *node) override
     {
         AST::Node::accept(node->formals, this);
         m_scopeBuilder.push(node);
@@ -187,13 +189,14 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::VariableDeclaration *node)
+    bool visit(AST::PatternElement *node) override
     {
-        AST::Node::accept(node->expression, this);
+    if (node->isVariableDeclaration())
+            AST::Node::accept(node->initializer, this);
         return false;
     }
 
-    virtual bool visit(AST::UiImport *ast)
+    bool visit(AST::UiImport *ast) override
     {
         if (ast && ast->importId == m_typeName) {
             const Imports *imp = m_context->imports(m_document.data());
@@ -205,7 +208,10 @@ protected:
         return false;
     }
 
-
+    void throwRecursionDepthError() override
+    {
+        qWarning("Warning: Hit maximum recursion depth while visiting AST in FindImplementationVisitor");
+    }
 private:
     bool checkTypeName(AST::UiQualifiedId *id)
     {
@@ -222,7 +228,7 @@ private:
     }
 
     Results m_implemenations;
-    AST::SourceLocation m_formLocation;
+    SourceLocation m_formLocation;
 
     Document::Ptr m_document;
     ContextPtr m_context;
@@ -231,7 +237,7 @@ private:
 
     QString m_typeName;
     QString m_itemId;
-    const ObjectValue *m_typeValue;
+    const ObjectValue *m_typeValue = nullptr;
     bool m_insideObject = false;
 };
 
@@ -248,9 +254,7 @@ QString matchingLine(unsigned position, const QString &source)
 } //namespace
 
 
-FindImplementation::FindImplementation()
-{
-}
+FindImplementation::FindImplementation() = default;
 
 QList<QmlJSEditor::FindReferences::Usage> FindImplementation::run(const QString &fileName,
                                                                   const QString &typeName,
@@ -263,7 +267,7 @@ QList<QmlJSEditor::FindReferences::Usage> FindImplementation::run(const QString 
     //Parse always the latest version of document
     QmlJS::Dialect dialect = QmlJS::ModelManagerInterface::guessLanguageOfFile(fileName);
     QmlJS::Document::MutablePtr documentUpdate = QmlJS::Document::create(fileName, dialect);
-    documentUpdate->setSource(modelManager->workingCopy().source(fileName));
+    documentUpdate->setSource(QmlJS::ModelManagerInterface::workingCopy().source(fileName));
     if (documentUpdate->parseQml())
         modelManager->updateDocument(documentUpdate);
 
@@ -282,7 +286,7 @@ QList<QmlJSEditor::FindReferences::Usage> FindImplementation::run(const QString 
     FindImplementationVisitor visitor(document, context);
 
     FindImplementationVisitor::Results results = visitor(typeName, itemName, targetValue);
-    foreach (const AST::SourceLocation &location, results) {
+    foreach (const SourceLocation &location, results) {
         usages.append(QmlJSEditor::FindReferences::Usage(fileName,
                                                          matchingLine(location.offset, document->source()),
                                                          location.startLine, location.startColumn - 1, location.length));

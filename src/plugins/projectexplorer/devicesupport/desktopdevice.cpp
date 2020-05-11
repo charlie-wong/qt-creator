@@ -27,73 +27,58 @@
 #include "desktopdeviceprocess.h"
 #include "deviceprocesslist.h"
 #include "localprocesslist.h"
-#include "desktopdeviceconfigurationwidget.h"
 #include "desktopprocesssignaloperation.h"
 
+#include <coreplugin/fileutils.h>
+
 #include <projectexplorer/projectexplorerconstants.h>
-#include <projectexplorer/runconfiguration.h>
-#include <projectexplorer/runnables.h>
+#include <projectexplorer/runcontrol.h>
 
 #include <ssh/sshconnection.h>
 
 #include <utils/environment.h>
+#include <utils/hostosinfo.h>
 #include <utils/portlist.h>
+#include <utils/stringutils.h>
+#include <utils/url.h>
 
 #include <QCoreApplication>
 
 using namespace ProjectExplorer::Constants;
+using namespace Utils;
 
 namespace ProjectExplorer {
 
-DesktopDevice::DesktopDevice() : IDevice(Core::Id(DESKTOP_DEVICE_TYPE),
-                                         IDevice::AutoDetected,
-                                         IDevice::Hardware,
-                                         Core::Id(DESKTOP_DEVICE_ID))
+DesktopDevice::DesktopDevice()
 {
-    setDisplayName(QCoreApplication::translate("ProjectExplorer::DesktopDevice", "Local PC"));
+    setupId(IDevice::AutoDetected, DESKTOP_DEVICE_ID);
+    setType(DESKTOP_DEVICE_TYPE);
+    setDefaultDisplayName(tr("Local PC"));
+    setDisplayType(QCoreApplication::translate("ProjectExplorer::DesktopDevice", "Desktop"));
+
     setDeviceState(IDevice::DeviceStateUnknown);
+    setMachineType(IDevice::Hardware);
+    setOsType(HostOsInfo::hostOs());
+
     const QString portRange =
             QString::fromLatin1("%1-%2").arg(DESKTOP_PORT_START).arg(DESKTOP_PORT_END);
     setFreePorts(Utils::PortList::fromString(portRange));
+    setOpenTerminal([](const Utils::Environment &env, const QString &workingDir) {
+        Core::FileUtils::openTerminal(workingDir, env);
+    });
 }
-
-DesktopDevice::DesktopDevice(const DesktopDevice &other) :
-    IDevice(other)
-{ }
 
 IDevice::DeviceInfo DesktopDevice::deviceInformation() const
 {
     return DeviceInfo();
 }
 
-QString DesktopDevice::displayType() const
-{
-    return QCoreApplication::translate("ProjectExplorer::DesktopDevice", "Desktop");
-}
-
 IDeviceWidget *DesktopDevice::createWidget()
 {
-    return 0;
+    return nullptr;
     // DesktopDeviceConfigurationWidget currently has just one editable field viz. free ports.
     // Querying for an available port is quite straightforward. Having a field for the port
     // range can be confusing to the user. Hence, disabling the widget for now.
-}
-
-QList<Core::Id> DesktopDevice::actionIds() const
-{
-    return QList<Core::Id>();
-}
-
-QString DesktopDevice::displayNameForActionId(Core::Id actionId) const
-{
-    Q_UNUSED(actionId);
-    return QString();
-}
-
-void DesktopDevice::executeAction(Core::Id actionId, QWidget *parent)
-{
-    Q_UNUSED(actionId);
-    Q_UNUSED(parent);
 }
 
 bool DesktopDevice::canAutoDetectPorts() const
@@ -124,7 +109,7 @@ DeviceProcessSignalOperation::Ptr DesktopDevice::signalOperation() const
 class DesktopDeviceEnvironmentFetcher : public DeviceEnvironmentFetcher
 {
 public:
-    DesktopDeviceEnvironmentFetcher() {}
+    DesktopDeviceEnvironmentFetcher() = default;
 
     void start() override
     {
@@ -137,14 +122,55 @@ DeviceEnvironmentFetcher::Ptr DesktopDevice::environmentFetcher() const
     return DeviceEnvironmentFetcher::Ptr(new DesktopDeviceEnvironmentFetcher());
 }
 
-Connection DesktopDevice::toolControlChannel(const ControlChannelHint &) const
+class DesktopPortsGatheringMethod : public PortsGatheringMethod
 {
-    return HostName("localhost");
+    Runnable runnable(QAbstractSocket::NetworkLayerProtocol protocol) const override
+    {
+        // We might encounter the situation that protocol is given IPv6
+        // but the consumer of the free port information decides to open
+        // an IPv4(only) port. As a result the next IPv6 scan will
+        // report the port again as open (in IPv6 namespace), while the
+        // same port in IPv4 namespace might still be blocked, and
+        // re-use of this port fails.
+        // GDBserver behaves exactly like this.
+
+        Q_UNUSED(protocol)
+
+        Runnable runnable;
+        if (HostOsInfo::isWindowsHost() || HostOsInfo::isMacHost()) {
+            runnable.executable = FilePath::fromString("netstat");
+            runnable.commandLineArguments =  "-a -n";
+        } else if (HostOsInfo::isLinuxHost()) {
+            runnable.executable = FilePath::fromString("/bin/sh");
+            runnable.commandLineArguments = "-c 'cat /proc/net/tcp*'";
+        }
+        return runnable;
+    }
+
+    QList<Utils::Port> usedPorts(const QByteArray &output) const override
+    {
+        QList<Utils::Port> ports;
+        const QList<QByteArray> lines = output.split('\n');
+        for (const QByteArray &line : lines) {
+            const Port port(Utils::parseUsedPortFromNetstatOutput(line));
+            if (port.isValid() && !ports.contains(port))
+                ports.append(port);
+        }
+        return ports;
+    }
+};
+
+PortsGatheringMethod::Ptr DesktopDevice::portsGatheringMethod() const
+{
+    return DesktopPortsGatheringMethod::Ptr(new DesktopPortsGatheringMethod);
 }
 
-IDevice::Ptr DesktopDevice::clone() const
+QUrl DesktopDevice::toolControlChannel(const ControlChannelHint &) const
 {
-    return Ptr(new DesktopDevice(*this));
+    QUrl url;
+    url.setScheme(Utils::urlTcpScheme());
+    url.setHost("localhost");
+    return url;
 }
 
 } // namespace ProjectExplorer

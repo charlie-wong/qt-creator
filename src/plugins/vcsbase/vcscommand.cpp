@@ -27,10 +27,14 @@
 #include "vcsbaseplugin.h"
 #include "vcsoutputwindow.h"
 
+#include <coreplugin/documentmanager.h>
 #include <coreplugin/vcsmanager.h>
+#include <utils/globalfilechangeblocker.h>
 #include <utils/synchronousprocess.h>
 
 #include <QProcessEnvironment>
+
+using namespace Utils;
 
 namespace VcsBase {
 
@@ -39,40 +43,47 @@ VcsCommand::VcsCommand(const QString &workingDirectory,
     Core::ShellCommand(workingDirectory, environment),
     m_preventRepositoryChanged(false)
 {
-    setOutputProxyFactory([this]() -> Utils::OutputProxy * {
-        auto proxy = new Utils::OutputProxy;
+    VcsOutputWindow::setRepository(workingDirectory);
+    setOutputProxyFactory([this] {
+        auto proxy = new OutputProxy;
         VcsOutputWindow *outputWindow = VcsOutputWindow::instance();
 
-        connect(proxy, &Utils::OutputProxy::append,
+        connect(proxy, &OutputProxy::append,
                 outputWindow, [](const QString &txt) { VcsOutputWindow::append(txt); });
-        connect(proxy, &Utils::OutputProxy::appendSilently,
+        connect(proxy, &OutputProxy::appendSilently,
                 outputWindow, &VcsOutputWindow::appendSilently);
-        connect(proxy, &Utils::OutputProxy::appendError,
+        connect(proxy, &OutputProxy::appendError,
                 outputWindow, &VcsOutputWindow::appendError);
-        connect(proxy, &Utils::OutputProxy::appendCommand,
+        connect(proxy, &OutputProxy::appendCommand,
                 outputWindow, &VcsOutputWindow::appendCommand);
-        connect(proxy, &Utils::OutputProxy::appendMessage,
+        connect(proxy, &OutputProxy::appendMessage,
                 outputWindow, &VcsOutputWindow::appendMessage);
 
         return proxy;
+    });
+    connect(this, &VcsCommand::started, this, [this] {
+        if (flags() & ExpectRepoChanges)
+            Utils::GlobalFileChangeBlocker::instance()->forceBlocked(true);
+    });
+    connect(this, &VcsCommand::finished, this, [this] {
+        if (flags() & ExpectRepoChanges)
+            Utils::GlobalFileChangeBlocker::instance()->forceBlocked(false);
     });
 }
 
 const QProcessEnvironment VcsCommand::processEnvironment() const
 {
     QProcessEnvironment env = Core::ShellCommand::processEnvironment();
-    VcsBasePlugin::setProcessEnvironment(&env, flags() & ForceCLocale, VcsBasePlugin::sshPrompt());
+    VcsBase::setProcessEnvironment(&env, flags() & ForceCLocale, VcsBase::sshPrompt());
     return env;
 }
 
-Utils::SynchronousProcessResponse VcsCommand::runCommand(const Utils::FileName &binary,
-                                                         const QStringList &arguments, int timeoutS,
-                                                         const QString &workingDirectory,
-                                                         const Utils::ExitCodeInterpreter &interpreter)
+SynchronousProcessResponse VcsCommand::runCommand(const CommandLine &command, int timeoutS,
+                                                  const QString &workingDirectory,
+                                                  const ExitCodeInterpreter &interpreter)
 {
-    Utils::SynchronousProcessResponse response
-            = Core::ShellCommand::runCommand(binary, arguments, timeoutS, workingDirectory,
-                                             interpreter);
+    SynchronousProcessResponse response
+            = Core::ShellCommand::runCommand(command, timeoutS, workingDirectory, interpreter);
     emitRepositoryChanged(workingDirectory);
     return response;
 }
@@ -89,8 +100,8 @@ void VcsCommand::emitRepositoryChanged(const QString &workingDirectory)
 unsigned VcsCommand::processFlags() const
 {
     unsigned processFlags = 0;
-    if (!VcsBasePlugin::sshPrompt().isEmpty() && (flags() & SshPasswordPrompt))
-        processFlags |= Utils::SynchronousProcess::UnixTerminalDisabled;
+    if (!VcsBase::sshPrompt().isEmpty() && (flags() & SshPasswordPrompt))
+        processFlags |= SynchronousProcess::UnixTerminalDisabled;
     return processFlags;
 }
 

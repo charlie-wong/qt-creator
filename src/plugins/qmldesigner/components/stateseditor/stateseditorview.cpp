@@ -30,7 +30,7 @@
 
 #include <QDebug>
 #include <QRegExp>
-#include <math.h>
+#include <cmath>
 
 #include <nodemetainfo.h>
 
@@ -67,12 +67,12 @@ WidgetInfo StatesEditorView::widgetInfo()
     if (!m_statesEditorWidget)
         m_statesEditorWidget = new StatesEditorWidget(this, m_statesEditorModel.data());
 
-    return createWidgetInfo(m_statesEditorWidget.data(), 0, QLatin1String("StatesEditor"), WidgetInfo::BottomPane, 0, tr("States Editor"));
+    return createWidgetInfo(m_statesEditorWidget.data(), nullptr, QLatin1String("StatesEditor"), WidgetInfo::BottomPane, 0, tr("States"));
 }
 
 void StatesEditorView::rootNodeTypeChanged(const QString &/*type*/, int /*majorVersion*/, int /*minorVersion*/)
 {
-    checkForWindow();
+    checkForStatesAvailability();
 }
 
 void StatesEditorView::toggleStatesViewExpanded()
@@ -138,7 +138,7 @@ void StatesEditorView::createNewState()
 void StatesEditorView::addState()
 {
     // can happen when root node is e.g. a ListModel
-    if (!QmlItemNode::isValidQmlItemNode(rootModelNode()))
+    if (!QmlVisualNode::isValidQmlVisualNode(rootModelNode()))
         return;
 
     QStringList modelStateNames = rootStateGroup().names();
@@ -152,6 +152,7 @@ void StatesEditorView::addState()
     }
 
     try {
+        rootModelNode().validId();
         if ((rootStateGroup().allStates().count() < 1) && //QtQuick import might be missing
                 (!model()->hasImport(Import::createLibraryImport("QtQuick", "1.0"), true, true))) {
             model()->changeImports({Import::createLibraryImport("QtQuick", "1.0")}, {});
@@ -199,11 +200,12 @@ void StatesEditorView::duplicateCurrentState()
     setCurrentState(newState);
 }
 
-void StatesEditorView::checkForWindow()
+void StatesEditorView::checkForStatesAvailability()
 {
-    if (m_statesEditorWidget)
-        m_statesEditorWidget->showAddNewStatesButton(!rootModelNode().metaInfo().isSubclassOf("QtQuick.Window.Window")
-                                                     && !rootModelNode().metaInfo().isSubclassOf("QtQuick.Window.Popup"));
+    if (m_statesEditorWidget) {
+        const bool isVisual = QmlVisualNode::isValidQmlVisualNode(rootModelNode());
+        m_statesEditorWidget->showAddNewStatesButton(isVisual);
+    }
 }
 
 void StatesEditorView::setCurrentState(const QmlModelState &state)
@@ -251,7 +253,13 @@ void StatesEditorView::renameState(int internalNodeId, const QString &newName)
                 // Jump to base state for the change
                 QmlModelState oldState = currentState();
                 setCurrentState(baseState());
+                const bool updateDefault = state.isDefault();
+
                 state.setName(newName);
+
+                if (updateDefault)
+                    state.setAsDefault();
+
                 setCurrentState(oldState);
             }
         }  catch (const RewritingException &e) {
@@ -273,7 +281,7 @@ void StatesEditorView::setWhenCondition(int internalNodeId, const QString &condi
             if (state.isValid())
                 state.modelNode().bindingProperty("when").setExpression(condition);
 
-        } catch (const RewritingException &e) {
+        } catch (const Exception &e) {
             e.showException();
         }
     }
@@ -302,6 +310,50 @@ void StatesEditorView::resetWhenCondition(int internalNodeId)
     m_block = false;
 }
 
+void StatesEditorView::setStateAsDefault(int internalNodeId)
+{
+    if (m_block)
+        return;
+
+    m_block = true;
+
+    if (hasModelNodeForInternalId(internalNodeId)) {
+        QmlModelState state(modelNodeForInternalId(internalNodeId));
+        try {
+            if (state.isValid())
+                state.setAsDefault();
+
+        } catch (const RewritingException &e) {
+            e.showException();
+        }
+    }
+
+    m_block = false;
+}
+
+void StatesEditorView::resetDefaultState()
+{
+    if (m_block)
+        return;
+
+    m_block = true;
+
+    try {
+        if (rootModelNode().hasProperty("state"))
+            rootModelNode().removeProperty("state");
+
+    } catch (const RewritingException &e) {
+        e.showException();
+    }
+
+    m_block = false;
+}
+
+bool StatesEditorView::hasDefaultState() const
+{
+    return rootModelNode().hasProperty("state");
+}
+
 void StatesEditorView::modelAttached(Model *model)
 {
     if (model == AbstractView::model())
@@ -313,7 +365,7 @@ void StatesEditorView::modelAttached(Model *model)
     if (m_statesEditorWidget)
         m_statesEditorWidget->setNodeInstanceView(nodeInstanceView());
 
-    checkForWindow();
+    checkForStatesAvailability();
 
     resetModel();
 }
@@ -387,6 +439,21 @@ void StatesEditorView::bindingPropertiesChanged(const QList<BindingProperty> &pr
         if (property.name() == "when" && QmlModelState::isValidQmlModelState(property.parentModelNode()))
             resetModel();
     }
+}
+
+void StatesEditorView::variantPropertiesChanged(const QList<VariantProperty> &propertyList,
+                                                AbstractView::PropertyChangeFlags /*propertyChange*/)
+{
+    m_block = true;
+
+    for (const VariantProperty &property : propertyList) {
+        if (property.name() == "name" && QmlModelState::isValidQmlModelState(property.parentModelNode()))
+            resetModel();
+        else if (property.name() == "state" && property.parentModelNode().isRootNode())
+            resetModel();
+    }
+
+    m_block = false;
 }
 
 void StatesEditorView::currentStateChanged(const ModelNode &node)

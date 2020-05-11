@@ -52,7 +52,7 @@ def main():
     if not neededFilePresent(SpeedCrunchPath):
         return
 
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
     result = openCmakeProject(SpeedCrunchPath, BuildPath)
@@ -60,20 +60,21 @@ def main():
         test.fatal("Could not open/create cmake project - leaving test")
         invokeMenuItem("File", "Exit")
         return
-    progressBarWait(30000)
+    waitForProjectParsing()
     naviTreeView = "{column='0' container=':Qt Creator_Utils::NavigationTreeView' text~='%s' type='QModelIndex'}"
-    compareProjectTree(naviTreeView % "speedcrunch( \[\S+\])?", "projecttree_speedcrunch.tsv")
-
-    if not cmakeSupportsServerMode() and JIRA.isBugStillOpen(18290):
-        test.xfail("Building with cmake in Tealeafreader mode may fail", "QTCREATORBUG-18290")
+    if cmakeSupportsServerMode():
+        treeFile = "projecttree_speedcrunch_server.tsv"
     else:
-        # Invoke a rebuild of the application
-        invokeMenuItem("Build", "Rebuild All")
+        treeFile = "projecttree_speedcrunch.tsv"
+    compareProjectTree(naviTreeView % "speedcrunch( \[\S+\])?", treeFile)
 
-        # Wait for, and test if the build succeeded
-        waitForCompile(300000)
-        checkCompile()
-        checkLastBuild()
+    # Invoke a rebuild of the application
+    invokeMenuItem("Build", "Rebuild All Projects")
+
+    # Wait for, and test if the build succeeded
+    waitForCompile(300000)
+    checkCompile()
+    checkLastBuild()
 
     invokeMenuItem("File", "Exit")
 

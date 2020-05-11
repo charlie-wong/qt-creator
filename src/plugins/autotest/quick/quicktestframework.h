@@ -28,6 +28,14 @@
 #include "../itestframework.h"
 
 namespace Autotest {
+namespace QuickTest {
+namespace Constants {
+
+const char FRAMEWORK_NAME[]              = "QtQuickTest";
+
+} // namespace Constants
+} // namespace QuickTest
+
 namespace Internal {
 
 class QuickTestFramework : public ITestFramework
@@ -36,10 +44,11 @@ public:
     QuickTestFramework() : ITestFramework(true) {}
     const char *name() const override;
     unsigned priority() const override;
+    IFrameworkSettings *frameworkSettings() override;
 
 protected:
-    ITestParser *createTestParser() const override;
-    TestTreeItem *createRootNode() const override;
+    ITestParser *createTestParser() override;
+    TestTreeItem *createRootNode() override;
 };
 
 } // namespace Internal

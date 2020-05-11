@@ -31,12 +31,14 @@
 #include <coreplugin/actionmanager/actionmanager.h>
 #include <coreplugin/actionmanager/command.h>
 #include <coreplugin/coreconstants.h>
+#include <coreplugin/documentmanager.h>
 #include <coreplugin/icontext.h>
 #include <coreplugin/icore.h>
 #include <coreplugin/iwizardfactory.h>
 
 #include <utils/algorithm.h>
 #include <utils/fileutils.h>
+#include <utils/icon.h>
 #include <utils/stringutils.h>
 #include <utils/theme/theme.h>
 
@@ -48,6 +50,7 @@
 #include <QHeaderView>
 #include <QHelpEvent>
 #include <QLabel>
+#include <QMenu>
 #include <QPainter>
 #include <QToolTip>
 #include <QTreeView>
@@ -81,7 +84,6 @@ QVariant ProjectModel::data(const QModelIndex &index, int role) const
     case Qt::DisplayRole:
         return data.second;
     case Qt::ToolTipRole:
-        return data.first;
     case FilePathRole:
         return data.first;
     case PrettyFilePathRole:
@@ -126,13 +128,19 @@ ProjectWelcomePage::ProjectWelcomePage()
     for (int i = 1; i <= actionsCount; ++i) {
         auto act = new QAction(tr("Open Session #%1").arg(i), this);
         Command *cmd = ActionManager::registerAction(act, sessionBase.withSuffix(i), welcomeContext);
-        cmd->setDefaultKeySequence(QKeySequence((UseMacShortcuts ? tr("Ctrl+Meta+%1") : tr("Ctrl+Alt+%1")).arg(i)));
-        connect(act, &QAction::triggered, this, [this, i] { openSessionAt(i - 1); });
+        cmd->setDefaultKeySequence(QKeySequence((useMacShortcuts ? tr("Ctrl+Meta+%1") : tr("Ctrl+Alt+%1")).arg(i)));
+        connect(act, &QAction::triggered, this, [this, i] {
+            if (i <= m_sessionModel->rowCount())
+                openSessionAt(i - 1);
+        });
 
         act = new QAction(tr("Open Recent Project #%1").arg(i), this);
         cmd = ActionManager::registerAction(act, projectBase.withSuffix(i), welcomeContext);
         cmd->setDefaultKeySequence(QKeySequence(tr("Ctrl+Shift+%1").arg(i)));
-        connect(act, &QAction::triggered, this, [this, i] { openProjectAt(i - 1); });
+        connect(act, &QAction::triggered, this, [this, i] {
+            if (i <= m_projectModel->rowCount(QModelIndex()))
+                openProjectAt(i - 1);
+        });
     }
 }
 
@@ -233,7 +241,10 @@ protected:
 class SessionDelegate : public BaseDelegate
 {
 protected:
-    QString entryType() override { return tr("session", "Appears in \"Open session <name>\""); }
+    QString entryType() override
+    {
+        return ProjectWelcomePage::tr("session", "Appears in \"Open session <name>\"");
+    }
     QRect toolTipArea(const QRect &itemRect, const QModelIndex &idx) const override
     {
         // in expanded state bottom contains 'Clone', 'Rename', etc links, where the tool tip
@@ -331,10 +342,11 @@ public:
             };
             for (int i = 0; i < 3; ++i) {
                 const QString &action = actions.at(i);
-                const int ww = fm.width(action);
+                const int ww = fm.horizontalAdvance(action);
                 const QRect actionRect(xx, yy - 10, ww, 15);
-                const bool isActive = actionRect.contains(mousePos);
-                painter->setPen(linkColor);
+                const bool isForcedDisabled = (i != 0 && sessionName == "default");
+                const bool isActive = actionRect.contains(mousePos) && !isForcedDisabled;
+                painter->setPen(isForcedDisabled ? disabledLinkColor : linkColor);
                 painter->setFont(sizedFont(12, option.widget, isActive));
                 painter->drawText(xx, yy, action);
                 if (i < 2) {
@@ -364,33 +376,37 @@ public:
         const QStyleOptionViewItem &option, const QModelIndex &idx) final
     {
         if (ev->type() == QEvent::MouseButtonRelease) {
+            const QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(ev);
+            const Qt::MouseButtons button = mouseEvent->button();
             const QPoint pos = static_cast<QMouseEvent *>(ev)->pos();
             const QRect rc(option.rect.right() - 24, option.rect.top(), 24, SESSION_LINE_HEIGHT);
             const QString sessionName = idx.data(Qt::DisplayRole).toString();
-            if (rc.contains(pos)) {
+            if (rc.contains(pos) || button == Qt::RightButton) {
                 // The expand/collapse "button".
                 if (m_expandedSessions.contains(sessionName))
                     m_expandedSessions.removeOne(sessionName);
                 else
                     m_expandedSessions.append(sessionName);
-                model->layoutChanged({QPersistentModelIndex(idx)});
-                return false;
+                emit model->layoutChanged({QPersistentModelIndex(idx)});
+                return true;
             }
-            // One of the action links?
-            const auto sessionModel = qobject_cast<SessionModel *>(model);
-            QTC_ASSERT(sessionModel, return false);
-            if (m_activeSwitchToRect.contains(pos))
-                sessionModel->switchToSession(sessionName);
-            else if (m_activeActionRects[0].contains(pos))
-                sessionModel->cloneSession(sessionName);
-            else if (m_activeActionRects[1].contains(pos))
-                sessionModel->renameSession(sessionName);
-            else if (m_activeActionRects[2].contains(pos))
-                sessionModel->deleteSession(sessionName);
-            return true;
+            if (button == Qt::LeftButton) {
+                // One of the action links?
+                const auto sessionModel = qobject_cast<SessionModel *>(model);
+                QTC_ASSERT(sessionModel, return false);
+                if (m_activeSwitchToRect.contains(pos))
+                    sessionModel->switchToSession(sessionName);
+                else if (m_activeActionRects[0].contains(pos))
+                    sessionModel->cloneSession(ICore::mainWindow(), sessionName);
+                else if (m_activeActionRects[1].contains(pos))
+                    sessionModel->renameSession(ICore::mainWindow(), sessionName);
+                else if (m_activeActionRects[2].contains(pos))
+                    sessionModel->deleteSessions(QStringList(sessionName));
+                return true;
+            }
         }
         if (ev->type() == QEvent::MouseMove) {
-            model->layoutChanged({QPersistentModelIndex(idx)}); // Somewhat brutish.
+            emit model->layoutChanged({QPersistentModelIndex(idx)}); // Somewhat brutish.
             //update(option.rect);
             return true;
         }
@@ -401,6 +417,7 @@ private:
     const QColor hoverColor = themeColor(Theme::Welcome_HoverColor);
     const QColor textColor = themeColor(Theme::Welcome_TextColor);
     const QColor linkColor = themeColor(Theme::Welcome_LinkColor);
+    const QColor disabledLinkColor = themeColor(Theme::Welcome_DisabledLinkColor);
     const QColor backgroundColor = themeColor(Theme::Welcome_BackgroundColor);
     const QColor foregroundColor1 = themeColor(Theme::Welcome_ForegroundPrimaryColor); // light-ish.
     const QColor foregroundColor2 = themeColor(Theme::Welcome_ForegroundSecondaryColor); // blacker.
@@ -413,7 +430,10 @@ private:
 
 class ProjectDelegate : public BaseDelegate
 {
-    QString entryType() override { return tr("project", "Appears in \"Open project <name>\""); }
+    QString entryType() override
+    {
+        return ProjectWelcomePage::tr("project", "Appears in \"Open project <name>\"");
+    }
     int shortcutRole() const override { return ProjectModel::ShortcutRole; }
 
 public:
@@ -457,17 +477,44 @@ public:
         QString projectName = idx.data(Qt::DisplayRole).toString();
         QString projectPath = idx.data(ProjectModel::FilePathRole).toString();
         QFontMetrics fm(sizedFont(13, option.widget));
-        int width = std::max(fm.width(projectName), fm.width(projectPath)) + 36;
+        int width = std::max(fm.horizontalAdvance(projectName),
+                             fm.horizontalAdvance(projectPath)) + 36;
         return QSize(width, 48);
     }
 
-    bool editorEvent(QEvent *ev, QAbstractItemModel *,
+    bool editorEvent(QEvent *ev, QAbstractItemModel *model,
         const QStyleOptionViewItem &, const QModelIndex &idx) final
     {
         if (ev->type() == QEvent::MouseButtonRelease) {
-            QString projectFile = idx.data(ProjectModel::FilePathRole).toString();
-            ProjectExplorerPlugin::openProjectWelcomePage(projectFile);
-            return true;
+            const QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(ev);
+            const Qt::MouseButtons button = mouseEvent->button();
+            if (button == Qt::LeftButton) {
+                const QString projectFile = idx.data(ProjectModel::FilePathRole).toString();
+                ProjectExplorerPlugin::openProjectWelcomePage(projectFile);
+                return true;
+            }
+            if (button == Qt::RightButton) {
+                QMenu contextMenu;
+                QAction *action = new QAction(
+                    ProjectWelcomePage::tr("Remove Project from Recent Projects"));
+                const auto projectModel = qobject_cast<ProjectModel *>(model);
+                contextMenu.addAction(action);
+                connect(action, &QAction::triggered, [idx, projectModel](){
+                    const QString projectFile = idx.data(ProjectModel::FilePathRole).toString();
+                    const QString displayName = idx.data(Qt::DisplayRole).toString();
+                    ProjectExplorerPlugin::removeFromRecentProjects(projectFile, displayName);
+                    projectModel->resetProjects();
+                });
+                contextMenu.addSeparator();
+                action = new QAction(ProjectWelcomePage::tr("Clear Recent Project List"));
+                connect(action, &QAction::triggered, [projectModel]() {
+                    ProjectExplorerPlugin::clearRecentProjects();
+                    projectModel->resetProjects();
+                });
+                contextMenu.addAction(action);
+                contextMenu.exec(mouseEvent->globalPos());
+                return true;
+            }
         }
         return false;
     }
@@ -476,9 +523,10 @@ public:
 class TreeView : public QTreeView
 {
 public:
-    TreeView(QWidget *parent)
+    TreeView(QWidget *parent, const QString &name)
         : QTreeView(parent)
     {
+        setObjectName(name);
         header()->hide();
         setMouseTracking(true); // To enable hover.
         setIndentation(0);
@@ -512,13 +560,19 @@ public:
         if (!projectWelcomePage->m_projectModel)
             projectWelcomePage->m_projectModel = new ProjectModel(this);
 
+        auto manageSessionsButton = new WelcomePageButton(this);
+        manageSessionsButton->setText(ProjectWelcomePage::tr("Manage"));
+        const Icon icon({{":/utils/images/settings.png", Theme::Welcome_ForegroundSecondaryColor}}, Icon::Tint);
+        manageSessionsButton->setIcon(icon.pixmap());
+        manageSessionsButton->setOnClicked([] { ProjectExplorerPlugin::showSessionManager(); });
+
         auto newButton = new WelcomePageButton(this);
-        newButton->setText(ProjectWelcomePage::tr("New Project"));
+        newButton->setText(ProjectWelcomePage::tr("New"));
         newButton->setIcon(pixmap("new", Theme::Welcome_ForegroundSecondaryColor));
         newButton->setOnClicked([] { ProjectExplorerPlugin::openNewProjectDialog(); });
 
         auto openButton = new WelcomePageButton(this);
-        openButton->setText(ProjectWelcomePage::tr("Open Project"));
+        openButton->setText(ProjectWelcomePage::tr("Open"));
         openButton->setIcon(pixmap("open", Theme::Welcome_ForegroundSecondaryColor));
         openButton->setOnClicked([] { ProjectExplorerPlugin::openOpenProjectDialog(); });
 
@@ -528,15 +582,15 @@ public:
 
         auto recentProjectsLabel = new QLabel(this);
         recentProjectsLabel->setFont(sizedFont(16, this));
-        recentProjectsLabel->setText(ProjectWelcomePage::tr("Recent Projects"));
+        recentProjectsLabel->setText(ProjectWelcomePage::tr("Projects"));
 
-        auto sessionsList = new TreeView(this);
+        auto sessionsList = new TreeView(this, "Sessions");
         sessionsList->setModel(projectWelcomePage->m_sessionModel);
         sessionsList->header()->setSectionHidden(1, true); // The "last modified" column.
         sessionsList->setItemDelegate(&m_sessionDelegate);
         sessionsList->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
-        auto projectsList = new TreeView(this);
+        auto projectsList = new TreeView(this, "Recent Projects");
         projectsList->setUniformRowHeights(true);
         projectsList->setModel(projectWelcomePage->m_projectModel);
         projectsList->setItemDelegate(&m_projectDelegate);
@@ -544,11 +598,17 @@ public:
 
         auto hbox11 = new QHBoxLayout;
         hbox11->setContentsMargins(0, 0, 0, 0);
-        hbox11->addWidget(newButton);
+        hbox11->addWidget(sessionsLabel);
+        hbox11->addSpacing(16);
+        hbox11->addWidget(manageSessionsButton);
         hbox11->addStretch(1);
 
         auto hbox21 = new QHBoxLayout;
         hbox21->setContentsMargins(0, 0, 0, 0);
+        hbox21->addWidget(recentProjectsLabel);
+        hbox21->addSpacing(16);
+        hbox21->addWidget(newButton);
+        hbox21->addSpacing(16);
         hbox21->addWidget(openButton);
         hbox21->addStretch(1);
 
@@ -557,16 +617,13 @@ public:
         vbox1->addStrut(200);
         vbox1->addItem(hbox11);
         vbox1->addSpacing(16);
-        vbox1->addWidget(sessionsLabel);
-        vbox1->addSpacing(21);
         vbox1->addWidget(sessionsList);
 
         auto vbox2 = new QVBoxLayout;
         vbox2->setContentsMargins(0, 0, 0, 0);
+        vbox1->addStrut(200);
         vbox2->addItem(hbox21);
         vbox2->addSpacing(16);
-        vbox2->addWidget(recentProjectsLabel);
-        vbox2->addSpacing(21);
         vbox2->addWidget(projectsList);
 
         auto hbox = new QHBoxLayout(this);

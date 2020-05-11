@@ -73,52 +73,52 @@ public:
             return (!temps.isEmpty()) ? temps.takeLast() : ty;
         }
 
-        virtual void visit(UndefinedType *)
+        void visit(UndefinedType *) override
         {
             temps.append(FullySpecifiedType());
         }
 
-        virtual void visit(VoidType *)
+        void visit(VoidType *) override
         {
             temps.append(control()->voidType());
         }
 
-        virtual void visit(IntegerType *type)
+        void visit(IntegerType *type) override
         {
             temps.append(control()->integerType(type->kind()));
         }
 
-        virtual void visit(FloatType *type)
+        void visit(FloatType *type) override
         {
             temps.append(control()->floatType(type->kind()));
         }
 
-        virtual void visit(PointerToMemberType *type)
+        void visit(PointerToMemberType *type) override
         {
             const Name *memberName = rewrite->rewriteName(type->memberName());
             const FullySpecifiedType elementType = rewrite->rewriteType(type->elementType());
             temps.append(control()->pointerToMemberType(memberName, elementType));
         }
 
-        virtual void visit(PointerType *type)
+        void visit(PointerType *type) override
         {
             const FullySpecifiedType elementType = rewrite->rewriteType(type->elementType());
             temps.append(control()->pointerType(elementType));
         }
 
-        virtual void visit(ReferenceType *type)
+        void visit(ReferenceType *type) override
         {
             const FullySpecifiedType elementType = rewrite->rewriteType(type->elementType());
             temps.append(control()->referenceType(elementType, type->isRvalueReference()));
         }
 
-        virtual void visit(ArrayType *type)
+        void visit(ArrayType *type) override
         {
             const FullySpecifiedType elementType = rewrite->rewriteType(type->elementType());
             temps.append(control()->arrayType(elementType, type->size()));
         }
 
-        virtual void visit(NamedType *type)
+        void visit(NamedType *type) override
         {
             FullySpecifiedType ty = rewrite->env->apply(type->name(), rewrite);
             if (! ty->isUndefinedType()) {
@@ -129,13 +129,14 @@ public:
             }
         }
 
-        virtual void visit(Function *type)
+        void visit(Function *type) override
         {
-            Function *funTy = control()->newFunction(0, 0);
+            Function *funTy = control()->newFunction(0, nullptr);
             funTy->copy(type);
             funTy->setConst(type->isConst());
             funTy->setVolatile(type->isVolatile());
             funTy->setRefQualifier(type->refQualifier());
+            funTy->setExceptionSpecification(type->exceptionSpecification());
 
             funTy->setName(rewrite->rewriteName(type->name()));
 
@@ -144,7 +145,7 @@ public:
             for (unsigned i = 0, argc = type->argumentCount(); i < argc; ++i) {
                 Symbol *arg = type->argumentAt(i);
 
-                Argument *newArg = control()->newArgument(0, 0);
+                Argument *newArg = control()->newArgument(0, nullptr);
                 newArg->copy(arg);
                 newArg->setName(rewrite->rewriteName(arg->name()));
                 newArg->setType(rewrite->rewriteType(arg->type()));
@@ -158,55 +159,55 @@ public:
             temps.append(funTy);
         }
 
-        virtual void visit(Namespace *type)
+        void visit(Namespace *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(Class *type)
+        void visit(Class *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(Enum *type)
+        void visit(Enum *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(ForwardClassDeclaration *type)
+        void visit(ForwardClassDeclaration *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(ObjCClass *type)
+        void visit(ObjCClass *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(ObjCProtocol *type)
+        void visit(ObjCProtocol *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(ObjCMethod *type)
+        void visit(ObjCMethod *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(ObjCForwardClassDeclaration *type)
+        void visit(ObjCForwardClassDeclaration *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
         }
 
-        virtual void visit(ObjCForwardProtocolDeclaration *type)
+        void visit(ObjCForwardProtocolDeclaration *type) override
         {
             qWarning() << Q_FUNC_INFO;
             temps.append(type);
@@ -225,7 +226,7 @@ public:
         const Identifier *identifier(const Identifier *other) const
         {
             if (! other)
-                return 0;
+                return nullptr;
 
             return control()->identifier(other->chars(), other->size());
         }
@@ -236,53 +237,53 @@ public:
         const Name *operator()(const Name *name)
         {
             if (! name)
-                return 0;
+                return nullptr;
 
             accept(name);
             return (!temps.isEmpty()) ? temps.takeLast() : name;
         }
 
-        virtual void visit(const QualifiedNameId *name)
+        void visit(const QualifiedNameId *name) override
         {
             const Name *base = rewrite->rewriteName(name->base());
             const Name *n = rewrite->rewriteName(name->name());
             temps.append(control()->qualifiedNameId(base, n));
         }
 
-        virtual void visit(const Identifier *name)
+        void visit(const Identifier *name) override
         {
             temps.append(control()->identifier(name->chars(), name->size()));
         }
 
-        virtual void visit(const TemplateNameId *name)
+        void visit(const TemplateNameId *name) override
         {
             QVarLengthArray<FullySpecifiedType, 8> args(name->templateArgumentCount());
-            for (unsigned i = 0; i < name->templateArgumentCount(); ++i)
+            for (int i = 0; i < name->templateArgumentCount(); ++i)
                 args[i] = rewrite->rewriteType(name->templateArgumentAt(i));
             temps.append(control()->templateNameId(identifier(name->identifier()), name->isSpecialization(),
                                                    args.data(), args.size()));
         }
 
-        virtual void visit(const DestructorNameId *name)
+        void visit(const DestructorNameId *name) override
         {
             temps.append(control()->destructorNameId(identifier(name->identifier())));
         }
 
-        virtual void visit(const OperatorNameId *name)
+        void visit(const OperatorNameId *name) override
         {
             temps.append(control()->operatorNameId(name->kind()));
         }
 
-        virtual void visit(const ConversionNameId *name)
+        void visit(const ConversionNameId *name) override
         {
             FullySpecifiedType ty = rewrite->rewriteType(name->type());
             temps.append(control()->conversionNameId(ty));
         }
 
-        virtual void visit(const SelectorNameId *name)
+        void visit(const SelectorNameId *name) override
         {
             QVarLengthArray<const Name *, 8> names(name->nameCount());
-            for (unsigned i = 0; i < name->nameCount(); ++i)
+            for (int i = 0; i < name->nameCount(); ++i)
                 names[i] = rewrite->rewriteName(name->nameAt(i));
             temps.append(control()->selectorNameId(names.constData(), names.size(), name->hasArguments()));
         }
@@ -296,7 +297,7 @@ public: // attributes
 };
 
 SubstitutionEnvironment::SubstitutionEnvironment()
-    : _scope(0)
+    : _scope(nullptr)
 {
 }
 
@@ -415,7 +416,7 @@ FullySpecifiedType UseMinimalNames::apply(const Name *name, Rewrite *rewrite) co
 
 
 UseQualifiedNames::UseQualifiedNames()
-    : UseMinimalNames(0)
+    : UseMinimalNames(nullptr)
 {
 
 }

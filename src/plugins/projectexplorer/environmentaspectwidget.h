@@ -45,15 +45,15 @@ namespace ProjectExplorer {
 
 class EnvironmentWidget;
 
-class PROJECTEXPLORER_EXPORT EnvironmentAspectWidget : public RunConfigWidget
+class PROJECTEXPLORER_EXPORT EnvironmentAspectWidget : public QWidget
 {
     Q_OBJECT
 
 public:
     explicit EnvironmentAspectWidget(EnvironmentAspect *aspect, QWidget *additionalWidget = nullptr);
 
-    QString displayName() const override;
     virtual EnvironmentAspect *aspect() const;
+    EnvironmentWidget *envWidget() const { return m_environmentWidget; }
 
     QWidget *additionalWidget() const;
 
@@ -61,7 +61,7 @@ private:
     void baseEnvironmentSelected(int idx);
     void changeBaseEnvironment();
     void userChangesEdited();
-    void changeUserChanges(QList<Utils::EnvironmentItem> changes);
+    void changeUserChanges(Utils::EnvironmentItems changes);
     void environmentChanged();
 
     EnvironmentAspect *m_aspect;

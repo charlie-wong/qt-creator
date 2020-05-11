@@ -24,8 +24,9 @@
 ****************************************************************************/
 #pragma once
 
-#include "utils/fileutils.h"
 #include "androidconfigurations.h"
+
+#include <utils/fileutils.h>
 
 #include <QStringList>
 
@@ -48,21 +49,20 @@ public:
     AndroidToolManager(const AndroidConfig &config);
     ~AndroidToolManager();
 
-    SdkPlatformList availableSdkPlatforms() const;
+    SdkPlatformList availableSdkPlatforms(bool *ok = nullptr) const;
     void launchAvdManager() const;
 
-    QFuture<AndroidConfig::CreateAvdInfo> createAvd(AndroidConfig::CreateAvdInfo info) const;
+    QFuture<CreateAvdInfo> createAvd(CreateAvdInfo info) const;
     bool removeAvd(const QString &name) const;
     QFuture<AndroidDeviceInfoList> androidVirtualDevicesFuture() const;
 
 // Helper methods
 private:
-    Utils::Environment androidToolEnvironment() const;
-    static AndroidConfig::CreateAvdInfo createAvdImpl(AndroidConfig::CreateAvdInfo info,
-                                       Utils::FileName androidToolPath, Utils::Environment env);
-    static AndroidDeviceInfoList androidVirtualDevices(const Utils::FileName &androidTool,
-                                                            const Utils::FileName &sdkLlocationPath,
-                                                            const Utils::Environment &environment);
+    static CreateAvdInfo createAvdImpl(CreateAvdInfo info, Utils::FilePath androidToolPath,
+                                       QProcessEnvironment env);
+    static AndroidDeviceInfoList androidVirtualDevices(const Utils::FilePath &androidTool,
+                                                            const Utils::FilePath &sdkLlocationPath,
+                                                            const QProcessEnvironment &env);
 private:
     const AndroidConfig &m_config;
     std::unique_ptr<AndroidToolOutputParser> m_parser;

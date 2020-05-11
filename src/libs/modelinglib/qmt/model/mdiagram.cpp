@@ -40,7 +40,7 @@ MDiagram::MDiagram()
 
 MDiagram::MDiagram(const MDiagram &rhs)
     : MObject(rhs),
-      m_elements(),
+      // no deep copy
       // modification date is copied (instead of set to current time) to allow exact copies of the diagram
       m_lastModified(rhs.m_lastModified),
       m_toolbarId(rhs.toolbarId())
@@ -66,44 +66,57 @@ MDiagram &MDiagram::operator=(const MDiagram &rhs)
 
 DElement *MDiagram::findDiagramElement(const Uid &key) const
 {
-    // PERFORM introduce map for better performance
-    foreach (DElement *element, m_elements) {
-        if (element->uid() == key)
-            return element;
-    }
-    return 0;
+    return m_elementMap.value(key);
+}
+
+DElement *MDiagram::findDelegate(const Uid &modelUid) const
+{
+    return m_modelUid2ElementMap.value(modelUid);
 }
 
 void MDiagram::setDiagramElements(const QList<DElement *> &elements)
 {
     m_elements = elements;
+    m_elementMap.clear();
+    m_modelUid2ElementMap.clear();
+    for (DElement *element : elements) {
+        m_elementMap.insert(element->uid(), element);
+        m_modelUid2ElementMap.insert(element->modelUid(), element);
+    }
 }
 
 void MDiagram::addDiagramElement(DElement *element)
 {
-    QMT_CHECK(element);
+    QMT_ASSERT(element, return);
 
     m_elements.append(element);
+    m_elementMap.insert(element->uid(), element);
+    m_modelUid2ElementMap.insert(element->modelUid(), element);
 }
 
 void MDiagram::insertDiagramElement(int beforeElement, DElement *element)
 {
-    QMT_CHECK(beforeElement >= 0 && beforeElement <= m_elements.size());
+    QMT_ASSERT(beforeElement >= 0 && beforeElement <= m_elements.size(), return);
 
     m_elements.insert(beforeElement, element);
+    m_elementMap.insert(element->uid(), element);
+    m_modelUid2ElementMap.insert(element->modelUid(), element);
 }
 
 void MDiagram::removeDiagramElement(int index)
 {
-    QMT_CHECK(index >= 0 && index < m_elements.size());
+    QMT_ASSERT(index >= 0 && index < m_elements.size(), return);
 
-    delete m_elements.at(index);
+    DElement *element = m_elements.at(index);
+    m_elementMap.remove(element->uid());
+    m_modelUid2ElementMap.remove(element->modelUid());
+    delete element;
     m_elements.removeAt(index);
 }
 
 void MDiagram::removeDiagramElement(DElement *element)
 {
-    QMT_CHECK(element);
+    QMT_ASSERT(element, return);
 
     removeDiagramElement(m_elements.indexOf(element));
 }

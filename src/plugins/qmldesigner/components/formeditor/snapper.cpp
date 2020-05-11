@@ -38,8 +38,8 @@
 namespace QmlDesigner {
 
 Snapper::Snapper()
-    : m_containerFormEditorItem(0),
-    m_transformtionSpaceFormEditorItem(0),
+    : m_containerFormEditorItem(nullptr),
+    m_transformtionSpaceFormEditorItem(nullptr),
     m_snappingDistance(5.0)
 {
 }
@@ -289,7 +289,7 @@ QLineF Snapper::createSnapLine(Qt::Orientation orientation,
     if (orientation == Qt::Horizontal) {
         double lowerX(qMin(lowerLimit, double(itemRect.left())));
         double upperX(qMax(upperLimit, double(itemRect.right())));
-        return QLineF(lowerX, snapLine, upperX, snapLine);
+        return {lowerX, snapLine, upperX, snapLine};
     } else {
         double lowerY(qMin(lowerLimit, double(itemRect.top())));
         double upperY(qMax(upperLimit, double(itemRect.bottom())));
@@ -311,9 +311,9 @@ QList<QLineF> Snapper::findSnappingLines(const SnapLineMap &snappingLineMap,
 {
     QList<QLineF> lineList;
 
-    SnapLineMapIterator snappingLineIterator(snappingLineMap);
-    while (snappingLineIterator.hasNext()) {
-        snappingLineIterator.next();
+    for (auto snappingLineIterator = snappingLineMap.cbegin(), end = snappingLineMap.cend();
+              snappingLineIterator != end;
+              ++snappingLineIterator) {
 
         if (compareLines(snapLine, snappingLineIterator.key())) { // near distance snapping lines
             lineList += createSnapLine(orientation,
@@ -321,7 +321,7 @@ QList<QLineF> Snapper::findSnappingLines(const SnapLineMap &snappingLineMap,
                                         lowerLimit,
                                         upperLimit,
                                         snappingLineIterator.value().first);
-            if (boundingRects != 0)
+            if (boundingRects != nullptr)
                 boundingRects->append(snappingLineIterator.value().first);
         }
     }
@@ -339,9 +339,9 @@ QList<QLineF> Snapper::findSnappingOffsetLines(const SnapLineMap &snappingOffset
 {
     QList<QLineF> lineList;
 
-    SnapLineMapIterator snappingOffsetIterator(snappingOffsetMap);
-    while (snappingOffsetIterator.hasNext()) {
-        snappingOffsetIterator.next();
+    for (auto snappingOffsetIterator = snappingOffsetMap.cbegin(), end = snappingOffsetMap.cend();
+              snappingOffsetIterator != end;
+              ++snappingOffsetIterator) {
 
         const QRectF &formEditorItemRect(snappingOffsetIterator.value().first);
         double formEditorItemRectLowerLimit;
@@ -363,7 +363,7 @@ QList<QLineF> Snapper::findSnappingOffsetLines(const SnapLineMap &snappingOffset
                                        lowerLimit,
                                        upperLimit,
                                        formEditorItemRect);
-            if (boundingRects != 0)
+            if (boundingRects != nullptr)
                 boundingRects->append(snappingOffsetIterator.value().first);
         }
     }
@@ -377,9 +377,9 @@ double Snapper::snappedOffsetForLines(const SnapLineMap &snappingLineMap,
 {
     QMultiMap<double, double> minimumSnappingLineMap;
 
-    SnapLineMapIterator snappingLineIterator(snappingLineMap);
-    while (snappingLineIterator.hasNext()) {
-        snappingLineIterator.next();
+    for (auto snappingLineIterator = snappingLineMap.cbegin(), end = snappingLineMap.cend();
+              snappingLineIterator != end;
+              ++snappingLineIterator) {
         double snapLine = snappingLineIterator.key();
         double offset = value - snapLine;
         double distance = qAbs(offset);
@@ -403,9 +403,9 @@ double Snapper::snappedOffsetForOffsetLines(const SnapLineMap &snappingOffsetMap
 {
     QMultiMap<double, double> minimumSnappingLineMap;
 
-    SnapLineMapIterator snappingOffsetIterator(snappingOffsetMap);
-    while (snappingOffsetIterator.hasNext()) {
-        snappingOffsetIterator.next();
+    for (auto snappingOffsetIterator = snappingOffsetMap.cbegin(), end = snappingOffsetMap.cend();
+              snappingOffsetIterator != end;
+              ++snappingOffsetIterator) {
         double snapLine = snappingOffsetIterator.key();
         const QRectF &formEditorItemRect(snappingOffsetIterator.value().first);
         double formEditorItemRectLowerLimit;
@@ -449,7 +449,7 @@ double Snapper::snappingDistance() const
 static QLineF mergedHorizontalLine(const QList<QLineF> &lineList)
 {
     if (lineList.count() == 1)
-        return lineList.first();
+        return lineList.constFirst();
 
     double minimumX =  std::numeric_limits<double>::max();
     double maximumX =  std::numeric_limits<double>::min();
@@ -460,14 +460,14 @@ static QLineF mergedHorizontalLine(const QList<QLineF> &lineList)
         maximumX = qMax(maximumX, double(line.x2()));
     }
 
-    double y(lineList.first().y1());
-    return QLineF(minimumX, y, maximumX, y);
+    double y(lineList.constFirst().y1());
+    return {minimumX, y, maximumX, y};
 }
 
 static QLineF mergedVerticalLine(const QList<QLineF> &lineList)
 {
     if (lineList.count() == 1)
-        return lineList.first();
+        return lineList.constFirst();
 
     double minimumY =  std::numeric_limits<double>::max();
     double maximumY =  std::numeric_limits<double>::min();
@@ -478,8 +478,8 @@ static QLineF mergedVerticalLine(const QList<QLineF> &lineList)
         maximumY = qMax(maximumY, double(line.y2()));
     }
 
-    double x(lineList.first().x1());
-    return QLineF(x, minimumY, x, maximumY);
+    double x(lineList.constFirst().x1());
+    return {x, minimumY, x, maximumY};
 }
 
 static QList<QLineF> mergedHorizontalLines(const QList<QLineF> &lineList)
@@ -492,13 +492,12 @@ static QList<QLineF> mergedHorizontalLines(const QList<QLineF> &lineList)
     });
 
     QList<QLineF> lineWithTheSameY;
-    QListIterator<QLineF>  sortedLineListIterator(sortedLineList);
-    while (sortedLineListIterator.hasNext()) {
-        QLineF line = sortedLineListIterator.next();
+    for (int i = 0, n = sortedLineList.size(); i < n; ++i) {
+        QLineF line = sortedLineList.at(i);
         lineWithTheSameY.append(line);
 
-        if (sortedLineListIterator.hasNext()) {
-            QLineF nextLine = sortedLineListIterator.peekNext();
+        if (i + 1 < n) {
+            QLineF nextLine = sortedLineList.at(i + 1);
             if (!qFuzzyCompare(line.y1(), nextLine.y1())) {
                 mergedLineList.append(mergedHorizontalLine(lineWithTheSameY));
                 lineWithTheSameY.clear();
@@ -521,13 +520,12 @@ static QList<QLineF> mergedVerticalLines(const QList<QLineF> &lineList)
     });
 
     QList<QLineF> lineWithTheSameX;
-    QListIterator<QLineF>  sortedLineListIterator(sortedLineList);
-    while (sortedLineListIterator.hasNext()) {
-        QLineF line = sortedLineListIterator.next();
+    for (int i = 0, n = sortedLineList.size(); i < n; ++i) {
+        QLineF line = sortedLineList.at(i);
         lineWithTheSameX.append(line);
 
-        if (sortedLineListIterator.hasNext()) {
-            QLineF nextLine = sortedLineListIterator.peekNext();
+        if (i + 1 < n) {
+            QLineF nextLine = sortedLineList.at(i + 1);
             if (!qFuzzyCompare(line.x1(), nextLine.x1())) {
                 mergedLineList.append(mergedVerticalLine(lineWithTheSameX));
                 lineWithTheSameX.clear();
@@ -565,9 +563,9 @@ static QmlItemNode findItemOnSnappingLine(const QmlItemNode &sourceQmlItemNode, 
     else
         compareAnchorLineType = AnchorLineLeft;
 
-    SnapLineMapIterator  snapLineIterator(snappingLines);
-    while (snapLineIterator.hasNext()) {
-        snapLineIterator.next();
+    for (auto snapLineIterator = snappingLines.cbegin(), end = snappingLines.cend();
+              snapLineIterator != end;
+              ++snapLineIterator) {
         double snapLine = snapLineIterator.key();
 
         if (qAbs(snapLine - anchorLine ) < 1.0) {
@@ -715,11 +713,11 @@ QList<QGraphicsItem*> Snapper::generateSnappingLines(const QList<QRectF> &boundi
 
     foreach (const QLineF &line, lineList) {
         QLineF lineInTransformationSpace = transform.map(line);
-        QGraphicsLineItem * lineItem = new QGraphicsLineItem(lineInTransformationSpace, layerItem);
+        auto lineItem = new QGraphicsLineItem(lineInTransformationSpace, layerItem);
         lineItem->setZValue(40);
         QPen linePen;
         linePen.setCosmetic(true);
-        linePen.setColor("#5d2dd7");
+        linePen.setColor(QColor(0x5d, 0x2d, 0xd7));
         lineItem->setPen(linePen);
 
         graphicsItemList.append(lineItem);

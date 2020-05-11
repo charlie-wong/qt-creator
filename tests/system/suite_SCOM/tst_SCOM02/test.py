@@ -28,14 +28,14 @@ source("../../shared/suites_qtta.py")
 
 # entry of test
 def main():
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
     # create qt quick application
     createNewQtQuickApplication(tempDir(), "SampleApp")
     # create syntax error in qml file
     openDocument("SampleApp.Resources.qml\.qrc./.main\\.qml")
-    if not appendToLine(waitForObject(":Qt Creator_QmlJSEditor::QmlJSTextEditorWidget"), "TextEdit {", "SyntaxError"):
+    if not appendToLine(waitForObject(":Qt Creator_QmlJSEditor::QmlJSTextEditorWidget"), "Window {", "SyntaxError"):
         invokeMenuItem("File", "Exit")
         return
     # save all to invoke qml parsing

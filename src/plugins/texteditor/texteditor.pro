@@ -1,8 +1,20 @@
 DEFINES += TEXTEDITOR_LIBRARY
-QT += gui-private network printsupport xml
+QT += network printsupport xml
 CONFIG += exceptions
 CONFIG += include_source_dir # For the highlighter autotest.
+
+include(../../shared/syntax/syntax_shared.pri)
+isEmpty(KSYNTAXHIGHLIGHTING_LIB_DIR) | isEmpty(KSYNTAXHIGHLIGHTING_INCLUDE_DIR) {
+    QTC_LIB_DEPENDS += syntax-highlighting
+} else {
+    unix:!disable_external_rpath {
+        !macos: QMAKE_LFLAGS += -Wl,-z,origin
+        QMAKE_LFLAGS += -Wl,-rpath,$$shell_quote($${KSYNTAXHIGHLIGHTING_LIB_DIR})
+    }
+}
+
 include(../../qtcreatorplugin.pri)
+
 SOURCES += texteditorplugin.cpp \
     plaintexteditorfactory.cpp \
     textdocument.cpp \
@@ -21,42 +33,24 @@ SOURCES += texteditorplugin.cpp \
     findinfiles.cpp \
     basefilefind.cpp \
     texteditorsettings.cpp \
-    codecselector.cpp \
     findincurrentfile.cpp \
     findinopenfiles.cpp \
     colorscheme.cpp \
     colorschemeedit.cpp \
     texteditoroverlay.cpp \
-    texteditoroptionspage.cpp \
     textdocumentlayout.cpp \
     completionsettings.cpp \
-    normalindenter.cpp \
-    indenter.cpp \
+    textindenter.cpp \
     quickfix.cpp \
     syntaxhighlighter.cpp \
-    highlighterutils.cpp \
-    generichighlighter/itemdata.cpp \
-    generichighlighter/specificrules.cpp \
-    generichighlighter/rule.cpp \
-    generichighlighter/dynamicrule.cpp \
-    generichighlighter/context.cpp \
-    generichighlighter/includerulesinstruction.cpp \
-    generichighlighter/progressdata.cpp \
-    generichighlighter/keywordlist.cpp \
-    generichighlighter/highlightdefinition.cpp \
-    generichighlighter/highlighter.cpp \
-    generichighlighter/manager.cpp \
-    generichighlighter/highlightdefinitionhandler.cpp \
-    generichighlighter/highlightersettingspage.cpp \
-    generichighlighter/highlightersettings.cpp \
-    generichighlighter/managedefinitionsdialog.cpp \
-    generichighlighter/definitiondownloader.cpp \
+    highlighter.cpp \
+    highlightersettings.cpp \
+    highlightersettingspage.cpp \
     refactoringchanges.cpp \
     refactoroverlay.cpp \
     outlinefactory.cpp \
     basehoverhandler.cpp \
     colorpreviewhoverhandler.cpp \
-    helpitem.cpp \
     autocompleter.cpp \
     snippets/snippetssettingspage.cpp \
     snippets/snippet.cpp \
@@ -77,16 +71,14 @@ SOURCES += texteditorplugin.cpp \
     snippets/snippetassistcollector.cpp \
     codeassist/assistinterface.cpp \
     codeassist/assistproposalitem.cpp \
-    convenience.cpp \
     codeassist/runner.cpp \
     codeassist/completionassistprovider.cpp \
     codeassist/genericproposalmodel.cpp \
-    codeassist/quickfixassistprovider.cpp \
-    codeassist/quickfixassistprocessor.cpp \
     codeassist/genericproposal.cpp \
     codeassist/genericproposalwidget.cpp \
     codeassist/iassistproposalmodel.cpp \
     codeassist/textdocumentmanipulator.cpp \
+    codeassist/documentcontentcompletion.cpp\
     tabsettingswidget.cpp \
     simplecodestylepreferences.cpp \
     simplecodestylepreferenceswidget.cpp \
@@ -103,7 +95,9 @@ SOURCES += texteditorplugin.cpp \
     codeassist/keywordscompletionassist.cpp \
     completionsettingspage.cpp \
     commentssettings.cpp \
-    marginsettings.cpp
+    marginsettings.cpp \
+    formattexteditor.cpp \
+    command.cpp
 
 HEADERS += texteditorplugin.h \
     plaintexteditorfactory.h \
@@ -125,47 +119,25 @@ HEADERS += texteditorplugin.h \
     findinfiles.h \
     basefilefind.h \
     texteditorsettings.h \
-    codecselector.h \
     findincurrentfile.h \
     findinopenfiles.h \
     colorscheme.h \
     colorschemeedit.h \
     texteditoroverlay.h \
-    texteditoroptionspage.h \
     textdocumentlayout.h \
     completionsettings.h \
-    normalindenter.h \
-    indenter.h \
+    textindenter.h \
     quickfix.h \
     syntaxhighlighter.h \
-    highlighterutils.h \
-    generichighlighter/reuse.h \
-    generichighlighter/itemdata.h \
-    generichighlighter/specificrules.h \
-    generichighlighter/rule.h \
-    generichighlighter/reuse.h \
-    generichighlighter/dynamicrule.h \
-    generichighlighter/context.h \
-    generichighlighter/includerulesinstruction.h \
-    generichighlighter/progressdata.h \
-    generichighlighter/keywordlist.h \
-    generichighlighter/highlighterexception.h \
-    generichighlighter/highlightdefinition.h \
-    generichighlighter/highlighter.h \
-    generichighlighter/manager.h \
-    generichighlighter/highlightdefinitionhandler.h \
-    generichighlighter/highlightersettingspage.h \
-    generichighlighter/highlightersettings.h \
-    generichighlighter/managedefinitionsdialog.h \
-    generichighlighter/highlightdefinitionmetadata.h \
-    generichighlighter/definitiondownloader.h \
+    highlighter.h \
+    highlightersettings.h \
+    highlightersettingspage.h \
     refactoringchanges.h \
     refactoroverlay.h \
     outlinefactory.h \
     ioutlinewidget.h \
     basehoverhandler.h \
     colorpreviewhoverhandler.h \
-    helpitem.h \
     autocompleter.h \
     snippets/snippetssettingspage.h \
     snippets/snippet.h \
@@ -187,19 +159,17 @@ HEADERS += texteditorplugin.h \
     snippets/snippetassistcollector.h \
     codeassist/assistinterface.h \
     codeassist/assistproposalitem.h \
-    convenience.h \
     codeassist/assistenums.h \
     codeassist/runner.h \
     codeassist/assistproposaliteminterface.h \
     codeassist/completionassistprovider.h \
     codeassist/genericproposalmodel.h \
-    codeassist/quickfixassistprovider.h \
-    codeassist/quickfixassistprocessor.h \
     codeassist/genericproposal.h \
     codeassist/genericproposalwidget.h \
     codeassist/iassistproposalmodel.h \
     codeassist/textdocumentmanipulator.h \
     codeassist/textdocumentmanipulatorinterface.h \
+    codeassist/documentcontentcompletion.h \
     tabsettingswidget.h \
     simplecodestylepreferences.h \
     simplecodestylepreferenceswidget.h \
@@ -218,20 +188,24 @@ HEADERS += texteditorplugin.h \
     blockrange.h \
     completionsettingspage.h \
     commentssettings.h \
-    textstyles.h
+    textstyles.h \
+    formattexteditor.h \
+    command.h \
+    indenter.h \
+    formatter.h
 
 FORMS += \
     displaysettingspage.ui \
     fontsettingspage.ui \
     colorschemeedit.ui \
-    generichighlighter/highlightersettingspage.ui \
-    generichighlighter/managedefinitionsdialog.ui \
     snippets/snippetssettingspage.ui \
     behaviorsettingswidget.ui \
     behaviorsettingspage.ui \
     tabsettingswidget.ui \
     completionsettingspage.ui \
-    codestyleselectorwidget.ui
+    codestyleselectorwidget.ui \
+    highlightersettingspage.ui
+
 RESOURCES += texteditor.qrc
 
 equals(TEST, 1) {

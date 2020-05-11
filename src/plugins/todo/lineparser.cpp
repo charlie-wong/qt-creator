@@ -50,11 +50,7 @@ QList<TodoItem> LineParser::parse(const QString &line)
 
 bool LineParser::isKeywordSeparator(const QChar &ch)
 {
-    return ch.isSpace()
-        || (ch == QLatin1Char(':'))
-        || (ch == QLatin1Char('/'))
-        || (ch == QLatin1Char('*'))
-        || (ch == QLatin1Char('('));
+    return ch.isSpace() || (ch == ':') || (ch == '/') || (ch == '*') || (ch == '(');
 }
 
 LineParser::KeywordEntryCandidates LineParser::findKeywordEntryCandidates(const QString &line)
@@ -108,17 +104,13 @@ QList<LineParser::KeywordEntry> LineParser::keywordEntriesFromCandidates(
         return QList<KeywordEntry>();
 
     // Convert candidates to entries
+    std::vector<KeywordEntry> tmp;
+    for (auto it = candidates.cbegin(), end = candidates.cend(); it != end; ++it)
+        tmp.emplace_back(KeywordEntry{it.value(), it.key(), QString()});
+
     QList<KeywordEntry> entries;
-    QMapIterator<int, int> i(candidates);
-    i.toBack();
-
-    while (i.hasPrevious()) {
-        i.previous();
-
-        KeywordEntry entry;
-
-        entry.keywordStart = i.key();
-        entry.keywordIndex = i.value();
+    for (auto it = tmp.crbegin(), end = tmp.crend(); it != end; ++it) {
+        KeywordEntry entry = *it;
 
         int keywordLength = m_keywords.at(entry.keywordIndex).name.length();
 

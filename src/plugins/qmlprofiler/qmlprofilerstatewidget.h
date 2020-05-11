@@ -38,16 +38,17 @@ class QmlProfilerStateWidget : public QFrame
     Q_OBJECT
 public:
     explicit QmlProfilerStateWidget(QmlProfilerStateManager *stateManager,
-                                    QmlProfilerModelManager *modelManager, QWidget *parent = 0);
-    ~QmlProfilerStateWidget();
-
-private slots:
-    void showText(const QString &text);
-    void updateDisplay();
-    void update();
-    void reposition();
+                                    QmlProfilerModelManager *modelManager,
+                                    QWidget *parent = nullptr);
+    ~QmlProfilerStateWidget() override;
 
 private:
+    void showText(const QString &text);
+    void updateDisplay();
+    void reposition();
+    void initialize();
+    void clear();
+
     class QmlProfilerStateWidgetPrivate;
     QmlProfilerStateWidgetPrivate *d;
 };

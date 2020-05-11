@@ -28,6 +28,8 @@
 #include <coreplugin/id.h>
 #include <coreplugin/ioutputpane.h>
 
+#include <memory>
+
 QT_BEGIN_NAMESPACE
 class QAction;
 class QModelIndex;
@@ -77,9 +79,10 @@ public:
 
 signals:
     void tasksChanged();
-    void tasksCleared();
 
 private:
+    void updateFilter() override;
+
     void addCategory(Core::Id categoryId, const QString &displayName, bool visible);
     void addTask(const ProjectExplorer::Task &task);
     void removeTask(const ProjectExplorer::Task &task);
@@ -100,7 +103,7 @@ private:
 
     int sizeHintForColumn(int column) const;
 
-    TaskWindowPrivate *d;
+    const std::unique_ptr<TaskWindowPrivate> d;
 };
 
 } // namespace Internal

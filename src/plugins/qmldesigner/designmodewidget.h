@@ -32,7 +32,11 @@
 #include <modelnode.h>
 
 #include <QWidget>
+#include <QMainWindow>
 #include <QScopedPointer>
+
+#include <advanceddockingsystem/dockmanager.h>
+#include <annotationeditor/globalannotationeditor.h>
 
 namespace Core {
     class SideBar;
@@ -52,17 +56,16 @@ namespace Internal {
 
 class DesignMode;
 class DocumentWidget;
-class DesignModeWidget;
 
-class DesignModeWidget : public QWidget
+class DesignModeWidget : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit DesignModeWidget(QWidget *parent = 0);
+    DesignModeWidget();
+    ~DesignModeWidget() override;
 
-    ~DesignModeWidget();
-    QString contextHelpId() const;
+    void contextHelp(const Core::IContext::HelpCallback &callback) const;
 
     void initialize();
 
@@ -76,14 +79,13 @@ public:
 
     void enableWidgets();
     void disableWidgets();
-    void switchTextOrForm();
 
     CrumbleBar* crumbleBar() const;
     void showInternalTextEditor();
 
-    void restoreDefaultView();
-    void toggleLeftSidebar();
-    void toggleRightSidebar();
+    void determineWorkspaceToRestoreAtStartup();
+
+    static QWidget *createProjectExplorerWidget(QWidget *parent);
 
 private: // functions
     enum InitializeStatus { NotInitialized, Initializing, Initialized };
@@ -94,16 +96,15 @@ private: // functions
     void setup();
     bool isInNodeDefinition(int nodeOffset, int nodeLength, int cursorPos) const;
     QmlDesigner::ModelNode nodeForPosition(int cursorPos) const;
-    void addNavigatorHistoryEntry(const Utils::FileName &fileName);
+    void addNavigatorHistoryEntry(const Utils::FilePath &fileName);
     QWidget *createCenterWidget();
     QWidget *createCrumbleBarFrame();
 
+    void aboutToShowWorkspaces();
+
 private: // variables
-    QSplitter *m_mainSplitter = nullptr;
     SwitchSplitTabWidget* m_centralTabWidget = nullptr;
 
-    QScopedPointer<Core::SideBar> m_leftSideBar;
-    QScopedPointer<Core::SideBar> m_rightSideBar;
     QPointer<QWidget> m_bottomSideBar;
     Core::EditorToolBar *m_toolBar;
     CrumbleBar *m_crumbleBar;
@@ -117,6 +118,10 @@ private: // variables
     bool m_keepNavigatorHistory = false;
 
     QList<QPointer<QWidget> >m_viewWidgets;
+
+    ADS::DockManager *m_dockManager = nullptr;
+    ADS::DockWidget *m_outputPaneDockWidget = nullptr;
+    GlobalAnnotationEditor m_globalAnnotationEditor;
 };
 
 } // namespace Internal

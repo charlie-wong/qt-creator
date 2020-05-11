@@ -28,30 +28,47 @@
 #include "qmldesignerplugin.h"
 #include "designersettings.h"
 #include "puppetcreator.h"
+#include "ui_settingspage.h"
+
+#include <app/app_version.h>
 
 #include <coreplugin/icore.h>
 
 #include <qmljseditor/qmljseditorconstants.h>
 #include <qmljstools/qmljstoolsconstants.h>
 
+#include <utils/qtcassert.h>
+
 #include <QLineEdit>
 #include <QTextStream>
 #include <QMessageBox>
 
-using namespace QmlDesigner;
-using namespace QmlDesigner::Internal;
+namespace QmlDesigner {
+namespace Internal {
 
-namespace {
-    QStringList puppetModes()
-    {
-        static QStringList puppetModeList{QLatin1String(""), QLatin1String("all"),
-            QLatin1String("editormode"), QLatin1String("rendermode"), QLatin1String("previewmode")};
-        return puppetModeList;
-    }
+static QStringList puppetModes()
+{
+    static QStringList puppetModeList{"", "all", "editormode", "rendermode", "previewmode"};
+    return puppetModeList;
 }
 
-SettingsPageWidget::SettingsPageWidget(QWidget *parent) :
-    QWidget(parent)
+class SettingsPageWidget final : public Core::IOptionsPageWidget
+{
+    Q_DECLARE_TR_FUNCTIONS(QmlDesigner::Internal::SettingsPage)
+
+public:
+    explicit SettingsPageWidget();
+
+    void apply() final;
+
+    DesignerSettings settings() const;
+    void setSettings(const DesignerSettings &settings);
+
+private:
+    Ui::SettingsPage m_ui;
+};
+
+SettingsPageWidget::SettingsPageWidget()
 {
     m_ui.setupUi(this);
 
@@ -60,12 +77,13 @@ SettingsPageWidget::SettingsPageWidget(QWidget *parent) :
             m_ui.designerShowDebuggerCheckBox->setChecked(true);
         }
     );
-    m_ui.resetFallbackPuppetPathButton->hide();
     connect(m_ui.resetFallbackPuppetPathButton, &QPushButton::clicked, [=]() {
         m_ui.fallbackPuppetPathLineEdit->setPath(
             PuppetCreator::defaultPuppetFallbackDirectory());
         }
     );
+    m_ui.fallbackPuppetPathLineEdit->lineEdit()->setPlaceholderText(PuppetCreator::defaultPuppetFallbackDirectory());
+
     connect(m_ui.resetQmlPuppetBuildPathButton, &QPushButton::clicked, [=]() {
         m_ui.puppetBuildPathLineEdit->setPath(
             PuppetCreator::defaultPuppetToplevelBuildDirectory());
@@ -84,6 +102,8 @@ SettingsPageWidget::SettingsPageWidget(QWidget *parent) :
 
     m_ui.forwardPuppetOutputComboBox->addItems(puppetModes());
     m_ui.debugPuppetComboBox->addItems(puppetModes());
+
+    setSettings(QmlDesignerPlugin::instance()->settings());
 }
 
 DesignerSettings SettingsPageWidget::settings() const
@@ -106,7 +126,7 @@ DesignerSettings SettingsPageWidget::settings() const
         m_ui.designerShowDebuggerCheckBox->isChecked());
     settings.insert(DesignerSettingsKey::ENABLE_DEBUGVIEW,
         m_ui.designerEnableDebuggerCheckBox->isChecked());
-    settings.insert(DesignerSettingsKey::USE_ONLY_FALLBACK_PUPPET,
+    settings.insert(DesignerSettingsKey::USE_DEFAULT_PUPPET,
         m_ui.useDefaultPuppetRadioButton->isChecked());
 
     int typeOfQsTrFunction;
@@ -127,10 +147,20 @@ DesignerSettings SettingsPageWidget::settings() const
     settings.insert(DesignerSettingsKey::DEBUG_PUPPET,
         m_ui.debugPuppetComboBox->currentText());
 
-    if (!m_ui.fallbackPuppetPathLineEdit->path().isEmpty() &&
-        m_ui.fallbackPuppetPathLineEdit->path() != PuppetCreator::defaultPuppetFallbackDirectory()) {
-        settings.insert(DesignerSettingsKey::PUPPET_FALLBACK_DIRECTORY,
-            m_ui.fallbackPuppetPathLineEdit->path());
+    QString newFallbackPuppetPath = m_ui.fallbackPuppetPathLineEdit->path();
+    QTC_CHECK(PuppetCreator::defaultPuppetFallbackDirectory() ==
+              m_ui.fallbackPuppetPathLineEdit->lineEdit()->placeholderText());
+    if (newFallbackPuppetPath.isEmpty())
+        newFallbackPuppetPath = m_ui.fallbackPuppetPathLineEdit->lineEdit()->placeholderText();
+    QString oldFallbackPuppetPath = PuppetCreator::qmlPuppetFallbackDirectory(settings);
+
+    if (oldFallbackPuppetPath != newFallbackPuppetPath && QFileInfo::exists(newFallbackPuppetPath)) {
+        if (newFallbackPuppetPath == PuppetCreator::defaultPuppetFallbackDirectory())
+            settings.insert(DesignerSettingsKey::PUPPET_DEFAULT_DIRECTORY, QString());
+        else
+            settings.insert(DesignerSettingsKey::PUPPET_DEFAULT_DIRECTORY, newFallbackPuppetPath);
+    } else if (!QFileInfo::exists(oldFallbackPuppetPath) || !QFileInfo::exists(newFallbackPuppetPath)){
+        settings.insert(DesignerSettingsKey::PUPPET_DEFAULT_DIRECTORY, QString());
     }
 
     if (!m_ui.puppetBuildPathLineEdit->path().isEmpty() &&
@@ -144,6 +174,10 @@ DesignerSettings SettingsPageWidget::settings() const
         m_ui.showPropertyEditorWarningsCheckBox->isChecked());
     settings.insert(DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT,
         m_ui.showWarnExceptionsCheckBox->isChecked());
+    settings.insert(DesignerSettingsKey::ENABLE_TIMELINEVIEW,
+                    m_ui.featureTimelineEditorCheckBox->isChecked());
+    settings.insert(DesignerSettingsKey::ALWAYS_DESIGN_MODE,
+                    m_ui.designerAlwaysDesignModeCheckBox->isChecked());
 
     return settings;
 }
@@ -173,9 +207,9 @@ void SettingsPageWidget::setSettings(const DesignerSettings &settings)
     m_ui.designerEnableDebuggerCheckBox->setChecked(settings.value(
         DesignerSettingsKey::ENABLE_DEBUGVIEW).toBool());
     m_ui.useDefaultPuppetRadioButton->setChecked(settings.value(
-        DesignerSettingsKey::USE_ONLY_FALLBACK_PUPPET).toBool());
+        DesignerSettingsKey::USE_DEFAULT_PUPPET).toBool());
     m_ui.useQtRelatedPuppetRadioButton->setChecked(!settings.value(
-        DesignerSettingsKey::USE_ONLY_FALLBACK_PUPPET).toBool());
+        DesignerSettingsKey::USE_DEFAULT_PUPPET).toBool());
     m_ui.useQsTrFunctionRadioButton->setChecked(settings.value(
         DesignerSettingsKey::TYPE_OF_QSTR_FUNCTION).toInt() == 0);
     m_ui.useQsTrIdFunctionRadioButton->setChecked(settings.value(
@@ -186,7 +220,7 @@ void SettingsPageWidget::setSettings(const DesignerSettings &settings)
         DesignerSettingsKey::CONTROLS_STYLE).toString());
 
     QString puppetFallbackDirectory = settings.value(
-        DesignerSettingsKey::PUPPET_FALLBACK_DIRECTORY,
+        DesignerSettingsKey::PUPPET_DEFAULT_DIRECTORY,
         PuppetCreator::defaultPuppetFallbackDirectory()).toString();
     m_ui.fallbackPuppetPathLineEdit->setPath(puppetFallbackDirectory);
 
@@ -208,50 +242,41 @@ void SettingsPageWidget::setSettings(const DesignerSettings &settings)
         DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT).toBool());
 
     m_ui.controls2StyleComboBox->setCurrentText(m_ui.styleLineEdit->text());
-}
 
-SettingsPage::SettingsPage() :
-    m_widget(0)
-{
-    setId("B.QmlDesigner");
-    setDisplayName(tr("Qt Quick Designer"));
-    setCategory(QmlJSEditor::Constants::SETTINGS_CATEGORY_QML);
-    setDisplayCategory(QCoreApplication::translate("QmlJSEditor",
-        QmlJSEditor::Constants::SETTINGS_TR_CATEGORY_QML));
-    setCategoryIcon(Utils::Icon(QmlJSTools::Constants::SETTINGS_CATEGORY_QML_ICON));
-}
+    m_ui.designerAlwaysDesignModeCheckBox->setChecked(settings.value(
+        DesignerSettingsKey::ALWAYS_DESIGN_MODE).toBool());
+    m_ui.featureTimelineEditorCheckBox->setChecked(settings.value(
+        DesignerSettingsKey::ENABLE_TIMELINEVIEW).toBool());
 
-QWidget *SettingsPage::widget()
-{
-    if (!m_widget) {
-        m_widget = new SettingsPageWidget;
-        m_widget->setSettings(QmlDesignerPlugin::instance()->settings());
+    if (settings.value(DesignerSettingsKey::STANDALONE_MODE).toBool()) {
+        m_ui.emulationGroupBox->hide();
+        m_ui.debugGroupBox->hide();
+        m_ui.featureTimelineEditorCheckBox->hide();
     }
-    return m_widget;
 }
 
-void SettingsPage::apply()
+void SettingsPageWidget::apply()
 {
-    if (!m_widget) // page was never shown
-        return;
-
     DesignerSettings currentSettings(QmlDesignerPlugin::instance()->settings());
-    DesignerSettings newSettings(m_widget->settings());
+    DesignerSettings newSettings = settings();
 
-    QList<QByteArray> restartNecessaryKeys;
-    restartNecessaryKeys << DesignerSettingsKey::PUPPET_FALLBACK_DIRECTORY
-                         << DesignerSettingsKey::PUPPET_TOPLEVEL_BUILD_DIRECTORY
-                         << DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT
-                         << DesignerSettingsKey::PUPPET_KILL_TIMEOUT
-                         << DesignerSettingsKey::FORWARD_PUPPET_OUTPUT
-                         << DesignerSettingsKey::DEBUG_PUPPET
-                         << DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT;
+    const auto restartNecessaryKeys = {
+      DesignerSettingsKey::PUPPET_DEFAULT_DIRECTORY,
+      DesignerSettingsKey::PUPPET_TOPLEVEL_BUILD_DIRECTORY,
+      DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT,
+      DesignerSettingsKey::PUPPET_KILL_TIMEOUT,
+      DesignerSettingsKey::FORWARD_PUPPET_OUTPUT,
+      DesignerSettingsKey::DEBUG_PUPPET,
+      DesignerSettingsKey::ENABLE_MODEL_EXCEPTION_OUTPUT,
+      DesignerSettingsKey::ENABLE_TIMELINEVIEW
+    };
 
-    foreach (const QByteArray &key, restartNecessaryKeys) {
+    for (const QByteArray &key : restartNecessaryKeys) {
         if (currentSettings.value(key) != newSettings.value(key)) {
             QMessageBox::information(Core::ICore::mainWindow(), tr("Restart Required"),
                 tr("The made changes will take effect after a "
-                   "restart of the QML Emulation layer or Qt Creator."));
+                   "restart of the QML Emulation layer or %1.")
+                .arg(Core::Constants::IDE_DISPLAY_NAME));
             break;
         }
     }
@@ -259,7 +284,13 @@ void SettingsPage::apply()
     QmlDesignerPlugin::instance()->setSettings(newSettings);
 }
 
-void SettingsPage::finish()
+SettingsPage::SettingsPage()
 {
-    delete m_widget;
+    setId("B.QmlDesigner");
+    setDisplayName(SettingsPageWidget::tr("Qt Quick Designer"));
+    setCategory(QmlJSEditor::Constants::SETTINGS_CATEGORY_QML);
+    setWidgetCreator([] { return new SettingsPageWidget; });
 }
+
+} // Internal
+} // QmlDesigner

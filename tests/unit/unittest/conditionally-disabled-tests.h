@@ -30,3 +30,9 @@
 #else
 #  define DISABLED_ON_WINDOWS(x) x
 #endif
+
+#ifndef Q_OS_WIN
+#  define DISABLED_ON_NON_WINDOWS(x) DISABLED_##x
+#else
+#  define DISABLED_ON_NON_WINDOWS(x) x
+#endif

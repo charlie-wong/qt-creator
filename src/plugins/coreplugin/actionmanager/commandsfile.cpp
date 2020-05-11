@@ -26,11 +26,10 @@
 #include "commandsfile.h"
 #include "command_p.h"
 #include <coreplugin/dialogs/shortcutsettings.h>
+#include <coreplugin/icore.h>
 
 #include <app/app_version.h>
-
 #include <utils/qtcassert.h>
-
 #include <utils/fileutils.h>
 
 #include <QKeySequence>
@@ -65,13 +64,15 @@ Context::Context() :
 }
 
 /*!
-    \class CommandsFile
+    \class Core::Internal::CommandsFile
+    \internal
+    \inmodule QtCreator
     \brief The CommandsFile class provides a collection of import and export commands.
     \inheaderfile commandsfile.h
 */
 
 /*!
-    ...
+    \internal
 */
 CommandsFile::CommandsFile(const QString &filename)
     : m_filename(filename)
@@ -80,11 +81,11 @@ CommandsFile::CommandsFile(const QString &filename)
 }
 
 /*!
-    ...
+    \internal
 */
-QMap<QString, QKeySequence> CommandsFile::importCommands() const
+QMap<QString, QList<QKeySequence>> CommandsFile::importCommands() const
 {
-    QMap<QString, QKeySequence> result;
+    QMap<QString, QList<QKeySequence>> result;
 
     QFile file(m_filename);
     if (!file.open(QIODevice::ReadOnly|QIODevice::Text))
@@ -100,19 +101,17 @@ QMap<QString, QKeySequence> CommandsFile::importCommands() const
         case QXmlStreamReader::StartElement: {
             const QStringRef name = r.name();
             if (name == ctx.shortCutElement) {
-                if (!currentId.isEmpty()) // shortcut element without key element == empty shortcut
-                    result.insert(currentId, QKeySequence());
                 currentId = r.attributes().value(ctx.idAttribute).toString();
+                if (!result.contains(currentId))
+                    result.insert(currentId, {});
             } else if (name == ctx.keyElement) {
-                QTC_ASSERT(!currentId.isEmpty(), return result);
+                QTC_ASSERT(!currentId.isEmpty(), continue);
                 const QXmlStreamAttributes attributes = r.attributes();
                 if (attributes.hasAttribute(ctx.valueAttribute)) {
                     const QString keyString = attributes.value(ctx.valueAttribute).toString();
-                    result.insert(currentId, QKeySequence(keyString));
-                } else {
-                    result.insert(currentId, QKeySequence());
+                    QList<QKeySequence> keys = result.value(currentId);
+                    result.insert(currentId, keys << QKeySequence(keyString));
                 }
-                currentId.clear();
             } // if key element
         } // case QXmlStreamReader::StartElement
         default:
@@ -124,7 +123,7 @@ QMap<QString, QKeySequence> CommandsFile::importCommands() const
 }
 
 /*!
-    ...
+    \internal
 */
 
 bool CommandsFile::exportCommands(const QList<ShortcutItem *> &items)
@@ -137,20 +136,22 @@ bool CommandsFile::exportCommands(const QList<ShortcutItem *> &items)
         w.setAutoFormattingIndent(1); // Historical, used to be QDom.
         w.writeStartDocument();
         w.writeDTD(QLatin1String("<!DOCTYPE KeyboardMappingScheme>"));
-        w.writeComment(QString::fromLatin1(" Written by Qt Creator %1, %2. ").
-                       arg(QLatin1String(Constants::IDE_VERSION_LONG),
+        w.writeComment(QString::fromLatin1(" Written by %1, %2. ").
+                       arg(ICore::versionString(),
                            QDateTime::currentDateTime().toString(Qt::ISODate)));
         w.writeStartElement(ctx.mappingElement);
         foreach (const ShortcutItem *item, items) {
             const Id id = item->m_cmd->id();
-            if (item->m_key.isEmpty()) {
+            if (item->m_keys.isEmpty() || item->m_keys.first().isEmpty()) {
                 w.writeEmptyElement(ctx.shortCutElement);
                 w.writeAttribute(ctx.idAttribute, id.toString());
             } else {
                 w.writeStartElement(ctx.shortCutElement);
                 w.writeAttribute(ctx.idAttribute, id.toString());
-                w.writeEmptyElement(ctx.keyElement);
-                w.writeAttribute(ctx.valueAttribute, item->m_key.toString());
+                for (const QKeySequence &k : item->m_keys) {
+                    w.writeEmptyElement(ctx.keyElement);
+                    w.writeAttribute(ctx.valueAttribute, k.toString());
+                }
                 w.writeEndElement(); // Shortcut
             }
         }

@@ -65,8 +65,7 @@ bool FileShareProtocolSettings::equals(const FileShareProtocolSettings &rhs) con
     return displayCount == rhs.displayCount &&  path == rhs.path;
 }
 
-FileShareProtocolSettingsWidget::FileShareProtocolSettingsWidget(QWidget *parent) :
-    QWidget(parent)
+FileShareProtocolSettingsWidget::FileShareProtocolSettingsWidget()
 {
     m_ui.setupUi(this);
 
@@ -85,20 +84,18 @@ void FileShareProtocolSettingsWidget::setSettings(const FileShareProtocolSetting
 FileShareProtocolSettings FileShareProtocolSettingsWidget::settings() const
 {
     FileShareProtocolSettings rc;
-    rc.path = m_ui.pathChooser->path();
+    rc.path = m_ui.pathChooser->filePath().toString();
     rc.displayCount = m_ui.displayCountSpinBox->value();
     return rc;
 }
 
 // ----------FileShareProtocolSettingsPage
-FileShareProtocolSettingsPage::FileShareProtocolSettingsPage(const QSharedPointer<FileShareProtocolSettings> &s,
-                                                             QObject *parent) :
-    Core::IOptionsPage(parent), m_settings(s), m_widget(nullptr)
+FileShareProtocolSettingsPage::FileShareProtocolSettingsPage(const QSharedPointer<FileShareProtocolSettings> &s)
+    : m_settings(s), m_widget(nullptr)
 {
     setId("X.CodePaster.FileSharePaster");
     setDisplayName(tr("Fileshare"));
     setCategory(Constants::CPASTER_SETTINGS_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("CodePaster", Constants::CPASTER_SETTINGS_TR_CATEGORY));
 }
 
 QWidget *FileShareProtocolSettingsPage::widget()

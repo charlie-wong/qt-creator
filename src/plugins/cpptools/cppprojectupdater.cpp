@@ -35,8 +35,7 @@
 
 namespace CppTools {
 
-CppProjectUpdater::CppProjectUpdater(ProjectExplorer::Project *project)
-    : m_project(project)
+CppProjectUpdater::CppProjectUpdater()
 {
     connect(&m_generateFutureWatcher, &QFutureWatcher<void>::finished,
             this, &CppProjectUpdater::onProjectInfoGenerated);
@@ -47,11 +46,10 @@ CppProjectUpdater::~CppProjectUpdater()
     cancelAndWaitForFinished();
 }
 
-void CppProjectUpdater::update(const ProjectUpdateInfo &projectUpdateInfo)
+void CppProjectUpdater::update(const ProjectExplorer::ProjectUpdateInfo &projectUpdateInfo)
 {
     // Stop previous update.
-    cancel();
-    m_futureInterface.waitForFinished();
+    cancelAndWaitForFinished();
     m_futureInterface = QFutureInterface<void>();
 
     m_projectUpdateInfo = projectUpdateInfo;
@@ -62,9 +60,11 @@ void CppProjectUpdater::update(const ProjectUpdateInfo &projectUpdateInfo)
             this, &CppProjectUpdater::onToolChainRemoved);
 
     // Run the project info generator in a worker thread and continue if that one is finished.
-    const QFutureInterface<void> &futureInterface = m_futureInterface;
     const QFuture<ProjectInfo> future = Utils::runAsync([=]() {
-        Internal::ProjectInfoGenerator generator(futureInterface, projectUpdateInfo);
+        ProjectUpdateInfo fullProjectUpdateInfo = projectUpdateInfo;
+        if (fullProjectUpdateInfo.rppGenerator)
+            fullProjectUpdateInfo.rawProjectParts = fullProjectUpdateInfo.rppGenerator();
+        Internal::ProjectInfoGenerator generator(m_futureInterface, fullProjectUpdateInfo);
         return generator.generate();
     });
     m_generateFutureWatcher.setFuture(future);
@@ -102,10 +102,16 @@ void CppProjectUpdater::onProjectInfoGenerated()
     QFuture<void> future = CppModelManager::instance()
             ->updateProjectInfo(m_futureInterface, m_generateFutureWatcher.result());
     QTC_CHECK(future != QFuture<void>());
+}
 
-    const ProjectInfo projectInfo = CppModelManager::instance()->projectInfo(m_project);
-    QTC_CHECK(projectInfo.isValid());
-    emit projectInfoUpdated(projectInfo);
+CppProjectUpdaterFactory::CppProjectUpdaterFactory()
+{
+    setObjectName("CppProjectUpdaterFactory");
+}
+
+CppProjectUpdaterInterface *CppProjectUpdaterFactory::create()
+{
+    return new CppProjectUpdater;
 }
 
 } // namespace CppTools

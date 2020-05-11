@@ -49,7 +49,7 @@ public:
     bool autoLoadSession() const;
 
 private:
-    void updateActions(const QString &session);
+    void updateActions(const QStringList &sessions);
 
     Ui::SessionDialog m_ui;
 };
@@ -59,7 +59,7 @@ class SessionNameInputDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit SessionNameInputDialog(QWidget *parent = nullptr);
+    explicit SessionNameInputDialog(QWidget *parent);
 
     void setActionText(const QString &actionText, const QString &openActionText);
     void setValue(const QString &value);

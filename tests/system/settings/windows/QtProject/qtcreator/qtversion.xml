@@ -1,39 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE QtCreatorQtVersions>
-<!-- Written by QtCreator 4.0.83, 2016-07-20T17:07:18. -->
+<!-- Written by QtCreator 4.5.1, 2018-01-10T14:24:21. -->
 <qtcreator>
  <data>
   <variable>QtVersion.0</variable>
   <valuemap type="QVariantMap">
    <value type="int" key="Id">2</value>
-   <value type="QString" key="Name">Qt 4.8 for Desktop - MSVC2010 (Qt SDK)</value>
-   <value type="QString" key="QMakePath">C:/QtSDK/Desktop/Qt/4.8.0/msvc2010/bin/qmake.exe</value>
+   <value type="QString" key="Name">Qt 4.8 for Desktop - MSVC2013</value>
+   <value type="QString" key="QMakePath">C:/Qt/Qt4.8.7/bin/qmake.exe</value>
    <value type="QString" key="QtVersion.Type">Qt4ProjectManager.QtVersion.Desktop</value>
    <value type="bool" key="isAutodetected">false</value>
   </valuemap>
  </data>
  <data>
   <variable>QtVersion.1</variable>
-  <valuemap type="QVariantMap">
-   <value type="int" key="Id">8</value>
-   <value type="QString" key="Name">Qt 4.7.4 for Desktop - MinGW 4.4 (Qt SDK)</value>
-   <value type="QString" key="QMakePath">c:/qtsdk/desktop/qt/4.7.4/mingw/bin/qmake.exe</value>
-   <value type="QString" key="QtVersion.Type">Qt4ProjectManager.QtVersion.Desktop</value>
-   <value type="bool" key="isAutodetected">false</value>
-  </valuemap>
- </data>
- <data>
-  <variable>QtVersion.2</variable>
-  <valuemap type="QVariantMap">
-   <value type="int" key="Id">20</value>
-   <value type="QString" key="Name">Qt 5.3.1 (msvc2010_opengl)</value>
-   <value type="QString" key="QMakePath">C:/Qt/Qt5.3.1/5.3/msvc2010_opengl/bin/qmake.exe</value>
-   <value type="QString" key="QtVersion.Type">Qt4ProjectManager.QtVersion.Desktop</value>
-   <value type="bool" key="isAutodetected">false</value>
-  </valuemap>
- </data>
- <data>
-  <variable>QtVersion.3</variable>
   <valuemap type="QVariantMap">
    <value type="int" key="Id">22</value>
    <value type="QString" key="Name">Qt %{Qt:Version} (mingw491_32)</value>
@@ -43,11 +23,21 @@
   </valuemap>
  </data>
  <data>
-  <variable>QtVersion.4</variable>
+  <variable>QtVersion.2</variable>
   <valuemap type="QVariantMap">
    <value type="int" key="Id">24</value>
-   <value type="QString" key="Name">Qt %{Qt:Version} (msvc2013)</value>
-   <value type="QString" key="QMakePath">C:/Qt/Qt5.6.1/5.6/msvc2013/bin/qmake.exe</value>
+   <value type="QString" key="Name">Qt %{Qt:Version} (msvc2017_64)</value>
+   <value type="QString" key="QMakePath">C:/Qt/Qt5.14.1/5.14.1/msvc2017_64/bin/qmake.exe</value>
+   <value type="QString" key="QtVersion.Type">Qt4ProjectManager.QtVersion.Desktop</value>
+   <value type="bool" key="isAutodetected">false</value>
+  </valuemap>
+ </data>
+ <data>
+  <variable>QtVersion.3</variable>
+  <valuemap type="QVariantMap">
+   <value type="int" key="Id">26</value>
+   <value type="QString" key="Name">Qt %{Qt:Version} (msvc2015)</value>
+   <value type="QString" key="QMakePath">C:/Qt/Qt5.10.1/5.10.1/msvc2015/bin/qmake.exe</value>
    <value type="QString" key="QtVersion.Type">Qt4ProjectManager.QtVersion.Desktop</value>
    <value type="bool" key="isAutodetected">false</value>
   </valuemap>

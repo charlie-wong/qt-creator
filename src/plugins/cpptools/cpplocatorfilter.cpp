@@ -25,14 +25,15 @@
 
 #include "cpplocatorfilter.h"
 #include "cppmodelmanager.h"
+#include "cpptoolsconstants.h"
 
 #include <coreplugin/editormanager/editormanager.h>
 #include <utils/algorithm.h>
 
-#include <QRegExp>
-#include <QStringMatcher>
+#include <QRegularExpression>
 
 #include <algorithm>
+#include <numeric>
 
 using namespace CppTools;
 using namespace CppTools::Internal;
@@ -40,19 +41,17 @@ using namespace CppTools::Internal;
 CppLocatorFilter::CppLocatorFilter(CppLocatorData *locatorData)
     : m_data(locatorData)
 {
-    setId("Classes and Methods");
-    setDisplayName(tr("C++ Classes, Enums and Functions"));
-    setShortcutString(QString(QLatin1Char(':')));
+    setId(Constants::LOCATOR_FILTER_ID);
+    setDisplayName(Constants::LOCATOR_FILTER_DISPLAY_NAME);
+    setShortcutString(":");
     setIncludedByDefault(false);
 }
 
-CppLocatorFilter::~CppLocatorFilter()
-{
-}
+CppLocatorFilter::~CppLocatorFilter() = default;
 
 Core::LocatorFilterEntry CppLocatorFilter::filterEntryFromIndexItem(IndexItem::Ptr info)
 {
-    const QVariant id = qVariantFromValue(info);
+    const QVariant id = QVariant::fromValue(info);
     Core::LocatorFilterEntry filterEntry(this, info->scopedSymbolName(), id, info->icon());
     if (info->type() == IndexItem::Class || info->type() == IndexItem::Enum)
         filterEntry.extraInfo = info->shortNativeFilePath();
@@ -70,39 +69,61 @@ void CppLocatorFilter::refresh(QFutureInterface<void> &future)
 QList<Core::LocatorFilterEntry> CppLocatorFilter::matchesFor(
         QFutureInterface<Core::LocatorFilterEntry> &future, const QString &entry)
 {
-    QList<Core::LocatorFilterEntry> goodEntries;
-    QList<Core::LocatorFilterEntry> betterEntries;
-    const Qt::CaseSensitivity cs = caseSensitivity(entry);
-    QStringMatcher matcher(entry, cs);
-    QRegExp regexp(entry, cs, QRegExp::Wildcard);
-    if (!regexp.isValid())
-        return goodEntries;
-    bool hasWildcard = containsWildcard(entry);
-    bool hasColonColon = entry.contains(QLatin1String("::"));
+    QList<Core::LocatorFilterEntry> entries[int(MatchLevel::Count)];
+    const Qt::CaseSensitivity caseSensitivityForPrefix = caseSensitivity(entry);
     const IndexItem::ItemType wanted = matchTypes();
+
+    const QRegularExpression regexp = createRegExp(entry);
+    if (!regexp.isValid())
+        return {};
+    const bool hasColonColon = entry.contains("::");
+    const QRegularExpression shortRegexp =
+            hasColonColon ? createRegExp(entry.mid(entry.lastIndexOf("::") + 2)) : regexp;
 
     m_data->filterAllFiles([&](const IndexItem::Ptr &info) -> IndexItem::VisitorResult {
         if (future.isCanceled())
             return IndexItem::Break;
-        if (info->type() & wanted) {
-            const QString matchString = hasColonColon ? info->scopedSymbolName() : info->symbolName();
-            int index = hasWildcard ? regexp.indexIn(matchString) : matcher.indexIn(matchString);
-            if (index >= 0) {
-                const bool betterMatch = index == 0;
+        const IndexItem::ItemType type = info->type();
+        if (type & wanted) {
+            const QString symbolName = info->symbolName();
+            QString matchString = hasColonColon ? info->scopedSymbolName() : symbolName;
+            int matchOffset = hasColonColon ? matchString.size() - symbolName.size() : 0;
+            QRegularExpressionMatch match = regexp.match(matchString);
+            bool matchInParameterList = false;
+            if (!match.hasMatch() && (type == IndexItem::Function)) {
+                matchString += info->symbolType();
+                match = regexp.match(matchString);
+                matchInParameterList = true;
+            }
+
+            if (match.hasMatch()) {
                 Core::LocatorFilterEntry filterEntry = filterEntryFromIndexItem(info);
 
-                if (matchString != filterEntry.displayName) {
-                    index = hasWildcard ? regexp.indexIn(filterEntry.displayName)
-                                        : matcher.indexIn(filterEntry.displayName);
+                // Highlight the matched characters, therefore it may be necessary
+                // to update the match if the displayName is different from matchString
+                if (matchString.midRef(matchOffset) != filterEntry.displayName) {
+                    match = shortRegexp.match(filterEntry.displayName);
+                    matchOffset = 0;
+                }
+                filterEntry.highlightInfo = highlightInfo(match);
+                if (matchInParameterList && filterEntry.highlightInfo.starts.isEmpty()) {
+                    match = regexp.match(filterEntry.extraInfo);
+                    filterEntry.highlightInfo = highlightInfo(match);
+                    filterEntry.highlightInfo.dataType =
+                            Core::LocatorFilterEntry::HighlightInfo::ExtraInfo;
+                } else if (matchOffset > 0) {
+                    for (int &start : filterEntry.highlightInfo.starts)
+                        start -= matchOffset;
                 }
 
-                if (index >= 0)
-                    filterEntry.highlightInfo = {index, (hasWildcard ? regexp.matchedLength() : entry.length())};
-
-                if (betterMatch)
-                    betterEntries.append(filterEntry);
+                if (matchInParameterList)
+                    entries[int(MatchLevel::Normal)].append(filterEntry);
+                else if (filterEntry.displayName.startsWith(entry, caseSensitivityForPrefix))
+                    entries[int(MatchLevel::Best)].append(filterEntry);
+                else if (filterEntry.displayName.contains(entry, caseSensitivityForPrefix))
+                    entries[int(MatchLevel::Better)].append(filterEntry);
                 else
-                    goodEntries.append(filterEntry);
+                    entries[int(MatchLevel::Good)].append(filterEntry);
             }
         }
 
@@ -112,13 +133,12 @@ QList<Core::LocatorFilterEntry> CppLocatorFilter::matchesFor(
             return IndexItem::Recurse;
     });
 
-    if (goodEntries.size() < 1000)
-        Utils::sort(goodEntries, Core::LocatorFilterEntry::compareLexigraphically);
-    if (betterEntries.size() < 1000)
-        Utils::sort(betterEntries, Core::LocatorFilterEntry::compareLexigraphically);
+    for (auto &entry : entries) {
+        if (entry.size() < 1000)
+            Utils::sort(entry, Core::LocatorFilterEntry::compareLexigraphically);
+    }
 
-    betterEntries += goodEntries;
-    return betterEntries;
+    return std::accumulate(std::begin(entries), std::end(entries), QList<Core::LocatorFilterEntry>());
 }
 
 void CppLocatorFilter::accept(Core::LocatorFilterEntry selection,

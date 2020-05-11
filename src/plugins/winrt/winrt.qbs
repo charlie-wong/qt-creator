@@ -9,8 +9,10 @@ QtcPlugin {
     Depends { name: "QtSupport" }
     Depends { name: "QmakeProjectManager" }
     Depends { name: "Qt.gui" }
+    Depends { name: "app_version_header" }
 
     files: [
+        "winrt.qrc",
         "winrtconstants.h",
         "winrtdebugsupport.cpp",
         "winrtdebugsupport.h",
@@ -18,29 +20,18 @@ QtcPlugin {
         "winrtdeployconfiguration.h",
         "winrtdevice.cpp",
         "winrtdevice.h",
-        "winrtdevicefactory.cpp",
-        "winrtdevicefactory.h",
         "winrtpackagedeploymentstep.cpp",
         "winrtpackagedeploymentstep.h",
-        "winrtpackagedeploymentstepwidget.cpp",
-        "winrtpackagedeploymentstepwidget.h",
-        "winrtpackagedeploymentstepwidget.ui",
         "winrtphoneqtversion.cpp",
         "winrtphoneqtversion.h",
         "winrtplugin.cpp",
         "winrtplugin.h",
         "winrtqtversion.cpp",
         "winrtqtversion.h",
-        "winrtqtversionfactory.cpp",
-        "winrtqtversionfactory.h",
         "winrtrunconfiguration.cpp",
         "winrtrunconfiguration.h",
-        "winrtrunconfigurationwidget.cpp",
-        "winrtrunconfigurationwidget.h",
         "winrtruncontrol.cpp",
         "winrtruncontrol.h",
-        "winrtrunfactories.cpp",
-        "winrtrunfactories.h",
         "winrtrunnerhelper.cpp",
         "winrtrunnerhelper.h"
     ]

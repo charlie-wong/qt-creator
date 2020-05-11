@@ -55,22 +55,17 @@ namespace Internal {
 class CppToolsSettingsPrivate
 {
 public:
-    CppToolsSettingsPrivate()
-        : m_globalCodeStyle(0)
-    {}
-
     CommentsSettings m_commentsSettings;
-    CppCodeStylePreferences *m_globalCodeStyle;
+    CppCodeStylePreferences *m_globalCodeStyle = nullptr;
 };
 
 } // namespace Internal
 } // namespace CppTools
 
-CppToolsSettings *CppToolsSettings::m_instance = 0;
+CppToolsSettings *CppToolsSettings::m_instance = nullptr;
 
-CppToolsSettings::CppToolsSettings(QObject *parent)
-    : QObject(parent)
-    , d(new Internal::CppToolsSettingsPrivate)
+CppToolsSettings::CppToolsSettings()
+    : d(new Internal::CppToolsSettingsPrivate)
 {
     QTC_ASSERT(!m_instance, return);
     m_instance = this;
@@ -86,7 +81,7 @@ CppToolsSettings::CppToolsSettings(QObject *parent)
     TextEditorSettings::registerCodeStyleFactory(factory);
 
     // code style pool
-    CodeStylePool *pool = new CodeStylePool(factory, this);
+    auto pool = new CodeStylePool(factory, this);
     TextEditorSettings::registerCodeStylePool(Constants::CPP_SETTINGS_ID, pool);
 
     // global code style settings
@@ -124,7 +119,7 @@ CppToolsSettings::CppToolsSettings(QObject *parent)
 
     // built-in settings
     // Qt style
-    CppCodeStylePreferences *qtCodeStyle = new CppCodeStylePreferences();
+    auto qtCodeStyle = new CppCodeStylePreferences;
     qtCodeStyle->setId("qt");
     qtCodeStyle->setDisplayName(tr("Qt"));
     qtCodeStyle->setReadOnly(true);
@@ -137,7 +132,7 @@ CppToolsSettings::CppToolsSettings(QObject *parent)
     pool->addCodeStyle(qtCodeStyle);
 
     // GNU style
-    CppCodeStylePreferences *gnuCodeStyle = new CppCodeStylePreferences();
+    auto gnuCodeStyle = new CppCodeStylePreferences;
     gnuCodeStyle->setId("gnu");
     gnuCodeStyle->setDisplayName(tr("GNU"));
     gnuCodeStyle->setReadOnly(true);
@@ -227,7 +222,7 @@ CppToolsSettings::~CppToolsSettings()
 
     delete d;
 
-    m_instance = 0;
+    m_instance = nullptr;
 }
 
 CppToolsSettings *CppToolsSettings::instance()

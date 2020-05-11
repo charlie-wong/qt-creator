@@ -27,6 +27,7 @@
 
 #include <coreplugin/inavigationwidgetfactory.h>
 
+#include <QList>
 #include <QString>
 #include <QWidget>
 #include <QStackedWidget>
@@ -37,11 +38,7 @@ class QLabel;
 class QModelIndex;
 class QStackedLayout;
 class QStandardItem;
-template <class> class QVector;
-template <class> class QList;
 QT_END_NAMESPACE
-
-namespace Core { class IEditor; }
 
 namespace TextEditor { class TextEditorLinkLabel; }
 
@@ -50,12 +47,12 @@ class NavigationTreeView;
 class AnnotatedItemDelegate;
 }
 
+namespace CppTools { class CppClass; }
+
 namespace CppEditor {
 namespace Internal {
 
 class CppEditorWidget;
-class CppClass;
-class CppClassLabel;
 
 class CppTypeHierarchyModel : public QStandardItemModel
 {
@@ -64,9 +61,9 @@ class CppTypeHierarchyModel : public QStandardItemModel
 public:
     CppTypeHierarchyModel(QObject *parent);
 
-    Qt::DropActions supportedDragActions() const;
-    QStringList mimeTypes() const;
-    QMimeData *mimeData(const QModelIndexList &indexes) const;
+    Qt::DropActions supportedDragActions() const override;
+    QStringList mimeTypes() const override;
+    QMimeData *mimeData(const QModelIndexList &indexes) const override;
 };
 
 class CppTypeHierarchyWidget : public QWidget
@@ -74,13 +71,13 @@ class CppTypeHierarchyWidget : public QWidget
     Q_OBJECT
 public:
     CppTypeHierarchyWidget();
-    virtual ~CppTypeHierarchyWidget();
+    ~CppTypeHierarchyWidget() override;
 
     void perform();
 
 private:
-    typedef QList<CppClass> CppClass::*HierarchyMember;
-    void buildHierarchy(const CppClass &cppClass, QStandardItem *parent,
+    typedef QList<CppTools::CppClass> CppTools::CppClass::*HierarchyMember;
+    void buildHierarchy(const CppTools::CppClass &cppClass, QStandardItem *parent,
                         bool isRoot, HierarchyMember member);
     void showNoTypeHierarchyLabel();
     void showTypeHierarchy();

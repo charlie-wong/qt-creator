@@ -25,46 +25,47 @@
 
 #include "qmlprojectplugin.h"
 #include "qmlproject.h"
-#include "qmlprojectrunconfigurationfactory.h"
-#include "fileformat/qmlprojectfileformat.h"
+#include "qmlprojectrunconfiguration.h"
 
 #include <coreplugin/fileiconprovider.h>
 #include <coreplugin/icore.h>
 
 #include <projectexplorer/projectmanager.h>
+#include <projectexplorer/runcontrol.h>
 
 #include <qmljstools/qmljstoolsconstants.h>
-
-#include <QtPlugin>
-
-#include <QApplication>
-#include <QMessageBox>
-#include <QPushButton>
 
 using namespace ProjectExplorer;
 
 namespace QmlProjectManager {
+namespace Internal {
 
-QmlProjectPlugin::QmlProjectPlugin()
-{ }
+class QmlProjectPluginPrivate
+{
+public:
+    QmlProjectRunConfigurationFactory runConfigFactory;
+    RunWorkerFactory runWorkerFactory{
+        RunWorkerFactory::make<SimpleTargetRunner>(),
+        {ProjectExplorer::Constants::NORMAL_RUN_MODE},
+        {runConfigFactory.id()}
+    };
+};
 
 QmlProjectPlugin::~QmlProjectPlugin()
 {
+    delete d;
 }
 
 bool QmlProjectPlugin::initialize(const QStringList &, QString *errorMessage)
 {
     Q_UNUSED(errorMessage)
 
-    addAutoReleasedObject(new Internal::QmlProjectRunConfigurationFactory);
+    d = new QmlProjectPluginPrivate;
 
     ProjectManager::registerProjectType<QmlProject>(QmlJSTools::Constants::QMLPROJECT_MIMETYPE);
     Core::FileIconProvider::registerIconOverlayForSuffix(":/qmlproject/images/qmlproject.png", "qmlproject");
     return true;
 }
 
-void QmlProjectPlugin::extensionsInitialized()
-{
-}
-
+} // namespace Internal
 } // namespace QmlProjectManager

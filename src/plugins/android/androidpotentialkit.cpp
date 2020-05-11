@@ -27,6 +27,8 @@
 #include "androidconstants.h"
 #include "androidconfigurations.h"
 
+#include <app/app_version.h>
+
 #include <utils/detailswidget.h>
 #include <utils/utilsicons.h>
 
@@ -66,7 +68,7 @@ bool AndroidPotentialKit::isEnabled() const
 {
     QList<ProjectExplorer::Kit *> kits = ProjectExplorer::KitManager::kits();
     foreach (ProjectExplorer::Kit *kit, kits) {
-        Core::Id deviceId = ProjectExplorer::DeviceKitInformation::deviceId(kit);
+        Core::Id deviceId = ProjectExplorer::DeviceKitAspect::deviceId(kit);
         if (kit->isAutoDetected()
                 && deviceId == Core::Id(Constants::ANDROID_DEVICE_ID)
                 && !kit->isSdkProvided()) {
@@ -89,10 +91,11 @@ AndroidPotentialKitWidget::AndroidPotentialKitWidget(QWidget *parent)
     setWidget(mainWidget);
 
     auto layout = new QGridLayout(mainWidget);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     auto label = new QLabel;
-    label->setText(tr("Qt Creator needs additional settings to enable Android support."
-                      " You can configure those settings in the Options dialog."));
+    label->setText(tr("%1 needs additional settings to enable Android support."
+                      " You can configure those settings in the Options dialog.")
+                   .arg(Core::Constants::IDE_DISPLAY_NAME));
     label->setWordWrap(true);
     layout->addWidget(label, 0, 0, 1, 2);
 
@@ -117,7 +120,7 @@ void AndroidPotentialKitWidget::recheck()
 {
     QList<ProjectExplorer::Kit *> kits = ProjectExplorer::KitManager::kits();
     foreach (ProjectExplorer::Kit *kit, kits) {
-        Core::Id deviceId = ProjectExplorer::DeviceKitInformation::deviceId(kit);
+        Core::Id deviceId = ProjectExplorer::DeviceKitAspect::deviceId(kit);
         if (kit->isAutoDetected()
                 && deviceId == Core::Id(Constants::ANDROID_DEVICE_ID)
                 && !kit->isSdkProvided()) {

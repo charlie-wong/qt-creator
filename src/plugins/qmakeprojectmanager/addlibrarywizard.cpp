@@ -30,9 +30,10 @@
 #include <utils/hostosinfo.h>
 #include <utils/fileutils.h>
 
-#include <QVBoxLayout>
-#include <QRadioButton>
 #include <QLabel>
+#include <QRadioButton>
+#include <QScrollArea>
+#include <QVBoxLayout>
 
 #include <QFileInfo>
 #include <QTextStream>
@@ -54,11 +55,11 @@ QStringList qt_clean_filter_list(const QString &filter)
     return f.split(QLatin1Char(' '), QString::SkipEmptyParts);
 }
 
-static bool validateLibraryPath(const Utils::FileName &filePath,
+static bool validateLibraryPath(const Utils::FilePath &filePath,
                                 const Utils::PathChooser *pathChooser,
                                 QString *errorMessage)
 {
-    Q_UNUSED(errorMessage);
+    Q_UNUSED(errorMessage)
     if (!filePath.exists())
         return false;
 
@@ -87,9 +88,7 @@ AddLibraryWizard::AddLibraryWizard(const QString &fileName, QWidget *parent) :
     addPage(m_summaryPage);
 }
 
-AddLibraryWizard::~AddLibraryWizard()
-{
-}
+AddLibraryWizard::~AddLibraryWizard() = default;
 
 QString AddLibraryWizard::proFile() const
 {
@@ -114,7 +113,7 @@ LibraryTypePage::LibraryTypePage(AddLibraryWizard *parent)
     setTitle(tr("Library Type"));
     setSubTitle(tr("Choose the type of the library to link to"));
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
+    auto *layout = new QVBoxLayout(this);
 
     m_internalRadio = new QRadioButton(tr("Internal library"), this);
     layout->addWidget(m_internalRadio);
@@ -196,7 +195,7 @@ DetailsPage::DetailsPage(AddLibraryWizard *parent)
 
     const auto pathValidator = [libPathChooser](Utils::FancyLineEdit *edit, QString *errorMessage) {
         return libPathChooser->defaultValidationFunction()(edit, errorMessage)
-                && validateLibraryPath(libPathChooser->fileName(),
+                && validateLibraryPath(libPathChooser->filePath(),
                                        libPathChooser, errorMessage);
     };
     libPathChooser->setValidationFunction(pathValidator);
@@ -221,7 +220,7 @@ void DetailsPage::initializePage()
 {
     if (m_libraryDetailsController) {
         delete m_libraryDetailsController;
-        m_libraryDetailsController = 0;
+        m_libraryDetailsController = nullptr;
     }
     QString title;
     QString subTitle;
@@ -269,12 +268,19 @@ SummaryPage::SummaryPage(AddLibraryWizard *parent)
     setTitle(tr("Summary"));
     setFinalPage(true);
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
+    auto *layout = new QVBoxLayout(this);
+    const auto scrollArea = new QScrollArea;
+    const auto snippetWidget = new QWidget;
+    const auto snippetLayout = new QVBoxLayout(snippetWidget);
     m_summaryLabel = new QLabel(this);
     m_snippetLabel = new QLabel(this);
     m_snippetLabel->setWordWrap(true);
     layout->addWidget(m_summaryLabel);
-    layout->addWidget(m_snippetLabel);
+    snippetLayout->addWidget(m_snippetLabel);
+    snippetLayout->addStretch(1);
+    scrollArea->setWidget(snippetWidget);
+    scrollArea->setWidgetResizable(true);
+    layout->addWidget(scrollArea);
     m_summaryLabel->setTextFormat(Qt::RichText);
     m_snippetLabel->setTextFormat(Qt::RichText);
     m_snippetLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);

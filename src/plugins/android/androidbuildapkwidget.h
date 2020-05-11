@@ -28,49 +28,52 @@
 
 #include "android_global.h"
 
+#include "androidbuildapkstep.h"
+
 #include <projectexplorer/buildstep.h>
 
-#include <QWidget>
-
 QT_BEGIN_NAMESPACE
-namespace Ui { class AndroidBuildApkWidget; }
+class QCheckBox;
+class QComboBox;
+class QLabel;
 QT_END_NAMESPACE
 
-namespace QmakeProjectManager { class QmakeBuildConfiguration; }
+namespace Utils {
+class InfoLabel;
+}
 
 namespace Android {
-class AndroidBuildApkStep;
+namespace Internal {
 
-class ANDROID_EXPORT AndroidBuildApkWidget : public ProjectExplorer::BuildStepConfigWidget
+class AndroidBuildApkWidget : public ProjectExplorer::BuildStepConfigWidget
 {
     Q_OBJECT
 
 public:
-    AndroidBuildApkWidget(AndroidBuildApkStep *step);
-    ~AndroidBuildApkWidget();
+    explicit AndroidBuildApkWidget(AndroidBuildApkStep *step);
 
 private:
-    void setTargetSdk(const QString &sdk);
-    void setMinistro();
-    void setDeployLocalQtLibs();
-    void setBundleQtLibs();
-    void createKeyStore();
-    void certificatesAliasComboBoxCurrentIndexChanged(const QString &alias);
-    void certificatesAliasComboBoxActivated(const QString &alias);
-    void updateSigningWarning();
-    void updateDebugDeploySigningWarning();
-    void useGradleCheckBoxToggled(bool checked);
-    void openPackageLocationCheckBoxToggled(bool checked);
-    void verboseOutputCheckBoxToggled(bool checked);
-    void updateKeyStorePath(const QString &path);
-    void signPackageCheckBoxToggled(bool checked);
-
-    virtual QString summaryText() const;
-    virtual QString displayName() const;
     void setCertificates();
+    void updateSigningWarning();
+    void signPackageCheckBoxToggled(bool checked);
+    void onOpenSslCheckBoxChanged();
+    bool isOpenSslLibsIncluded();
+    QString openSslIncludeFileContent(const Utils::FilePath &projectPath);
 
-    Ui::AndroidBuildApkWidget *m_ui;
-    AndroidBuildApkStep *m_step;
+    QWidget *createApplicationGroup();
+    QWidget *createSignPackageGroup();
+    QWidget *createAdvancedGroup();
+    QWidget *createCreateTemplatesGroup();
+    QWidget *createAdditionalLibrariesGroup();
+
+private:
+    AndroidBuildApkStep *m_step = nullptr;
+    QCheckBox *m_signPackageCheckBox = nullptr;
+    Utils::InfoLabel *m_signingDebugWarningLabel = nullptr;
+    QComboBox *m_certificatesAliasComboBox = nullptr;
+    QCheckBox *m_addDebuggerCheckBox = nullptr;
+    QCheckBox *m_openSslCheckBox = nullptr;
 };
 
-}
+} // namespace Internal
+} // namespace Android

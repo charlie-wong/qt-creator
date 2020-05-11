@@ -31,7 +31,6 @@
 
 namespace QmlDesigner {
 
-
 class StatesEditorModel;
 class StatesEditorWidget;
 
@@ -39,12 +38,15 @@ class StatesEditorView : public AbstractView {
     Q_OBJECT
 
 public:
-    explicit StatesEditorView(QObject *parent = 0);
-    ~StatesEditorView();
+    explicit StatesEditorView(QObject *parent = nullptr);
+    ~StatesEditorView() override;
 
     void renameState(int internalNodeId,const QString &newName);
     void setWhenCondition(int internalNodeId, const QString &condition);
     void resetWhenCondition(int internalNodeId);
+    void setStateAsDefault(int internalNodeId);
+    void resetDefaultState();
+    bool hasDefaultState() const;
     bool validStateName(const QString &name) const;
     QString currentStateName() const;
     void setCurrentState(const QmlModelState &state);
@@ -69,6 +71,7 @@ public:
                         AbstractView::PropertyChangeFlags propertyChange) override;
     void nodeOrderChanged(const NodeListProperty &listProperty, const ModelNode &movedNode, int oldIndex) override;
     void bindingPropertiesChanged(const QList<BindingProperty>& propertyList, PropertyChangeFlags propertyChange) override;
+    void variantPropertiesChanged(const QList<VariantProperty>& propertyList, PropertyChangeFlags propertyChange) override;
 
 
     // AbstractView
@@ -92,7 +95,7 @@ private:
     void resetModel();
     void addState();
     void duplicateCurrentState();
-    void checkForWindow();
+    void checkForStatesAvailability();
 
 private:
     QPointer<StatesEditorModel> m_statesEditorModel;

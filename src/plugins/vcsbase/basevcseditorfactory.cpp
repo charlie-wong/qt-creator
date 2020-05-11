@@ -54,16 +54,15 @@ VcsEditorFactory::VcsEditorFactory(const VcsBaseEditorParameters *parameters,
                                    const EditorWidgetCreator editorWidgetCreator,
                                    std::function<void(const QString &, const QString &)> describeFunc)
 {
-    setProperty("VcsEditorFactoryName", QByteArray(parameters->id));
     setId(parameters->id);
     setDisplayName(QCoreApplication::translate("VCS", parameters->displayName));
     if (QLatin1String(parameters->mimeType) != QLatin1String(DiffEditor::Constants::DIFF_EDITOR_MIMETYPE))
-        addMimeType(parameters->mimeType);
+        addMimeType(QLatin1String(parameters->mimeType));
 
     setEditorActionHandlers(TextEditorActionHandler::None);
     setDuplicatedSupported(false);
 
-    setDocumentCreator([this, parameters]() -> TextDocument* {
+    setDocumentCreator([parameters]() -> TextDocument* {
         auto document = new TextDocument(parameters->id);
  //  if (QLatin1String(parameters->mimeType) != QLatin1String(DiffEditor::Constants::DIFF_EDITOR_MIMETYPE))
         document->setMimeType(QLatin1String(parameters->mimeType));
@@ -71,22 +70,16 @@ VcsEditorFactory::VcsEditorFactory(const VcsBaseEditorParameters *parameters,
         return document;
     });
 
-    setEditorWidgetCreator([this, parameters, editorWidgetCreator, describeFunc]() -> TextEditorWidget * {
-        auto widget = qobject_cast<VcsBaseEditorWidget *>(editorWidgetCreator());
-        widget->setDescribeFunc(describeFunc);
-        widget->setParameters(parameters);
+    setEditorWidgetCreator([parameters, editorWidgetCreator, describeFunc]() {
+        auto widget = editorWidgetCreator();
+        auto editorWidget = Aggregation::query<VcsBaseEditorWidget>(widget);
+        editorWidget->setDescribeFunc(describeFunc);
+        editorWidget->setParameters(parameters);
         return widget;
     });
 
     setEditorCreator([]() { return new VcsBaseEditor(); });
-}
-
-VcsBaseEditor *VcsEditorFactory::createEditorById(const char *id)
-{
-    auto factory =  ExtensionSystem::PluginManager::getObject<VcsEditorFactory>(
-        [id](QObject *ob) { return ob->property("VcsEditorFactoryName").toByteArray() == id; });
-    QTC_ASSERT(factory, return 0);
-    return qobject_cast<VcsBaseEditor *>(factory->createEditor());
+    setMarksVisible(false);
 }
 
 } // namespace VcsBase

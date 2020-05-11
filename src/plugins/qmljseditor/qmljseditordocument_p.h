@@ -32,14 +32,17 @@
 #include <QTextLayout>
 #include <QTimer>
 
+namespace TextEditor { class TextMark; }
+
 namespace QmlJSEditor {
 
 class QmlJSEditorDocument;
+class SemanticHighlighter;
 
 namespace Internal {
 
 class QmlOutlineModel;
-class SemanticHighlighter;
+
 class SemanticInfoUpdater;
 
 class QmlJSEditorDocumentPrivate : public QObject
@@ -48,7 +51,7 @@ class QmlJSEditorDocumentPrivate : public QObject
 
 public:
     QmlJSEditorDocumentPrivate(QmlJSEditorDocument *parent);
-    ~QmlJSEditorDocumentPrivate();
+    ~QmlJSEditorDocumentPrivate() override;
 
     void invalidateFormatterCache();
     void reparseDocument();
@@ -56,6 +59,11 @@ public:
     void reupdateSemanticInfo();
     void acceptNewSemanticInfo(const QmlJSTools::SemanticInfo &semanticInfo);
     void updateOutlineModel();
+
+    void createTextMarks(const QList<QmlJS::DiagnosticMessage> &diagnostics);
+    void cleanDiagnosticMarks();
+    void createTextMarks(const QmlJSTools::SemanticInfo &info);
+    void cleanSemanticMarks();
 
 public:
     QmlJSEditorDocument *q = nullptr;
@@ -65,12 +73,14 @@ public:
     SemanticInfoUpdater *m_semanticInfoUpdater;
     QmlJSTools::SemanticInfo m_semanticInfo;
     QVector<QTextLayout::FormatRange> m_diagnosticRanges;
-    Internal::SemanticHighlighter *m_semanticHighlighter = nullptr;
+    SemanticHighlighter *m_semanticHighlighter = nullptr;
     bool m_semanticHighlightingNecessary = false;
     bool m_outlineModelNeedsUpdate = false;
-    bool m_firstSementicInfo = true;
     QTimer m_updateOutlineModelTimer;
     Internal::QmlOutlineModel *m_outlineModel = nullptr;
+    QVector<TextEditor::TextMark *> m_diagnosticMarks;
+    QVector<TextEditor::TextMark *> m_semanticMarks;
+    bool m_isDesignModePreferred = false;
 };
 
 } // Internal

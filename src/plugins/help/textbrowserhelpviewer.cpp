@@ -52,10 +52,11 @@ TextBrowserHelpViewer::TextBrowserHelpViewer(QWidget *parent)
     , m_textBrowser(new TextBrowserHelpWidget(this))
 {
     m_textBrowser->setOpenLinks(false);
-    QVBoxLayout *layout = new QVBoxLayout;
+    auto layout = new QVBoxLayout;
     setLayout(layout);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_textBrowser, 10);
+    setFocusProxy(m_textBrowser);
     QPalette p = palette();
     p.setColor(QPalette::Inactive, QPalette::Highlight,
         p.color(QPalette::Active, QPalette::Highlight));
@@ -72,9 +73,7 @@ TextBrowserHelpViewer::TextBrowserHelpViewer(QWidget *parent)
     connect(m_textBrowser, &QTextBrowser::backwardAvailable, this, &HelpViewer::backwardAvailable);
 }
 
-TextBrowserHelpViewer::~TextBrowserHelpViewer()
-{
-}
+TextBrowserHelpViewer::~TextBrowserHelpViewer() = default;
 
 QFont TextBrowserHelpViewer::viewerFont() const
 {
@@ -100,12 +99,14 @@ void TextBrowserHelpViewer::scaleDown()
 
 void TextBrowserHelpViewer::resetScale()
 {
-    if (m_textBrowser->zoomCount != 0) {
-        m_textBrowser->forceFont = true;
-        m_textBrowser->zoomOut(m_textBrowser->zoomCount);
-        m_textBrowser->forceFont = false;
-    }
-    m_textBrowser->zoomCount = 0;
+    m_textBrowser->withFixedTopPosition([this] {
+        if (m_textBrowser->zoomCount != 0) {
+            m_textBrowser->forceFont = true;
+            m_textBrowser->zoomOut(m_textBrowser->zoomCount);
+            m_textBrowser->forceFont = false;
+        }
+        m_textBrowser->zoomCount = 0;
+    });
 }
 
 qreal TextBrowserHelpViewer::scale() const
@@ -115,18 +116,20 @@ qreal TextBrowserHelpViewer::scale() const
 
 void TextBrowserHelpViewer::setScale(qreal scale)
 {
-    m_textBrowser->forceFont = true;
-    if (scale > 10)
-        scale = 10;
-    else if (scale < -5)
-        scale = -5;
-    int diff = (int)scale - m_textBrowser->zoomCount;
-    if (diff > 0)
-        m_textBrowser->zoomIn(diff);
-    else if (diff < 0)
-        m_textBrowser->zoomOut(-diff);
-    m_textBrowser->zoomCount = (int)scale;
-    m_textBrowser->forceFont = false;
+    m_textBrowser->withFixedTopPosition([this, &scale] {
+        m_textBrowser->forceFont = true;
+        if (scale > 10)
+            scale = 10;
+        else if (scale < -5)
+            scale = -5;
+        int diff = int(scale) - m_textBrowser->zoomCount;
+        if (diff > 0)
+            m_textBrowser->zoomIn(diff);
+        else if (diff < 0)
+            m_textBrowser->zoomOut(-diff);
+        m_textBrowser->zoomCount = int(scale);
+        m_textBrowser->forceFont = false;
+    });
 }
 
 QString TextBrowserHelpViewer::title() const
@@ -146,13 +149,11 @@ void TextBrowserHelpViewer::setSource(const QUrl &url)
 
     slotLoadStarted();
     m_textBrowser->setSource(url);
-    QTimer::singleShot(0, this, [this, url]() {
-        if (!url.fragment().isEmpty())
-            m_textBrowser->scrollToAnchor(url.fragment());
-        if (QScrollBar *hScrollBar = m_textBrowser->horizontalScrollBar())
-            hScrollBar->setValue(0);
-        slotLoadFinished();
-    });
+    if (!url.fragment().isEmpty())
+        m_textBrowser->scrollToAnchor(url.fragment());
+    if (QScrollBar *hScrollBar = m_textBrowser->horizontalScrollBar())
+        hScrollBar->setValue(0);
+    slotLoadFinished();
 }
 
 void TextBrowserHelpViewer::setHtml(const QString &html)
@@ -178,7 +179,7 @@ bool TextBrowserHelpViewer::isBackwardAvailable() const
 void TextBrowserHelpViewer::addBackHistoryItems(QMenu *backMenu)
 {
     for (int i = 1; i <= m_textBrowser->backwardHistoryCount(); ++i) {
-        QAction *action = new QAction(backMenu);
+        auto action = new QAction(backMenu);
         action->setText(m_textBrowser->historyTitle(-i));
         action->setData(-i);
         connect(action, &QAction::triggered, this, &TextBrowserHelpViewer::goToHistoryItem);
@@ -189,7 +190,7 @@ void TextBrowserHelpViewer::addBackHistoryItems(QMenu *backMenu)
 void TextBrowserHelpViewer::addForwardHistoryItems(QMenu *forwardMenu)
 {
     for (int i = 1; i <= m_textBrowser->forwardHistoryCount(); ++i) {
-        QAction *action = new QAction(forwardMenu);
+        auto action = new QAction(forwardMenu);
         action->setText(m_textBrowser->historyTitle(i));
         action->setData(i);
         connect(action, &QAction::triggered, this, &TextBrowserHelpViewer::goToHistoryItem);
@@ -280,7 +281,7 @@ void TextBrowserHelpViewer::print(QPrinter *printer)
 
 void TextBrowserHelpViewer::goToHistoryItem()
 {
-    QAction *action = qobject_cast<QAction *>(sender());
+    auto action = qobject_cast<const QAction *>(sender());
     QTC_ASSERT(action, return);
     bool ok = false;
     int index = action->data().toInt(&ok);
@@ -331,31 +332,53 @@ QString TextBrowserHelpWidget::linkAt(const QPoint &pos)
     return anchor;
 }
 
+void TextBrowserHelpWidget::withFixedTopPosition(const std::function<void()> &action)
+{
+    const int topTextPosition = cursorForPosition({width() / 2, 0}).position();
+    action();
+    scrollToTextPosition(topTextPosition);
+}
+
+void TextBrowserHelpWidget::scrollToTextPosition(int position)
+{
+    QTextCursor tc(document());
+    tc.setPosition(position);
+    const int dy = cursorRect(tc).top();
+    if (verticalScrollBar()) {
+        verticalScrollBar()->setValue(
+            std::min(verticalScrollBar()->value() + dy, verticalScrollBar()->maximum()));
+    }
+}
+
 void TextBrowserHelpWidget::scaleUp()
 {
-    if (zoomCount < 10) {
-        zoomCount++;
-        forceFont = true;
-        zoomIn();
-        forceFont = false;
-    }
+    withFixedTopPosition([this] {
+        if (zoomCount < 10) {
+            zoomCount++;
+            forceFont = true;
+            zoomIn();
+            forceFont = false;
+        }
+    });
 }
 
 void TextBrowserHelpWidget::scaleDown()
 {
-    if (zoomCount > -5) {
-        zoomCount--;
-        forceFont = true;
-        zoomOut();
-        forceFont = false;
-    }
+    withFixedTopPosition([this] {
+        if (zoomCount > -5) {
+            zoomCount--;
+            forceFont = true;
+            zoomOut();
+            forceFont = false;
+        }
+    });
 }
 
 void TextBrowserHelpWidget::contextMenuEvent(QContextMenuEvent *event)
 {
-    QMenu menu("", 0);
+    QMenu menu("", nullptr);
 
-    QAction *copyAnchorAction = 0;
+    QAction *copyAnchorAction = nullptr;
     const QUrl link(linkAt(event->pos()));
     if (!link.isEmpty() && link.isValid()) {
         QAction *action = menu.addAction(tr("Open Link"));
@@ -377,8 +400,6 @@ void TextBrowserHelpWidget::contextMenuEvent(QContextMenuEvent *event)
         copyAnchorAction = menu.addAction(tr("Copy Link"));
     } else if (!textCursor().selectedText().isEmpty()) {
         connect(menu.addAction(tr("Copy")), &QAction::triggered, this, &QTextEdit::copy);
-    } else {
-        connect(menu.addAction(tr("Reload")), &QAction::triggered, this, &QTextBrowser::reload);
     }
 
     if (copyAnchorAction == menu.exec(event->globalPos()))
@@ -392,29 +413,19 @@ bool TextBrowserHelpWidget::eventFilter(QObject *obj, QEvent *event)
             if (!forceFont)
                 return true;
         } else if (event->type() == QEvent::KeyPress) {
-            QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+            auto keyEvent = static_cast<QKeyEvent *>(event);
             if (keyEvent->key() == Qt::Key_Slash) {
                 keyEvent->accept();
                 Core::Find::openFindToolBar(Core::Find::FindForwardDirection);
                 return true;
             }
         } else if (event->type() == QEvent::ToolTip) {
-            QHelpEvent *e = static_cast<QHelpEvent *>(event);
+            auto e = static_cast<const QHelpEvent *>(event);
             QToolTip::showText(e->globalPos(), linkAt(e->pos()));
             return true;
         }
     }
     return QTextBrowser::eventFilter(obj, event);
-}
-
-void TextBrowserHelpWidget::wheelEvent(QWheelEvent *e)
-{
-    if (e->modifiers() == Qt::ControlModifier) {
-        e->accept();
-        e->delta() > 0 ? scaleUp() : scaleDown();
-    } else {
-        QTextBrowser::wheelEvent(e);
-    }
 }
 
 void TextBrowserHelpWidget::mousePressEvent(QMouseEvent *e)
@@ -431,7 +442,8 @@ void TextBrowserHelpWidget::mouseReleaseEvent(QMouseEvent *e)
 
     bool controlPressed = e->modifiers() & Qt::ControlModifier;
     const QString link = linkAt(e->pos());
-    if ((controlPressed || e->button() == Qt::MidButton) && link.isEmpty()) {
+    if (m_parent->isActionVisible(HelpViewer::Action::NewPage)
+            && (controlPressed || e->button() == Qt::MidButton) && !link.isEmpty()) {
         emit m_parent->newPageRequested(QUrl(link));
         return;
     }
@@ -439,18 +451,9 @@ void TextBrowserHelpWidget::mouseReleaseEvent(QMouseEvent *e)
     QTextBrowser::mouseReleaseEvent(e);
 }
 
-void TextBrowserHelpWidget::setSource(const QUrl &name)
+void TextBrowserHelpWidget::resizeEvent(QResizeEvent *e)
 {
-    QTextBrowser::setSource(name);
-
-    QTextCursor cursor(document());
-    while (!cursor.atEnd()) {
-        QTextBlockFormat fmt = cursor.blockFormat();
-        if (fmt.hasProperty(QTextFormat::LineHeightType) && fmt.lineHeightType() == QTextBlockFormat::FixedHeight) {
-           fmt.setProperty(QTextFormat::LineHeightType, QTextBlockFormat::MinimumHeight);
-           cursor.setBlockFormat(fmt);
-        }
-        if (!cursor.movePosition(QTextCursor::NextBlock))
-            break;
-    }
+    const int topTextPosition = cursorForPosition({width() / 2, 0}).position();
+    QTextBrowser::resizeEvent(e);
+    scrollToTextPosition(topTextPosition);
 }

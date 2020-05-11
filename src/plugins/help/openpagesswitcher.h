@@ -27,12 +27,14 @@
 
 #include <QFrame>
 
-QT_FORWARD_DECLARE_CLASS(QModelIndex)
+QT_BEGIN_NAMESPACE
+class QAbstractItemModel;
+class QModelIndex;
+QT_END_NAMESPACE
 
 namespace Help {
     namespace Internal {
 
-class OpenPagesModel;
 class OpenPagesWidget;
 
 class OpenPagesSwitcher : public QFrame
@@ -40,18 +42,18 @@ class OpenPagesSwitcher : public QFrame
     Q_OBJECT
 
 public:
-    OpenPagesSwitcher(OpenPagesModel *model);
-    ~OpenPagesSwitcher();
+    OpenPagesSwitcher(QAbstractItemModel *model);
+    ~OpenPagesSwitcher() override;
 
     void gotoNextPage();
     void gotoPreviousPage();
 
     void selectAndHide();
-    void selectCurrentPage();
+    void selectCurrentPage(int index);
 
-    void setVisible(bool visible);
-    void focusInEvent(QFocusEvent *event);
-    bool eventFilter(QObject *object, QEvent *event);
+    void setVisible(bool visible) override;
+    void focusInEvent(QFocusEvent *event) override;
+    bool eventFilter(QObject *object, QEvent *event) override;
 
 signals:
     void closePage(const QModelIndex &index);
@@ -61,8 +63,8 @@ private:
     void selectPageUpDown(int summand);
 
 private:
-    OpenPagesModel *m_openPagesModel;
-    OpenPagesWidget *m_openPagesWidget;
+    QAbstractItemModel *m_openPagesModel = nullptr;
+    OpenPagesWidget *m_openPagesWidget = nullptr;
 };
 
     }   // namespace Internal

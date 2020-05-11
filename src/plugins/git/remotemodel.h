@@ -32,12 +32,10 @@
 namespace Git {
 namespace Internal {
 
-class GitClient;
-
 class RemoteModel : public QAbstractTableModel {
     Q_OBJECT
 public:
-    explicit RemoteModel(QObject *parent = 0);
+    explicit RemoteModel(QObject *parent = nullptr);
 
     void clear();
     bool refresh(const QString &workingDirectory, QString *errorMessage);
@@ -71,7 +69,7 @@ protected:
         QString name;
         QString url;
     };
-    typedef QList<Remote> RemoteList;
+    using RemoteList = QList<Remote>;
 
 private:
     const Qt::ItemFlags m_flags = Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable;

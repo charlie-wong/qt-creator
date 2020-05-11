@@ -6,7 +6,10 @@
     "trDescription": "Creates a Qt Resource file (.qrc).",
     "trDisplayName": "Qt Resource File",
     "trDisplayCategory": "Qt",
-    "enabled": "%{JS: [ %{Plugins} ].indexOf('ResourceEditor') >= 0}",
+    "iconText": "qrc",
+    "enabled": "%{JS: value('Plugins').indexOf('ResourceEditor') >= 0}",
+
+    "options": { "key": "DefaultSuffix", "value": "%{JS: Util.preferredSuffix('application/vnd.qt.xml.resource')}" },
 
     "pages" :
     [
@@ -28,7 +31,7 @@
             "data":
             {
                 "source": "file.qrc",
-                "target": "%{JS: Cpp.fileName('%{TargetPath}', '%{JS: Util.preferredSuffix('application/vnd.qt.xml.resource')}')}",
+                "target": "%{JS: Util.fileName(value('TargetPath'), value('DefaultSuffix'))}",
                 "openInEditor": true
             }
         }

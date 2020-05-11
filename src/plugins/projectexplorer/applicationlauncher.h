@@ -34,6 +34,8 @@
 
 #include <QProcess>
 
+#include <memory>
+
 namespace Utils { class ProcessHandle; }
 
 namespace ProjectExplorer {
@@ -47,20 +49,17 @@ class PROJECTEXPLORER_EXPORT ApplicationLauncher : public QObject
     Q_OBJECT
 
 public:
-    enum Mode {
-        Console,
-        Gui
-    };
-
     explicit ApplicationLauncher(QObject *parent = nullptr);
     ~ApplicationLauncher() override;
 
     void setProcessChannelMode(QProcess::ProcessChannelMode mode);
+    void setUseTerminal(bool on);
     void start(const Runnable &runnable);
     void start(const Runnable &runnable, const IDevice::ConstPtr &device);
     void stop();
     bool isRunning() const;
     Utils::ProcessHandle applicationPID() const;
+    bool isRemoteRunning() const;
 
     QString errorString() const;
     QProcess::ProcessError processError() const;
@@ -69,20 +68,20 @@ public:
     static QString msgWinCannotRetrieveDebuggingOutput();
 
 signals:
-    void appendMessage(const QString &message, Utils::OutputFormat format);
+    void appendMessage(const QString &message, Utils::OutputFormat format, bool appendNewLine = true);
     void processStarted();
     void processExited(int exitCode, QProcess::ExitStatus);
     void error(QProcess::ProcessError error);
 
-    void remoteStdout(const QByteArray &output);
-    void remoteStderr(const QByteArray &output);
+    void remoteStdout(const QString &output);
+    void remoteStderr(const QString &output);
     void reportProgress(const QString &progressOutput);
     void reportError(const QString &errorOutput);
     void remoteProcessStarted();
     void finished(bool success);
 
 private:
-    Internal::ApplicationLauncherPrivate *d;
+    std::unique_ptr<Internal::ApplicationLauncherPrivate> d;
 };
 
 } // namespace ProjectExplorer

@@ -29,23 +29,56 @@
 
 #include <coreplugin/icore.h>
 
+#include <projectexplorer/project.h>
+#include <projectexplorer/projectnodes.h>
+#include <projectexplorer/session.h>
+
 #include <utils/codegeneration.h>
 #include <utils/fileutils.h>
 
 #include <QFileInfo>
+#include <QStringList>
 #include <QTextStream>
 
 namespace CppTools {
 namespace Internal {
+
+static QString fileName(const QString &path, const QString &extension)
+{
+    return Utils::FilePath::fromStringWithExtension(path, extension).toString();
+}
 
 QString CppToolsJsExtension::headerGuard(const QString &in) const
 {
     return Utils::headerGuard(in);
 }
 
-QString CppToolsJsExtension::fileName(const QString &path, const QString &extension) const
+static QStringList parts(const QString &klass)
 {
-    QString raw = Utils::FileName::fromString(path, extension).toString();
+    return klass.split(QStringLiteral("::"));
+}
+
+QStringList CppToolsJsExtension::namespaces(const QString &klass) const
+{
+    QStringList result = parts(klass);
+    result.removeLast();
+    return result;
+}
+
+bool CppToolsJsExtension::hasNamespaces(const QString &klass) const
+{
+    return !namespaces(klass).empty();
+}
+
+QString CppToolsJsExtension::className(const QString &klass) const
+{
+    QStringList result = parts(klass);
+    return result.last();
+}
+
+QString CppToolsJsExtension::classToFileName(const QString &klass, const QString &extension) const
+{
+    const QString raw = fileName(className(klass), extension);
     CppFileSettings settings;
     settings.fromSettings(Core::ICore::settings());
     if (!settings.lowerCaseFiles)
@@ -62,30 +95,6 @@ QString CppToolsJsExtension::fileName(const QString &path, const QString &extens
     if (!ext.isEmpty())
         ext = QString(QLatin1Char('.')) + ext;
     return finalPath + name + ext;
-}
-
-
-static QStringList parts(const QString &klass)
-{
-    return klass.split(QStringLiteral("::"));
-}
-
-QStringList CppToolsJsExtension::namespaces(const QString &klass) const
-{
-    QStringList result = parts(klass);
-    result.removeLast();
-    return result;
-}
-
-QString CppToolsJsExtension::className(const QString &klass) const
-{
-    QStringList result = parts(klass);
-    return result.last();
-}
-
-QString CppToolsJsExtension::classToFileName(const QString &klass, const QString &extension) const
-{
-    return fileName(className(klass), extension);
 }
 
 QString CppToolsJsExtension::classToHeaderGuard(const QString &klass, const QString &extension) const
@@ -107,6 +116,70 @@ QString CppToolsJsExtension::closeNamespaces(const QString &klass) const
     QTextStream str(&result);
     Utils::writeClosingNameSpaces(namespaces(klass), QString(), str);
     return result;
+}
+
+QString CppToolsJsExtension::includeStatement(
+        const QString &fullyQualifiedClassName,
+        const QString &suffix,
+        const QString &specialClasses,
+        const QString &pathOfIncludingFile
+        )
+{
+    if (fullyQualifiedClassName.isEmpty())
+        return {};
+    const QString className = parts(fullyQualifiedClassName).last();
+    if (className.isEmpty() || specialClasses.contains(className))
+        return {};
+    if (className.startsWith('Q') && className.length() > 2 && className.at(1).isUpper())
+        return "#include <" + className + ">\n";
+    const auto withUnderScores = [&className] {
+        QString baseName = className;
+        baseName[0] = baseName[0].toLower();
+        for (int i = 1; i < baseName.length(); ++i) {
+            if (baseName[i].isUpper()) {
+                baseName.insert(i, '_');
+                baseName[i + 1] = baseName[i + 1].toLower();
+                ++i;
+            }
+        }
+        return baseName;
+    };
+    QStringList candidates{className + '.' + suffix};
+    bool hasUpperCase = false;
+    bool hasLowerCase = false;
+    for (int i = 0; i < className.length() && (!hasUpperCase || !hasLowerCase); ++i) {
+        if (className.at(i).isUpper())
+            hasUpperCase = true;
+        if (className.at(i).isLower())
+            hasLowerCase = true;
+    }
+    if (hasUpperCase)
+        candidates << className.toLower() + '.' + suffix;
+    if (hasUpperCase && hasLowerCase)
+        candidates << withUnderScores()  + '.' + suffix;
+    candidates.removeDuplicates();
+    using namespace ProjectExplorer;
+    const auto nodeMatchesFileName = [&candidates](Node *n) {
+        if (const FileNode * const fileNode = n->asFileNode()) {
+            if (fileNode->fileType() == FileType::Header
+                && candidates.contains(fileNode->filePath().fileName())) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (const Project * const p : SessionManager::projects()) {
+        const Node *theNode = p->rootProjectNode()->findNode(nodeMatchesFileName);
+        if (theNode) {
+            const bool sameDir = pathOfIncludingFile == theNode->filePath().toFileInfo().path();
+            return QString("#include ")
+                    .append(sameDir ? '"' : '<')
+                    .append(theNode->filePath().fileName())
+                    .append(sameDir ? '"' : '>')
+                    .append('\n');
+        }
+    }
+    return {};
 }
 
 } // namespace Internal

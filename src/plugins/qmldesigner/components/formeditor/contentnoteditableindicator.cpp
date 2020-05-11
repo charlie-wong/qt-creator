@@ -26,6 +26,8 @@
 #include "contentnoteditableindicator.h"
 #include "nodemetainfo.h"
 
+#include <utils/algorithm.h>
+
 #include <QSet>
 #include <QPen>
 
@@ -37,9 +39,7 @@ ContentNotEditableIndicator::ContentNotEditableIndicator(LayerItem *layerItem)
 
 }
 
-ContentNotEditableIndicator::ContentNotEditableIndicator()
-{
-}
+ContentNotEditableIndicator::ContentNotEditableIndicator() = default;
 
 ContentNotEditableIndicator::~ContentNotEditableIndicator()
 {
@@ -70,9 +70,9 @@ void ContentNotEditableIndicator::setItems(const QList<FormEditorItem*> &itemLis
 void ContentNotEditableIndicator::updateItems(const QList<FormEditorItem *> &itemList)
 {
     QSet<FormEditorItem*> affectedFormEditorItemItems;
-    affectedFormEditorItemItems.unite(itemList.toSet());
+    affectedFormEditorItemItems.unite(Utils::toSet(itemList));
     foreach (FormEditorItem *formEditorItem, itemList)
-        affectedFormEditorItemItems.unite(formEditorItem->offspringFormEditorItems().toSet());
+        affectedFormEditorItemItems.unite(Utils::toSet(formEditorItem->offspringFormEditorItems()));
 
     foreach (const EntryPair &entryPair, m_entryList) {
          foreach (FormEditorItem *formEditorItem, affectedFormEditorItemItems) {
@@ -88,13 +88,14 @@ void ContentNotEditableIndicator::updateItems(const QList<FormEditorItem *> &ite
 void ContentNotEditableIndicator::addAddiationEntries(const QList<FormEditorItem *> &itemList)
 {
     foreach (FormEditorItem *formEditorItem, itemList) {
-        if (formEditorItem->qmlItemNode().modelNode().metaInfo().isSubclassOf("QtQuick.Loader")) {
+        const ModelNode modelNode = formEditorItem->qmlItemNode().modelNode();
+        if (modelNode.metaInfo().isValid() && modelNode.metaInfo().isSubclassOf("QtQuick.Loader")) {
 
             if (!m_entryList.contains(EntryPair(formEditorItem, 0))) {
-                QGraphicsRectItem *indicatorShape = new QGraphicsRectItem(m_layerItem);
+                auto indicatorShape = new QGraphicsRectItem(m_layerItem);
                 QPen linePen;
                 linePen.setCosmetic(true);
-                linePen.setColor("#a0a0a0");
+                linePen.setColor(QColor(0xa0, 0xa0, 0xa0));
                 indicatorShape->setPen(linePen);
                 QRectF boundingRectangleInSceneSpace = formEditorItem->qmlItemNode().instanceSceneTransform().mapRect(formEditorItem->qmlItemNode().instanceBoundingRect());
                 indicatorShape->setRect(boundingRectangleInSceneSpace);
@@ -110,14 +111,12 @@ void ContentNotEditableIndicator::addAddiationEntries(const QList<FormEditorItem
 
 void ContentNotEditableIndicator::removeEntriesWhichAreNotInTheList(const QList<FormEditorItem *> &itemList)
 {
-    QMutableListIterator<EntryPair> entryIterator(m_entryList);
-
-    while (entryIterator.hasNext()) {
-        EntryPair &entryPair = entryIterator.next();
+    for (int i = 0; i < m_entryList.size(); ++i) {
+        const EntryPair &entryPair = m_entryList.at(i);
         if (!itemList.contains(entryPair.first)) {
             delete entryPair.second;
             entryPair.first->blurContent(false);
-            entryIterator.remove();
+            m_entryList.removeAt(i--);
         }
     }
 }

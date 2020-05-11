@@ -57,17 +57,17 @@ def parse_arguments():
 
 source_include_patterns = [
     # directories
-    r"^scripts/.*$",     # everything under scripts/
-    r"^doc/.*$",         # everything under doc/
+    r"^(?!(share|tests)/.*$)(.*/)?$",                     # look into all directories except under share/ and tests/
     r"^share/(qtcreator/(qml/(qmlpuppet/(.*/)?)?)?)?$", # for shared headers for qt quick designer plugins
-    r"^src/(.*/)?$",     # all directories under src/
-    r"^plugins/(.*/)?$", # all directories under plugins/ (if this is run on extra plugin repositories)
     # files
     r"^HACKING$",
     r"^LICENSE.*$",
     r"^README.md$",
-    r"^.*\.pri$",
-    r"^.*\.h$",
+    r"^scripts/.*$", # include everything under scripts/
+    r"^doc/.*$",     # include everything under doc/
+    r"^.*\.pri$",    # .pri files in all directories that are looked into
+    r"^.*\.h$",      # .h files in all directories that are looked into
+    r"^.*\.hpp$"     # .hpp files in all directories that are looked into
 ]
 
 build_include_patterns = [
@@ -122,7 +122,7 @@ def main():
     copy_regexp(build_include_regexp, arguments.build, arguments.target_directory, arguments.verbose)
 
     if arguments.sevenzip_target:
-        subprocess.check_call([arguments.sevenzip, 'a', '-mx9', arguments.sevenzip_target,
+        subprocess.check_call([arguments.sevenzip, 'a', '-mx9', '-mmt2', arguments.sevenzip_target,
             os.path.join(arguments.target_directory, '*')])
 
 if __name__ == "__main__":

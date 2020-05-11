@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>527</width>
-    <height>469</height>
+    <width>599</width>
+    <height>545</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -17,16 +17,65 @@
       <string>System</string>
      </property>
      <layout class="QGridLayout" name="gridLayout">
-      <item row="1" column="3">
-       <widget class="QToolButton" name="helpExternalFileBrowserButton">
+      <item row="0" column="0">
+       <widget class="QLabel" name="terminalLabel">
         <property name="text">
-         <string>?</string>
-        </property>
-        <property name="icon">
-         <iconset resource="../../libs/utils/utils.qrc">
-          <normaloff>:/utils/images/help.png</normaloff>:/utils/images/help.png</iconset>
+         <string>Terminal:</string>
         </property>
        </widget>
+      </item>
+      <item row="0" column="1">
+       <layout class="QHBoxLayout" name="horizontalLayout_8">
+        <item>
+         <widget class="QComboBox" name="terminalComboBox">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Ignored" vsizetype="Fixed">
+            <horstretch>3</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>100</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="editable">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="terminalOpenArgs"/>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="terminalExecuteArgs">
+          <property name="toolTip">
+           <string>Command line arguments used for &quot;Run in terminal&quot;.</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="0" column="2">
+       <widget class="QPushButton" name="resetTerminalButton">
+        <property name="toolTip">
+         <string comment="Terminal">Reset to default.</string>
+        </property>
+        <property name="text">
+         <string>Reset</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="externalFileBrowserLabel">
+        <property name="text">
+         <string>External file browser:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="externalFileBrowserEdit"/>
       </item>
       <item row="1" column="2">
        <widget class="QPushButton" name="resetFileBrowserButton">
@@ -38,7 +87,24 @@
         </property>
        </widget>
       </item>
-      <item row="3" column="0" colspan="4">
+      <item row="1" column="3">
+       <widget class="QToolButton" name="helpExternalFileBrowserButton">
+        <property name="text">
+         <string>?</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="patchCommandLabel">
+        <property name="text">
+         <string>Patch command:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1" colspan="2">
+       <widget class="Utils::PathChooser" name="patchChooser" native="true"/>
+      </item>
+      <item row="3" column="0" colspan="2">
        <widget class="QWidget" name="fileSystemCaseSensitivityWidget" native="true">
         <layout class="QHBoxLayout" name="horizontalLayout">
          <property name="leftMargin">
@@ -82,13 +148,56 @@
         </layout>
        </widget>
       </item>
-      <item row="5" column="0" colspan="4">
+      <item row="4" column="0" colspan="4">
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <item>
+         <widget class="QLabel" name="modifiedLabel">
+          <property name="text">
+           <string>When files are externally modified:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="reloadBehavior">
+          <property name="currentIndex">
+           <number>0</number>
+          </property>
+          <item>
+           <property name="text">
+            <string>Always Ask</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Reload All Unchanged Editors</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Ignore Modifications</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_3">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item row="5" column="0" colspan="3">
        <layout class="QHBoxLayout" name="horizontalLayout_5">
         <item>
          <widget class="QCheckBox" name="autoSaveCheckBox">
-          <property name="toolTip">
-           <string>Automatically creates temporary copies of modified files. If Qt Creator is restarted after a crash or power failure, it asks whether to recover the auto-saved content.</string>
-          </property>
           <property name="text">
            <string>Auto-save modified files</string>
           </property>
@@ -145,59 +254,59 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="1" colspan="2">
-       <widget class="Utils::PathChooser" name="patchChooser" native="true"/>
-      </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="externalFileBrowserLabel">
-        <property name="text">
-         <string>External file browser:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="terminalLabel">
-        <property name="text">
-         <string>Terminal:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QLineEdit" name="externalFileBrowserEdit"/>
-      </item>
-      <item row="4" column="0" colspan="4">
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
+      <item row="6" column="0" colspan="4">
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
         <item>
-         <widget class="QLabel" name="modifiedLabel">
+         <widget class="QCheckBox" name="autoSuspendCheckBox">
+          <property name="toolTip">
+           <string>Automatically free resources of old documents that are not visible and not modified. They stay visible in the list of open documents.</string>
+          </property>
           <property name="text">
-           <string>When files are externally modified:</string>
+           <string>Auto-suspend unmodified files</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QComboBox" name="reloadBehavior">
-          <property name="currentIndex">
-           <number>0</number>
+         <spacer name="horizontalSpacer_7">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
           </property>
-          <item>
-           <property name="text">
-            <string>Always Ask</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Reload All Unchanged Editors</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Ignore Modifications</string>
-           </property>
-          </item>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QLabel" name="autoSuspendLabel">
+          <property name="toolTip">
+           <string>Minimum number of open documents that should be kept in memory. Increasing this number will lead to greater resource usage when not manually closing documents.</string>
+          </property>
+          <property name="text">
+           <string>Files to keep open:</string>
+          </property>
          </widget>
         </item>
         <item>
-         <spacer name="horizontalSpacer_3">
+         <widget class="QSpinBox" name="autoSuspendMinDocumentCount">
+          <property name="minimum">
+           <number>1</number>
+          </property>
+          <property name="maximum">
+           <number>500</number>
+          </property>
+          <property name="value">
+           <number>30</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_2">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
           </property>
@@ -211,24 +320,7 @@
         </item>
        </layout>
       </item>
-      <item row="0" column="2">
-       <widget class="QPushButton" name="resetTerminalButton">
-        <property name="toolTip">
-         <string comment="Terminal">Reset to default.</string>
-        </property>
-        <property name="text">
-         <string>Reset</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QComboBox" name="terminalComboBox">
-        <property name="editable">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item row="7" column="0" colspan="4">
+      <item row="7" column="0" colspan="3">
        <layout class="QHBoxLayout" name="horizontalLayout_4">
         <item>
          <widget class="QCheckBox" name="warnBeforeOpeningBigFiles">
@@ -271,66 +363,20 @@
         </item>
        </layout>
       </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="patchCommandLabel">
-        <property name="text">
-         <string>Patch command:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="6" column="0" colspan="4">
-       <layout class="QHBoxLayout" name="horizontalLayout_3">
+      <item row="8" column="0" colspan="3">
+       <layout class="QHBoxLayout" name="horizontalLayout_6">
         <item>
-         <widget class="QCheckBox" name="autoSuspendCheckBox">
-          <property name="toolTip">
-           <string>Automatically free resources of old documents that are not visible and not modified. They stay visible in the list of open documents.</string>
-          </property>
+         <widget class="QLabel" name="maxRecentFilesLabel">
           <property name="text">
-           <string>Auto-suspend unmodified files</string>
-          </property>
-          <property name="checked">
-           <bool>true</bool>
+           <string>Maximum number of entries in &quot;Recent Files&quot;:</string>
           </property>
          </widget>
         </item>
         <item>
-         <spacer name="horizontalSpacer_7">
-          <property name="orientation">
-           <enum>Qt::Horizontal</enum>
-          </property>
-          <property name="sizeHint" stdset="0">
-           <size>
-            <width>40</width>
-            <height>20</height>
-           </size>
-          </property>
-         </spacer>
+         <widget class="QSpinBox" name="maxRecentFilesSpinBox"/>
         </item>
         <item>
-         <widget class="QLabel" name="autoSuspendLabel">
-          <property name="toolTip">
-           <string>Minimum number of open documents that should be kept in memory. Increasing this number will lead to greater resource usage of Qt Creator when not manually closing documents.</string>
-          </property>
-          <property name="text">
-           <string>Files to keep open:</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QSpinBox" name="autoSuspendMinDocumentCount">
-          <property name="minimum">
-           <number>1</number>
-          </property>
-          <property name="maximum">
-           <number>500</number>
-          </property>
-          <property name="value">
-           <number>30</number>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <spacer name="horizontalSpacer_2">
+         <spacer name="horizontalSpacer_8">
           <property name="orientation">
            <enum>Qt::Horizontal</enum>
           </property>
@@ -375,7 +421,6 @@
   </customwidget>
  </customwidgets>
  <tabstops>
-  <tabstop>terminalComboBox</tabstop>
   <tabstop>resetTerminalButton</tabstop>
   <tabstop>externalFileBrowserEdit</tabstop>
   <tabstop>resetFileBrowserButton</tabstop>
@@ -389,8 +434,6 @@
   <tabstop>warnBeforeOpeningBigFiles</tabstop>
   <tabstop>bigFilesLimitSpinBox</tabstop>
  </tabstops>
- <resources>
-  <include location="../../libs/utils/utils.qrc"/>
- </resources>
+ <resources/>
  <connections/>
 </ui>

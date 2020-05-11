@@ -31,7 +31,6 @@
 
 namespace TextEditor {
 
-class IAssistProvider;
 class AssistInterface;
 class IAssistProposal;
 
@@ -41,7 +40,7 @@ public:
     IAssistProcessor();
     virtual ~IAssistProcessor();
 
-    virtual IAssistProposal *immediateProposal(const AssistInterface *) { return 0; }
+    virtual IAssistProposal *immediateProposal(const AssistInterface *) { return nullptr; }
     virtual IAssistProposal *perform(const AssistInterface *interface) = 0;
 
     void setAsyncProposalAvailable(IAssistProposal *proposal);
@@ -50,12 +49,12 @@ public:
     using AsyncCompletionsAvailableHandler = std::function<void (IAssistProposal *proposal)>;
     void setAsyncCompletionAvailableHandler(const AsyncCompletionsAvailableHandler &finalizer);
 
-    bool performWasApplicable() { return m_performWasApplicable; }
-    void setPerformWasApplicable(bool applicable) { m_performWasApplicable = applicable; }
+    virtual bool running() { return false; }
+    virtual bool needsRestart() const { return false; }
+    virtual void cancel() {}
 
 private:
     AsyncCompletionsAvailableHandler m_asyncCompletionsAvailableHandler;
-    bool m_performWasApplicable = true;
 };
 
 } // TextEditor

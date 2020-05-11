@@ -25,7 +25,7 @@
 
 #pragma once
 
-#include <clangbackendipc/diagnosticcontainer.h>
+#include <clangsupport/diagnosticcontainer.h>
 
 QT_BEGIN_NAMESPACE
 class QLayout;
@@ -38,8 +38,10 @@ class ClangDiagnosticWidget {
 public:
     enum Destination { ToolTip, InfoBar };
 
-    static QWidget *create(const QVector<ClangBackEnd::DiagnosticContainer> &diagnostics,
-                           const Destination &destination);
+    static QString createText(const QVector<ClangBackEnd::DiagnosticContainer> &diagnostics,
+                              const Destination &destination);
+    static QWidget *createWidget(const QVector<ClangBackEnd::DiagnosticContainer> &diagnostics,
+                                 const Destination &destination);
 };
 
 } // namespace Internal

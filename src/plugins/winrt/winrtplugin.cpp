@@ -24,28 +24,58 @@
 ****************************************************************************/
 
 #include "winrtplugin.h"
-#include "winrtrunfactories.h"
-#include "winrtdevice.h"
-#include "winrtdevicefactory.h"
+
+#include "winrtconstants.h"
+#include "winrtdebugsupport.h"
 #include "winrtdeployconfiguration.h"
-#include "winrtqtversionfactory.h"
+#include "winrtdevice.h"
+#include "winrtpackagedeploymentstep.h"
+#include "winrtphoneqtversion.h"
+#include "winrtqtversion.h"
+#include "winrtrunconfiguration.h"
+#include "winrtruncontrol.h"
 
-#include <coreplugin/icore.h>
-#include <extensionsystem/pluginmanager.h>
 #include <projectexplorer/devicesupport/devicemanager.h>
+#include <projectexplorer/devicesupport/idevice.h>
+#include <projectexplorer/kitinformation.h>
+#include <projectexplorer/target.h>
 
-#include <QtPlugin>
-#include <QSysInfo>
-
-using ExtensionSystem::PluginManager;
-using ProjectExplorer::DeviceManager;
+using namespace ProjectExplorer;
 
 namespace WinRt {
 namespace Internal {
 
-WinRtPlugin::WinRtPlugin()
+class WinRtPluginPrivate
 {
-    setObjectName(QLatin1String("WinRtPlugin"));
+public:
+    WinRtRunConfigurationFactory runConfigFactory;
+    WinRtQtVersionFactory qtVersionFactory;
+    WinRtPhoneQtVersionFactory phoneQtVersionFactory;
+    WinRtAppDeployConfigurationFactory appDeployConfigFactory;
+    WinRtPhoneDeployConfigurationFactory phoneDeployConfigFactory;
+    WinRtEmulatorDeployConfigurationFactory emulatorDeployFactory;
+    WinRtDeployStepFactory deployStepFactory;
+    WinRtDeviceFactory localDeviceFactory{Constants::WINRT_DEVICE_TYPE_LOCAL};
+    WinRtDeviceFactory phoneDeviceFactory{Constants::WINRT_DEVICE_TYPE_PHONE};
+    WinRtDeviceFactory emulatorDeviceFactory{Constants::WINRT_DEVICE_TYPE_EMULATOR};
+
+    RunWorkerFactory runWorkerFactory{
+        RunWorkerFactory::make<WinRtRunner>(),
+        {ProjectExplorer::Constants::NORMAL_RUN_MODE},
+        {runConfigFactory.id()}
+    };
+
+    RunWorkerFactory debugWorkerFactory{
+        RunWorkerFactory::make<WinRtDebugSupport>(),
+        {ProjectExplorer::Constants::DEBUG_RUN_MODE},
+        {runConfigFactory.id()},
+        {Internal::Constants::WINRT_DEVICE_TYPE_LOCAL}
+    };
+};
+
+WinRtPlugin::~WinRtPlugin()
+{
+    delete d;
 }
 
 bool WinRtPlugin::initialize(const QStringList &arguments, QString *errorMessage)
@@ -53,17 +83,9 @@ bool WinRtPlugin::initialize(const QStringList &arguments, QString *errorMessage
     Q_UNUSED(arguments)
     Q_UNUSED(errorMessage)
 
-    addAutoReleasedObject(new Internal::WinRtRunConfigurationFactory);
-    addAutoReleasedObject(new Internal::WinRtRunControlFactory);
-    addAutoReleasedObject(new Internal::WinRtQtVersionFactory);
-    addAutoReleasedObject(new Internal::WinRtDeployConfigurationFactory);
-    addAutoReleasedObject(new Internal::WinRtDeployStepFactory);
-    return true;
-}
+    d = new WinRtPluginPrivate;
 
-void WinRtPlugin::extensionsInitialized()
-{
-    addAutoReleasedObject(new Internal::WinRtDeviceFactory);
+    return true;
 }
 
 } // namespace Internal

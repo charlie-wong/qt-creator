@@ -25,18 +25,22 @@
 
 #pragma once
 
-#include <QAbstractItemModel>
-#include <QSet>
-#include <QFutureInterface>
-#include <QFutureWatcher>
-#include <QDialog>
-#include <QTreeView>
-#include <QLabel>
 #include "projectexplorer_export.h"
 
 #include <utils/fileutils.h>
 
-namespace Utils { class PathChooser; }
+#include <QAbstractItemModel>
+#include <QDialog>
+#include <QFutureInterface>
+#include <QFutureWatcher>
+#include <QLabel>
+#include <QSet>
+#include <QTreeView>
+
+namespace Utils {
+class FancyLineEdit;
+class PathChooser;
+}
 
 QT_BEGIN_NAMESPACE
 class QVBoxLayout;
@@ -47,7 +51,11 @@ namespace ProjectExplorer {
 class Tree
 {
 public:
-    ~Tree();
+    virtual ~Tree()
+    {
+        qDeleteAll(childDirectories);
+        qDeleteAll(files);
+    }
 
     QString name;
     Qt::CheckState checked = Qt::Unchecked;
@@ -56,7 +64,7 @@ public:
     QList<Tree *> files;
     QList<Tree *> visibleFiles;
     QIcon icon;
-    Utils::FileName fullPath;
+    Utils::FilePath fullPath;
     Tree *parent = nullptr;
 };
 
@@ -99,7 +107,7 @@ public:
     SelectableFilesModel(QObject *parent);
     ~SelectableFilesModel() override;
 
-    void setInitialMarkedFiles(const Utils::FileNameList &files);
+    void setInitialMarkedFiles(const Utils::FilePaths &files);
 
     int columnCount(const QModelIndex &parent) const override;
     int rowCount(const QModelIndex &parent) const override;
@@ -110,50 +118,72 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
     Qt::ItemFlags flags(const QModelIndex &index) const override;
 
-    Utils::FileNameList selectedFiles() const;
-    Utils::FileNameList selectedPaths() const;
-    Utils::FileNameList preservedFiles() const;
+    Utils::FilePaths selectedFiles() const;
+    Utils::FilePaths selectedPaths() const;
+    Utils::FilePaths preservedFiles() const;
 
     bool hasCheckedFiles() const;
 
-    void startParsing(const Utils::FileName &baseDir);
-    void cancel();
     void applyFilter(const QString &selectFilesfilter, const QString &hideFilesfilter);
 
     void selectAllFiles();
 
-signals:
-    void checkedFilesChanged();
-    void parsingFinished();
-    void parsingProgress(const Utils::FileName &fileName);
-
-private:
-    void buildTreeFinished();
-    QList<Glob> parseFilter(const QString &filter);
-    Qt::CheckState applyFilter(const QModelIndex &index);
     enum class FilterState { HIDDEN, SHOWN, CHECKED };
     FilterState filter(Tree *t);
-    void run(QFutureInterface<void> &fi);
-    void collectFiles(Tree *root, Utils::FileNameList *result) const;
-    void collectPaths(Tree *root, Utils::FileNameList *result) const;
-    void buildTree(const Utils::FileName &baseDir, Tree *tree, QFutureInterface<void> &fi, int symlinkDepth);
+
+signals:
+    void checkedFilesChanged();
+
+protected:
     void propagateUp(const QModelIndex &index);
-    void propagateDown(const QModelIndex &index);
+    void propagateDown(const QModelIndex &idx);
+
+private:
+    QList<Glob> parseFilter(const QString &filter);
+    Qt::CheckState applyFilter(const QModelIndex &idx);
+    void collectFiles(Tree *root, Utils::FilePaths *result) const;
+    void collectPaths(Tree *root, Utils::FilePaths *result) const;
     void selectAllFiles(Tree *root);
 
+protected:
+    bool m_allFiles = true;
+    QSet<Utils::FilePath> m_outOfBaseDirFiles;
+    QSet<Utils::FilePath> m_files;
     Tree *m_root = nullptr;
 
+private:
+    QList<Glob> m_hideFilesFilter;
+    QList<Glob> m_selectFilesFilter;
+};
+
+class PROJECTEXPLORER_EXPORT SelectableFilesFromDirModel : public SelectableFilesModel
+{
+    Q_OBJECT
+
+public:
+    SelectableFilesFromDirModel(QObject *parent);
+    ~SelectableFilesFromDirModel() override;
+
+    void startParsing(const Utils::FilePath &baseDir);
+    void cancel();
+
+signals:
+    void parsingFinished();
+    void parsingProgress(const Utils::FilePath &fileName);
+
+private:
+    void buildTree(const Utils::FilePath &baseDir,
+                   Tree *tree,
+                   QFutureInterface<void> &fi,
+                   int symlinkDepth);
+    void run(QFutureInterface<void> &fi);
+    void buildTreeFinished();
+
     // Used in the future thread need to all not used after calling startParsing
-    Utils::FileName m_baseDir;
-    QSet<Utils::FileName> m_files;
-    QSet<Utils::FileName> m_outOfBaseDirFiles;
+    Utils::FilePath m_baseDir;
     QFutureWatcher<void> m_watcher;
     Tree *m_rootForFuture = nullptr;
     int m_futureCount = 0;
-    bool m_allFiles = true;
-
-    QList<Glob> m_hideFilesFilter;
-    QList<Glob> m_showFilesFilter;
 };
 
 class PROJECTEXPLORER_EXPORT SelectableFilesWidget : public QWidget
@@ -162,19 +192,21 @@ class PROJECTEXPLORER_EXPORT SelectableFilesWidget : public QWidget
 
 public:
     explicit SelectableFilesWidget(QWidget *parent = nullptr);
-    SelectableFilesWidget(const Utils::FileName &path, const Utils::FileNameList &files,
+    SelectableFilesWidget(const Utils::FilePath &path, const Utils::FilePaths &files,
                           QWidget *parent = nullptr);
 
     void setAddFileFilter(const QString &filter);
     void setBaseDirEditable(bool edit);
 
-    Utils::FileNameList selectedFiles() const;
-    Utils::FileNameList selectedPaths() const;
+    Utils::FilePaths selectedFiles() const;
+    Utils::FilePaths selectedPaths() const;
 
     bool hasFilesSelected() const;
 
-    void resetModel(const Utils::FileName &path, const Utils::FileNameList &files);
+    void resetModel(const Utils::FilePath &path, const Utils::FilePaths &files);
     void cancelParsing();
+
+    void enableFilterHistoryCompletion(const QString &keyPrefix);
 
 signals:
     void selectedFilesChanged();
@@ -184,31 +216,32 @@ private:
     void applyFilter();
     void baseDirectoryChanged(bool validState);
 
-    void startParsing(const Utils::FileName &baseDir);
-    void parsingProgress(const Utils::FileName &fileName);
+    void startParsing(const Utils::FilePath &baseDir);
+    void parsingProgress(const Utils::FilePath &fileName);
     void parsingFinished();
 
-    void smartExpand(const QModelIndex &index);
+    void smartExpand(const QModelIndex &idx);
 
-    SelectableFilesModel *m_model = nullptr;
+    SelectableFilesFromDirModel *m_model = nullptr;
 
     Utils::PathChooser *m_baseDirChooser;
     QLabel *m_baseDirLabel;
     QPushButton *m_startParsingButton;
 
-    QLabel *m_showFilesFilterLabel;
-    QLineEdit *m_showFilesFilterEdit;
+    QLabel *m_selectFilesFilterLabel;
+    Utils::FancyLineEdit *m_selectFilesFilterEdit;
 
     QLabel *m_hideFilesFilterLabel;
-    QLineEdit *m_hideFilesFilterEdit;
+    Utils::FancyLineEdit *m_hideFilesFilterEdit;
 
-    QPushButton *m_applyFilterButton;
+    QPushButton *m_applyFiltersButton;
 
     QTreeView *m_view;
 
     QLabel *m_preservedFilesLabel;
 
     QLabel *m_progressLabel;
+    bool m_filteringScheduled = false;
 };
 
 class PROJECTEXPLORER_EXPORT SelectableFilesDialogEditFiles : public QDialog
@@ -216,9 +249,9 @@ class PROJECTEXPLORER_EXPORT SelectableFilesDialogEditFiles : public QDialog
     Q_OBJECT
 
 public:
-    SelectableFilesDialogEditFiles(const Utils::FileName &path, const Utils::FileNameList &files,
+    SelectableFilesDialogEditFiles(const Utils::FilePath &path, const Utils::FilePaths &files,
                                    QWidget *parent);
-    Utils::FileNameList selectedFiles() const;
+    Utils::FilePaths selectedFiles() const;
 
     void setAddFileFilter(const QString &filter) { m_filesWidget->setAddFileFilter(filter); }
 
@@ -231,10 +264,8 @@ class SelectableFilesDialogAddDirectory : public SelectableFilesDialogEditFiles
     Q_OBJECT
 
 public:
-    SelectableFilesDialogAddDirectory(const Utils::FileName &path, const Utils::FileNameList &files,
+    SelectableFilesDialogAddDirectory(const Utils::FilePath &path, const Utils::FilePaths &files,
                                       QWidget *parent);
-
-    void setAddFileFilter(const QString &filter) { m_filesWidget->setAddFileFilter(filter); }
 };
 
 } // namespace ProjectExplorer

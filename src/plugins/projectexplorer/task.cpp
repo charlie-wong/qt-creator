@@ -25,13 +25,22 @@
 
 #include "task.h"
 
+#include "fileinsessionfinder.h"
+#include "projectexplorerconstants.h"
+
+#include <app/app_version.h>
+#include <texteditor/textmark.h>
+
+#include <utils/algorithm.h>
 #include <utils/utilsicons.h>
 #include <utils/qtcassert.h>
 
-#include "projectexplorerconstants.h"
+#include <QFileInfo>
+#include <QTextStream>
 
-namespace ProjectExplorer
-{
+using namespace Utils;
+
+namespace ProjectExplorer {
 
 static QIcon taskTypeIcon(Task::TaskType t)
 {
@@ -54,33 +63,22 @@ unsigned int Task::s_nextId = 1;
 */
 
 Task::Task(TaskType type_, const QString &description_,
-           const Utils::FileName &file_, int line_, Core::Id category_,
-           const Utils::FileName &iconFile) :
-    taskId(s_nextId), type(type_), description(description_),
-    file(file_), line(line_), movedLine(line_), category(category_),
-    icon(iconFile.isEmpty() ? taskTypeIcon(type_) : QIcon(iconFile.toString()))
+           const Utils::FilePath &file_, int line_, Core::Id category_,
+           const QIcon &icon, Options options) :
+    taskId(s_nextId), type(type_), options(options), description(description_),
+    line(line_), movedLine(line_), category(category_),
+    icon(icon.isNull() ? taskTypeIcon(type_) : icon)
 {
     ++s_nextId;
+    setFile(file_);
 }
 
 Task Task::compilerMissingTask()
 {
-    return Task(Task::Error,
-                QCoreApplication::translate("ProjectExplorer::Task",
-                                            "Qt Creator needs a compiler set up to build. "
-                                            "Configure a compiler in the kit options."),
-                Utils::FileName(), -1,
-                Constants::TASK_CATEGORY_BUILDSYSTEM);
-}
-
-Task Task::buildConfigurationMissingTask()
-{
-    return Task(Task::Error,
-                QCoreApplication::translate("ProjectExplorer::Task",
-                                            "Qt Creator needs a build configuration set up to build. "
-                                            "Configure a build configuration in the project settings."),
-                Utils::FileName(), -1,
-                Constants::TASK_CATEGORY_BUILDSYSTEM);
+    return BuildSystemTask(Task::Error,
+                           tr("%1 needs a compiler set up to build. "
+                              "Configure a compiler in the kit options.")
+                           .arg(Core::Constants::IDE_DISPLAY_NAME));
 }
 
 void Task::setMark(TextEditor::TextMark *mark)
@@ -100,13 +98,25 @@ void Task::clear()
     taskId = 0;
     type = Task::Unknown;
     description.clear();
-    file = Utils::FileName();
+    file = Utils::FilePath();
     line = -1;
     movedLine = -1;
     category = Core::Id();
     icon = QIcon();
     formats.clear();
     m_mark.clear();
+}
+
+void Task::setFile(const Utils::FilePath &file_)
+{
+    file = file_;
+    if (!file.isEmpty() && !file.toFileInfo().isAbsolute()) {
+        Utils::FilePaths possiblePaths = findFileInSession(file);
+        if (possiblePaths.length() == 1)
+            file = possiblePaths.first();
+        else
+            fileCandidates = possiblePaths;
+    }
 }
 
 //
@@ -144,5 +154,51 @@ uint qHash(const Task &task)
 {
     return task.taskId;
 }
+
+QString toHtml(const Tasks &issues)
+{
+    QString result;
+    QTextStream str(&result);
+
+    for (const Task &t : issues) {
+        str << "<b>";
+        switch (t.type) {
+        case Task::Error:
+            str << QCoreApplication::translate("ProjectExplorer::Kit", "Error:") << " ";
+            break;
+        case Task::Warning:
+            str << QCoreApplication::translate("ProjectExplorer::Kit", "Warning:") << " ";
+            break;
+        case Task::Unknown:
+        default:
+            break;
+        }
+        str << "</b>" << t.description << "<br>";
+    }
+    return result;
+}
+
+bool containsType(const Tasks &issues, Task::TaskType type)
+{
+    return Utils::contains(issues, [type](const Task &t) { return t.type == type; });
+}
+
+// CompilerTask
+
+CompileTask::CompileTask(TaskType type, const QString &desc, const FilePath &file, int line)
+    : Task(type, desc, file, line, ProjectExplorer::Constants::TASK_CATEGORY_COMPILE)
+{}
+
+// BuildSystemTask
+
+BuildSystemTask::BuildSystemTask(Task::TaskType type, const QString &desc, const FilePath &file, int line)
+    : Task(type, desc, file, line, ProjectExplorer::Constants::TASK_CATEGORY_BUILDSYSTEM)
+{}
+
+// DeploymentTask
+
+DeploymentTask::DeploymentTask(Task::TaskType type, const QString &desc)
+    : Task(type, desc, {}, -1, ProjectExplorer::Constants::TASK_CATEGORY_DEPLOYMENT)
+{}
 
 } // namespace ProjectExplorer

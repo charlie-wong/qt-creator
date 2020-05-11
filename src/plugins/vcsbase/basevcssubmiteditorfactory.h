@@ -30,26 +30,34 @@
 #include <coreplugin/editormanager/ieditorfactory.h>
 #include <functional>
 
+#include <QAction>
+#include <QCoreApplication>
+
 namespace VcsBase {
 
 class VcsBaseSubmitEditor;
 class VcsBaseSubmitEditorParameters;
+class VcsBasePluginPrivate;
 
 // Parametrizable base class for editor factories creating instances of
 // VcsBaseSubmitEditor subclasses.
+
 class VCSBASE_EXPORT VcsSubmitEditorFactory : public Core::IEditorFactory
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(VcsBase::VcsSubmitEditorFactory)
 
 public:
     typedef std::function<VcsBaseSubmitEditor *()> EditorCreator;
 
-    VcsSubmitEditorFactory(const VcsBaseSubmitEditorParameters *parameters, const EditorCreator &editorCreator);
-
-    Core::IEditor *createEditor() override;
+    VcsSubmitEditorFactory(const VcsBaseSubmitEditorParameters &parameters,
+                           const EditorCreator &editorCreator,
+                           VcsBasePluginPrivate *plugin);
 
 private:
-    EditorCreator m_editorCreator;
+    QAction m_submitAction;
+    QAction m_diffAction;
+    QAction m_undoAction;
+    QAction m_redoAction;
 };
 
 } // namespace VcsBase

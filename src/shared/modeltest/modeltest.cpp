@@ -33,7 +33,7 @@
     Connect to all of the models signals.  Whenever anything happens
     recheck everything.
 */
-ModelTest::ModelTest(QAbstractItemModel *_model, QObject *parent) : QObject(parent), model(_model), fetchingMore(false)
+ModelTest::ModelTest(QAbstractItemModel *_model, QObject *parent) : QObject(parent), model(_model)
 {
     Q_ASSERT(model);
 
@@ -458,7 +458,7 @@ void ModelTest::data()
  */
 void ModelTest::rowsAboutToBeInserted(const QModelIndex &parent, int start, int end)
 {
-    Q_UNUSED(end);
+    Q_UNUSED(end)
     Changing c;
     c.parent = parent;
     c.oldSize = model->rowCount(parent);

@@ -40,13 +40,14 @@ namespace Core {
 
 /*!
     \class Core::Id
+    \inmodule QtCreator
 
     \brief The Id class encapsulates an identifier that is unique
     within a specific running \QC process.
 
     \c{Core::Id} is used as facility to identify objects of interest
-    in a more typesafe and faster manner than a plain \c QString or
-    \c QByteArray would provide.
+    in a more typesafe and faster manner than a plain QString or
+    QByteArray would provide.
 
     An id is associated with a plain 7-bit-clean ASCII name used
     for display and persistency.
@@ -56,9 +57,7 @@ namespace Core {
 class StringHolder
 {
 public:
-    StringHolder()
-        : n(0), str(0)
-    {}
+    StringHolder() = default;
 
     StringHolder(const char *s, int length)
         : n(length), str(s)
@@ -72,8 +71,8 @@ public:
             h &= 0x0fffffff;
         }
     }
-    int n;
-    const char *str;
+    int n = 0;
+    const char *str = nullptr;
     quintptr h;
 };
 
@@ -216,7 +215,7 @@ QVariant Id::toSetting() const
 }
 
 /*!
-  Reconstructs an id from a persistent value.
+  Reconstructs an id from the persistent value \a variant.
 
   \sa toSetting()
 */
@@ -243,14 +242,14 @@ Id Id::versionedId(const QByteArray &prefix, int major, int minor)
 
 QSet<Id> Id::fromStringList(const QStringList &list)
 {
-    return QSet<Id>::fromList(Utils::transform(list, [](const QString &s) { return Id::fromString(s); }));
+    return Utils::transform<QSet<Id>>(list, &Id::fromString);
 }
 
 QStringList Id::toStringList(const QSet<Id> &ids)
 {
-    QList<Id> idList = ids.toList();
+    QList<Id> idList = Utils::toList(ids);
     Utils::sort(idList);
-    return Utils::transform(idList, [](Id i) { return i.toString(); });
+    return Utils::transform(idList, &Id::toString);
 }
 
 /*!
@@ -279,8 +278,6 @@ Id Id::withSuffix(const char *suffix) const
 
 /*!
   \overload
-
-  \sa stringSuffix()
 */
 
 Id Id::withSuffix(const QString &suffix) const

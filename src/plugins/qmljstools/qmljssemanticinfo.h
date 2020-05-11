@@ -44,10 +44,8 @@ namespace QmlJSTools {
 class QMLJSTOOLS_EXPORT Range
 {
 public:
-    Range(): ast(0) {}
-
-public: // attributes
-    QmlJS::AST::Node *ast;
+    // attributes
+    QmlJS::AST::Node *ast = nullptr;
     QTextCursor begin;
     QTextCursor end;
 };
@@ -55,8 +53,8 @@ public: // attributes
 class QMLJSTOOLS_EXPORT SemanticInfo
 {
 public:
-    SemanticInfo() {}
-    SemanticInfo(QmlJS::ScopeChain *rootScopeChain);
+    SemanticInfo() = default;
+    explicit SemanticInfo(QmlJS::ScopeChain *rootScopeChain);
 
     bool isValid() const;
     int revision() const;
@@ -87,7 +85,7 @@ public: // attributes
     QmlJS::Snapshot snapshot;
     QmlJS::ContextPtr context;
     QList<Range> ranges;
-    QHash<QString, QList<QmlJS::AST::SourceLocation> > idLocations;
+    QHash<QString, QList<QmlJS::SourceLocation> > idLocations;
 
     // these are in addition to the parser messages in the document
     QList<QmlJS::DiagnosticMessage> semanticMessages;

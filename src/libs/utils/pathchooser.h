@@ -39,6 +39,7 @@ QT_END_NAMESPACE
 namespace Utils {
 
 class FancyLineEdit;
+class MacroExpander;
 class Environment;
 class PathChooserPrivate;
 
@@ -50,20 +51,17 @@ class QTCREATOR_UTILS_EXPORT PathChooser : public QWidget
     Q_PROPERTY(QString promptDialogTitle READ promptDialogTitle WRITE setPromptDialogTitle DESIGNABLE true)
     Q_PROPERTY(QString promptDialogFilter READ promptDialogFilter WRITE setPromptDialogFilter DESIGNABLE true)
     Q_PROPERTY(Kind expectedKind READ expectedKind WRITE setExpectedKind DESIGNABLE true)
-    Q_PROPERTY(QString baseDirectory READ baseDirectory WRITE setBaseDirectory DESIGNABLE true)
+    Q_PROPERTY(Utils::FilePath baseDirectory READ baseDirectory WRITE setBaseDirectory DESIGNABLE true)
     Q_PROPERTY(QStringList commandVersionArguments READ commandVersionArguments WRITE setCommandVersionArguments)
     Q_PROPERTY(bool readOnly READ isReadOnly WRITE setReadOnly DESIGNABLE true)
     // Designer does not know this type, so force designable to false:
-    Q_PROPERTY(Utils::FileName fileName READ fileName WRITE setFileName DESIGNABLE false)
-    Q_PROPERTY(Utils::FileName baseFileName READ baseFileName WRITE setBaseFileName DESIGNABLE false)
-    Q_PROPERTY(QColor errorColor READ errorColor WRITE setErrorColor DESIGNABLE true)
-    Q_PROPERTY(QColor okColor READ okColor WRITE setOkColor DESIGNABLE true)
+    Q_PROPERTY(Utils::FilePath filePath READ filePath WRITE setFilePath DESIGNABLE false)
 
 public:
     static QString browseButtonLabel();
 
-    explicit PathChooser(QWidget *parent = 0);
-    virtual ~PathChooser();
+    explicit PathChooser(QWidget *parent = nullptr);
+    ~PathChooser() override;
 
     enum Kind {
         ExistingDirectory,
@@ -90,19 +88,16 @@ public:
     bool isValid() const;
     QString errorMessage() const;
 
-    QString path() const;
-    QString rawPath() const; // The raw unexpanded input.
-    FileName rawFileName() const; // The raw unexpanded input.
-    FileName fileName() const;
+    FilePath filePath() const;
 
-    static QString expandedDirectory(const QString &input, const Utils::Environment &env,
+    QString rawPath() const; // The raw unexpanded input.
+    FilePath rawFileName() const; // The raw unexpanded input.
+
+    static QString expandedDirectory(const QString &input, const Environment &env,
                                      const QString &baseDir);
 
-    QString baseDirectory() const;
-    void setBaseDirectory(const QString &directory);
-
-    FileName baseFileName() const;
-    void setBaseFileName(const FileName &base);
+    FilePath baseDirectory() const;
+    void setBaseDirectory(const FilePath &base);
 
     void setEnvironment(const Environment &env);
 
@@ -135,18 +130,28 @@ public:
     // Enable a history completer with a history of entries.
     void setHistoryCompleter(const QString &historyKey, bool restoreLastItemFromHistory = false);
 
+    // Sets a macro expander that is used when producing path and fileName.
+    // By default, the global expander is used.
+    // nullptr can be passed to disable macro expansion.
+    void setMacroExpander(MacroExpander *macroExpander);
+
     bool isReadOnly() const;
     void setReadOnly(bool b);
+
+    bool isFileDialogOnly() const;
+    void setFileDialogOnly(bool b);
 
     void triggerChanged();
 
     // global handler for adding context menus to ALL pathchooser
     // used by the coreplugin to add "Open in Terminal" and "Open in Explorer" context menu actions
-    using AboutToShowContextMenuHandler = std::function<void (Utils::PathChooser *, QMenu *)>;
+    using AboutToShowContextMenuHandler = std::function<void (PathChooser *, QMenu *)>;
     static void setAboutToShowContextMenuHandler(AboutToShowContextMenuHandler handler);
 
-    QColor errorColor() const;
-    QColor okColor() const;
+    // Deprecated. Use filePath().toString() or better suitable conversions.
+    QString path() const { return filePath().toString(); }
+    // Deprecated. Use filePath()
+    FilePath fileName() const { return filePath(); }
 
 private:
     bool validatePath(FancyLineEdit *edit, QString *errorMessage) const;
@@ -154,6 +159,7 @@ private:
     QString makeDialogTitle(const QString &title);
     void slotBrowse();
     void contextMenuRequested(const QPoint &pos);
+    void updateReadOnlyStateOfSubwidgets();
 
 signals:
     void validChanged(bool validState);
@@ -166,13 +172,12 @@ signals:
 
 public slots:
     void setPath(const QString &);
-    void setFileName(const Utils::FileName &);
-
-    void setErrorColor(const QColor &errorColor);
-    void setOkColor(const QColor &okColor);
+    // Deprecated: Use setFilePath()
+    void setFileName(const FilePath &path) { setFilePath(path); }
+    void setFilePath(const FilePath &);
 
 private:
-    PathChooserPrivate *d;
+    PathChooserPrivate *d = nullptr;
     static AboutToShowContextMenuHandler s_aboutToShowContextMenuHandler;
 };
 

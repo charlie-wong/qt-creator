@@ -34,7 +34,7 @@ QString RmKeysOperation::name() const
 
 QString RmKeysOperation::helpText() const
 {
-    return QLatin1String("remove settings from Qt Creator configuration");
+    return QLatin1String("remove settings from configuration");
 }
 
 QString RmKeysOperation::argumentsHelpText() const
@@ -203,7 +203,7 @@ QVariantMap RmKeysOperation::rmKeys(const QVariantMap &map, const QStringList &r
             foldBack = current;
         }
 
-        Q_ASSERT(stack.count() == 0);
+        Q_ASSERT(stack.isEmpty());
         Q_ASSERT(foldBack != map);
 
         result = foldBack;

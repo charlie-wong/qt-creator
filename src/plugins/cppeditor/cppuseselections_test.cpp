@@ -24,12 +24,14 @@
 ****************************************************************************/
 
 #include "cppeditor.h"
+#include "cppeditorwidget.h"
 #include "cppeditorplugin.h"
 #include "cppeditortestcase.h"
 
 #include <QElapsedTimer>
 #include <QtTest>
 
+// Uses 1-based line and 0-based column.
 struct Selection {
     Selection(int line, int column, int length) : line(line), column(column), length(length) {}
     int line;
@@ -99,7 +101,6 @@ UseSelectionsTestCase::UseSelectionsTestCase(TestDocument &testFile,
     bool hasTimedOut;
     const SelectionList selections = waitForUseSelections(&hasTimedOut);
     QEXPECT_FAIL("non-local use as macro argument - argument expanded 1", "TODO", Abort);
-    QEXPECT_FAIL("macro use 2", "TODO", Abort);
     QVERIFY(!hasTimedOut);
 //    foreach (const Selection &selection, selections)
 //        qDebug() << QTest::toString(selection);
@@ -115,7 +116,7 @@ SelectionList UseSelectionsTestCase::toSelectionList(
         int line, column;
         const int position = qMin(selection.cursor.position(), selection.cursor.anchor());
         m_editorWidget->convertPosition(position, &line, &column);
-        result << Selection(line, column, selection.cursor.selectedText().length());
+        result << Selection(line, column - 1, selection.cursor.selectedText().length());
     }
     return result;
 }
@@ -163,7 +164,7 @@ void CppEditorPlugin::test_useSelections_data()
                 );
 
     QTest::newRow("local use as macro argument 1 - argument expanded")
-            << _("#define Q_UNUSED(x) (void)x;\n"
+            << _("#define Q_UNUSED(x) (void)x\n"
                  "void f(int arg)\n"
                  "{\n"
                  "    Q_UNUSED(@arg)\n"

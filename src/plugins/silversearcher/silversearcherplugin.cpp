@@ -35,17 +35,13 @@ bool SilverSearcherPlugin::initialize(const QStringList &arguments, QString *err
     Q_UNUSED(arguments)
     Q_UNUSED(errorString)
 
-    addAutoReleasedObject(new FindInFilesSilverSearcher);
+    new FindInFilesSilverSearcher(this);
 
     return true;
 }
 
-void SilverSearcherPlugin::extensionsInitialized()
-{
-}
-
 #ifdef WITH_TESTS
-QList<QObject *> SilverSearcherPlugin::createTestObjects() const
+QVector<QObject *> SilverSearcherPlugin::createTestObjects() const
 {
     return {new OutputParserTest};
 }

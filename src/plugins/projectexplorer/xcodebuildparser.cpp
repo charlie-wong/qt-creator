@@ -32,6 +32,8 @@
 
 #include <QCoreApplication>
 
+using namespace Utils;
+
 namespace ProjectExplorer {
 
 static const char failureRe[] = "\\*\\* BUILD FAILED \\*\\*$";
@@ -50,62 +52,51 @@ XcodebuildParser::XcodebuildParser()
     QTC_CHECK(m_buildRe.isValid());
 }
 
-bool XcodebuildParser::hasFatalErrors() const
-{
-    return (m_fatalErrorCount > 0) || IOutputParser::hasFatalErrors();
-}
-
-void XcodebuildParser::stdOutput(const QString &line)
+OutputLineParser::Result XcodebuildParser::handleLine(const QString &line, OutputFormat type)
 {
     const QString lne = rightTrimmed(line);
-    if (m_buildRe.indexIn(lne) > -1) {
-        m_xcodeBuildParserState = InXcodebuild;
-        m_lastTarget = m_buildRe.cap(2);
-        m_lastProject = m_buildRe.cap(3);
-        return;
-    }
-    if (m_xcodeBuildParserState == InXcodebuild || m_xcodeBuildParserState == UnknownXcodebuildState) {
-        if (m_successRe.indexIn(lne) > -1) {
-            m_xcodeBuildParserState = OutsideXcodebuild;
-            return;
+    if (type == StdOutFormat) {
+        if (m_buildRe.indexIn(lne) > -1) {
+            m_xcodeBuildParserState = InXcodebuild;
+            m_lastTarget = m_buildRe.cap(2);
+            m_lastProject = m_buildRe.cap(3);
+            return Status::Done;
         }
-        if (lne.endsWith(QLatin1String(signatureChangeEndsWithPattern))) {
-            Task task(Task::Warning,
-                      QCoreApplication::translate("ProjectExplorer::XcodebuildParser",
-                                                  "Replacing signature"),
-                      Utils::FileName::fromString(
-                          lne.left(lne.size() - QLatin1String(signatureChangeEndsWithPattern).size())), /* filename */
-                      -1, /* line */
-                      Constants::TASK_CATEGORY_COMPILE);
-            taskAdded(task, 1);
-            return;
+        if (m_xcodeBuildParserState == InXcodebuild
+                || m_xcodeBuildParserState == UnknownXcodebuildState) {
+            if (m_successRe.indexIn(lne) > -1) {
+                m_xcodeBuildParserState = OutsideXcodebuild;
+                return Status::Done;
+            }
+            if (lne.endsWith(QLatin1String(signatureChangeEndsWithPattern))) {
+                const int filePathEndPos = lne.size()
+                        - QLatin1String(signatureChangeEndsWithPattern).size();
+                CompileTask task(Task::Warning,
+                                 tr("Replacing signature"),
+                                 absoluteFilePath(FilePath::fromString(
+                                     lne.left(filePathEndPos))));
+                LinkSpecs linkSpecs;
+                addLinkSpecForAbsoluteFilePath(linkSpecs, task.file, task.line, 0, filePathEndPos);
+                scheduleTask(task, 1);
+                return {Status::Done, linkSpecs};
+            }
         }
-        IOutputParser::stdError(line);
-    } else {
-        IOutputParser::stdOutput(line);
+        return Status::NotHandled;
     }
-}
-
-void XcodebuildParser::stdError(const QString &line)
-{
-    const QString lne = rightTrimmed(line);
     if (m_failureRe.indexIn(lne) > -1) {
         ++m_fatalErrorCount;
         m_xcodeBuildParserState = UnknownXcodebuildState;
         // unfortunately the m_lastTarget, m_lastProject might not be in sync
-        Task task(Task::Error,
-                  QCoreApplication::translate("ProjectExplorer::XcodebuildParser",
-                                              "Xcodebuild failed."),
-                  Utils::FileName(), /* filename */
-                  -1, /* line */
-                  Constants::TASK_CATEGORY_COMPILE);
-        taskAdded(task);
-        return;
+        scheduleTask(CompileTask(Task::Error, tr("Xcodebuild failed.")), 1);
     }
-    if (m_xcodeBuildParserState == OutsideXcodebuild) { // also forward if UnknownXcodebuildState ?
-        IOutputParser::stdError(line);
-        return;
-    }
+    if (m_xcodeBuildParserState == OutsideXcodebuild)
+        return Status::NotHandled;
+    return Status::Done;
+}
+
+bool XcodebuildParser::hasDetectedRedirection() const
+{
+    return m_xcodeBuildParserState != OutsideXcodebuild;
 }
 
 } // namespace ProjectExplorer
@@ -139,7 +130,7 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
     QTest::addColumn<OutputParserTester::Channel>("inputChannel");
     QTest::addColumn<QString>("childStdOutLines");
     QTest::addColumn<QString>("childStdErrLines");
-    QTest::addColumn<QList<Task> >("tasks");
+    QTest::addColumn<Tasks >("tasks");
     QTest::addColumn<QString>("outputLines");
     QTest::addColumn<ProjectExplorer::XcodebuildParser::XcodebuildStatus>("finalStatus");
 
@@ -147,42 +138,42 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
             << XcodebuildParser::OutsideXcodebuild
             << QString::fromLatin1("Sometext") << OutputParserTester::STDOUT
             << QString::fromLatin1("Sometext\n") << QString()
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::OutsideXcodebuild;
     QTest::newRow("outside pass-through stderr")
             << XcodebuildParser::OutsideXcodebuild
             << QString::fromLatin1("Sometext") << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("Sometext\n")
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::OutsideXcodebuild;
     QTest::newRow("inside pass stdout to stderr")
             << XcodebuildParser::InXcodebuild
             << QString::fromLatin1("Sometext") << OutputParserTester::STDOUT
             << QString() << QString::fromLatin1("Sometext\n")
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::InXcodebuild;
     QTest::newRow("inside ignore stderr")
             << XcodebuildParser::InXcodebuild
             << QString::fromLatin1("Sometext") << OutputParserTester::STDERR
             << QString() << QString()
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::InXcodebuild;
     QTest::newRow("unknown pass stdout to stderr")
             << XcodebuildParser::UnknownXcodebuildState
             << QString::fromLatin1("Sometext") << OutputParserTester::STDOUT
             << QString() << QString::fromLatin1("Sometext\n")
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::UnknownXcodebuildState;
     QTest::newRow("unknown ignore stderr (change?)")
             << XcodebuildParser::UnknownXcodebuildState
             << QString::fromLatin1("Sometext") << OutputParserTester::STDERR
             << QString() << QString()
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::UnknownXcodebuildState;
     QTest::newRow("switch outside->in->outside")
@@ -196,7 +187,7 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
                                    "outside2")
             << OutputParserTester::STDOUT
             << QString::fromLatin1("outside\noutside2\n") << QString::fromLatin1("in xcodebuild\nin xcodebuild2\n")
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::OutsideXcodebuild;
     QTest::newRow("switch Unknown->in->outside")
@@ -208,9 +199,10 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
                                    "outside")
             << OutputParserTester::STDOUT
             << QString::fromLatin1("outside\n") << QString::fromLatin1("unknown\nin xcodebuild\n")
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::OutsideXcodebuild;
+
     QTest::newRow("switch in->unknown")
             << XcodebuildParser::InXcodebuild
             << QString::fromLatin1("insideErr\n"
@@ -218,16 +210,12 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
                                    "unknownErr")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<Task>()
-                << Task(
-                    Task::Error,
-                    QCoreApplication::translate("ProjectExplorer::XcodebuildParser",
-                                                "Xcodebuild failed."),
-                    Utils::FileName(), /* filename */
-                    -1, /* line */
-                    Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Error,
+                               XcodebuildParser::tr("Xcodebuild failed.")))
             << QString()
             << XcodebuildParser::UnknownXcodebuildState;
+
     QTest::newRow("switch out->unknown")
             << XcodebuildParser::OutsideXcodebuild
             << QString::fromLatin1("outErr\n"
@@ -235,34 +223,28 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
                                    "unknownErr")
             << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("outErr\n")
-            << (QList<Task>()
-                << Task(
-                    Task::Error,
-                    QCoreApplication::translate("ProjectExplorer::XcodebuildParser",
-                                                "Xcodebuild failed."),
-                    Utils::FileName(), /* filename */
-                    -1, /* line */
-                    Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Error,
+                               XcodebuildParser::tr("Xcodebuild failed.")))
             << QString()
             << XcodebuildParser::UnknownXcodebuildState;
+
     QTest::newRow("inside catch codesign replace signature")
             << XcodebuildParser::InXcodebuild
             << QString::fromLatin1("/somepath/somefile.app: replacing existing signature") << OutputParserTester::STDOUT
             << QString() << QString()
-            << (QList<Task>()
-                << Task(Task::Warning,
-                        QCoreApplication::translate("ProjectExplorer::XcodebuildParser",
-                                                    "Replacing signature"),
-                        Utils::FileName::fromString(QLatin1String("/somepath/somefile.app")), /* filename */
-                        -1, /* line */
-                        Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Warning,
+                               XcodebuildParser::tr("Replacing signature"),
+                               FilePath::fromString("/somepath/somefile.app")))
             << QString()
             << XcodebuildParser::InXcodebuild;
+
     QTest::newRow("outside forward codesign replace signature")
             << XcodebuildParser::OutsideXcodebuild
             << QString::fromLatin1("/somepath/somefile.app: replacing existing signature") << OutputParserTester::STDOUT
             << QString::fromLatin1("/somepath/somefile.app: replacing existing signature\n") << QString()
-            << QList<Task>()
+            << Tasks()
             << QString()
             << XcodebuildParser::OutsideXcodebuild;
 }
@@ -270,19 +252,19 @@ void ProjectExplorerPlugin::testXcodebuildParserParsing_data()
 void ProjectExplorerPlugin::testXcodebuildParserParsing()
 {
     OutputParserTester testbench;
-    XcodebuildParser *childParser = new XcodebuildParser;
-    XcodebuildParserTester *tester = new XcodebuildParserTester(childParser);
+    auto *childParser = new XcodebuildParser;
+    auto *tester = new XcodebuildParserTester(childParser);
 
     connect(&testbench, &OutputParserTester::aboutToDeleteParser,
             tester, &XcodebuildParserTester::onAboutToDeleteParser);
 
-    testbench.appendOutputParser(childParser);
+    testbench.addLineParser(childParser);
     QFETCH(ProjectExplorer::XcodebuildParser::XcodebuildStatus, initialStatus);
     QFETCH(QString, input);
     QFETCH(OutputParserTester::Channel, inputChannel);
     QFETCH(QString, childStdOutLines);
     QFETCH(QString, childStdErrLines);
-    QFETCH(QList<Task>, tasks);
+    QFETCH(Tasks, tasks);
     QFETCH(QString, outputLines);
     QFETCH(ProjectExplorer::XcodebuildParser::XcodebuildStatus, finalStatus);
 

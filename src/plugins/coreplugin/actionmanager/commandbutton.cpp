@@ -34,6 +34,7 @@ using namespace Core;
 
 /*!
     \class Core::CommandButton
+    \inmodule QtCreator
 
     \brief The CommandButton class is a tool button associated with one of
     the registered Command objects.
@@ -42,19 +43,33 @@ using namespace Core;
     key sequence which is automatically updated when user changes it.
  */
 
+/*!
+    \property CommandButton::toolTipBase
+    \brief The tool tip base for the command button.
+*/
+
+/*!
+    \internal
+*/
 CommandButton::CommandButton(QWidget *parent)
     : QToolButton(parent)
-    , m_command(0)
+    , m_command(nullptr)
 {
 }
 
+/*!
+    \internal
+*/
 CommandButton::CommandButton(Id id, QWidget *parent)
     : QToolButton(parent)
-    , m_command(0)
+    , m_command(nullptr)
 {
     setCommandId(id);
 }
 
+/*!
+    Sets the ID of the command associated with this tool button to \a id.
+*/
 void CommandButton::setCommandId(Id id)
 {
     if (m_command)

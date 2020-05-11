@@ -34,6 +34,7 @@
 class LocalsSymbolGroup;
 class WatchesSymbolGroup;
 class OutputCallback;
+class EventCallback;
 class ExtensionCommandContext;
 
 // Global parameters
@@ -42,6 +43,8 @@ struct Parameters
     unsigned maxStringLength = 10000;
     unsigned maxArraySize = 100;
     unsigned maxStackDepth = 1000;
+    unsigned firstChanceException = 1;
+    unsigned secondChanceException = 1;
 };
 
 // Global singleton with context.
@@ -84,7 +87,7 @@ public:
      * 'X' exception, error. If the message is larger than outputChunkSize,
      * it needs to be split up in chunks, remainingChunks needs to indicate the number
      * of the following chunks (0 for just one chunk). */
-    bool report(char code, int remainingChunks, int token, const char *serviceName, PCSTR Format, ...);
+    bool report(char code, int token, int remainingChunks, const char *serviceName, PCSTR Format, ...);
     // Convenience for reporting potentially long messages in chunks
     bool reportLong(char code, int token, const char *serviceName, const std::string &message);
     ULONG executionStatus() const;
@@ -134,13 +137,13 @@ private:
     bool isInitialized() const;
 
     IInterfacePointer<CIDebugControl> m_control;
-    std::auto_ptr<LocalsSymbolGroup> m_symbolGroup;
-    std::auto_ptr<WatchesSymbolGroup> m_watchesSymbolGroup;
+    std::unique_ptr<LocalsSymbolGroup> m_symbolGroup;
+    std::unique_ptr<WatchesSymbolGroup> m_watchesSymbolGroup;
 
     CIDebugClient *m_hookedClient = nullptr;
     IDebugEventCallbacks *m_oldEventCallback = nullptr;
     IDebugOutputCallbacksWide *m_oldOutputCallback = nullptr;
-    IDebugEventCallbacks *m_creatorEventCallback = nullptr;
+    EventCallback *m_creatorEventCallback = nullptr;
     OutputCallback *m_creatorOutputCallback = nullptr;
 
     StopReasonMap m_stopReason;

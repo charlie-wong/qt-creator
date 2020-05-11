@@ -25,21 +25,37 @@
 
 #pragma once
 
-#include <string>
+#include <utils/hostosinfo.h>
 
-// use std::filesystem::path if it is supported by all compilers
-#ifdef _WIN32
-const char nativeSeperator = '\\';
-#else
-const char nativeSeperator = '/';
-#endif
+#include <nativefilepath.h>
 
-inline
-std::string toNativePath(std::string &&path)
+#include <QCoreApplication>
+#include <QDir>
+
+template<std::size_t Size>
+ClangBackEnd::NativeFilePath toNativePath(const char (&text)[Size])
 {
-#ifdef _WIN32
-    std::replace(path.begin(), path.end(), '/', '\\');
-#endif
+    ClangBackEnd::FilePath path = text;
 
-    return std::move(path);
+    return ClangBackEnd::NativeFilePath{path};
+}
+
+inline Utils::PathString toNativePath(const QString &text)
+{
+    ClangBackEnd::FilePath path{text};
+
+    return ClangBackEnd::NativeFilePath{path}.path();
+}
+
+inline Utils::PathString toNativePath(Utils::SmallStringView text)
+{
+    ClangBackEnd::FilePath path{text};
+
+    return ClangBackEnd::NativeFilePath{path}.path();
+}
+
+inline QString resourcePath()
+{
+    return QDir::cleanPath(QCoreApplication::applicationDirPath() + '/' + RELATIVE_DATA_PATH
+                           + "/indexing_preincludes");
 }

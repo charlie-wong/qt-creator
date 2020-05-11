@@ -33,7 +33,7 @@
 #include <QString>
 #include <QCoreApplication>
 
-namespace Utils { class FileName; }
+namespace Utils { class FilePath; }
 
 namespace Debugger {
 
@@ -45,14 +45,14 @@ class DEBUGGER_EXPORT DebuggerItemManager : public QObject
 
 public:
     DebuggerItemManager();
-    ~DebuggerItemManager();
+    ~DebuggerItemManager() override;
 
-    static QList<DebuggerItem> debuggers();
+    static const QList<DebuggerItem> debuggers();
 
     static QVariant registerDebugger(const DebuggerItem &item);
     static void deregisterDebugger(const QVariant &id);
 
-    static const DebuggerItem *findByCommand(const Utils::FileName &command);
+    static const DebuggerItem *findByCommand(const Utils::FilePath &command);
     static const DebuggerItem *findById(const QVariant &id);
     static const DebuggerItem *findByEngineType(DebuggerEngineType engineType);
 };

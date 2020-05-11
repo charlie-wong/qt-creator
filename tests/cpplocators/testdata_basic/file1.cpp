@@ -12,6 +12,12 @@ int myVariable;
 
 int myFunction(bool yesno, int number) {}
 
+struct Pos {};
+int somePositionWithin() { return 3; }
+void pointOfService() {}
+int matchArgument(Pos p) { return 0; }
+int positiveNumber() { return 2; }
+
 enum MyEnum { V1, V2 };
 
 class MyClass

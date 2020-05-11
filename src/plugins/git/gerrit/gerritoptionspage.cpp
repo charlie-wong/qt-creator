@@ -30,6 +30,8 @@
 #include <coreplugin/icore.h>
 #include <utils/pathchooser.h>
 
+#include <vcsbase/vcsbaseconstants.h>
+
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QCheckBox>
@@ -40,11 +42,12 @@ namespace Internal {
 
 GerritOptionsPage::GerritOptionsPage(const QSharedPointer<GerritParameters> &p,
                                      QObject *parent)
-    : VcsBase::VcsBaseOptionsPage(parent)
+    : Core::IOptionsPage(parent)
     , m_parameters(p)
 {
     setId("Gerrit");
     setDisplayName(tr("Gerrit"));
+    setCategory(VcsBase::Constants::VCS_SETTINGS_CATEGORY);
 }
 
 GerritOptionsPage::~GerritOptionsPage()
@@ -72,6 +75,7 @@ void GerritOptionsPage::apply()
                 newParameters.setPortFlagBySshType();
             *m_parameters = newParameters;
             m_parameters->toSettings(Core::ICore::settings());
+            emit settingsChanged();
         }
     }
 }
@@ -90,7 +94,7 @@ GerritOptionsWidget::GerritOptionsWidget(QWidget *parent)
     , m_portSpinBox(new QSpinBox(this))
     , m_httpsCheckBox(new QCheckBox(tr("HTTPS")))
 {
-    QFormLayout *formLayout = new QFormLayout(this);
+    auto formLayout = new QFormLayout(this);
     formLayout->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     formLayout->addRow(tr("&Host:"), m_hostLineEdit);
     formLayout->addRow(tr("&User:"), m_userLineEdit);
@@ -120,8 +124,8 @@ GerritParameters GerritOptionsWidget::parameters() const
                                  static_cast<unsigned short>(m_portSpinBox->value()),
                                  m_userLineEdit->text().trimmed(),
                                  GerritServer::Ssh);
-    result.ssh = m_sshChooser->path();
-    result.curl = m_curlChooser->path();
+    result.ssh = m_sshChooser->filePath().toString();
+    result.curl = m_curlChooser->filePath().toString();
     result.https = m_httpsCheckBox->isChecked();
     return result;
 }

@@ -24,24 +24,30 @@
 ****************************************************************************/
 
 #include "locator.h"
+
+#include "directoryfilter.h"
+#include "executefilter.h"
+#include "externaltoolsfilter.h"
+#include "filesystemfilter.h"
+#include "javascriptfilter.h"
 #include "locatorconstants.h"
 #include "locatorfiltersfilter.h"
 #include "locatormanager.h"
+#include "locatorsettingspage.h"
 #include "locatorwidget.h"
 #include "opendocumentsfilter.h"
-#include "filesystemfilter.h"
-#include "locatorsettingspage.h"
-#include "externaltoolsfilter.h"
+#include "urllocatorfilter.h"
 
 #include <coreplugin/coreplugin.h>
-#include <coreplugin/statusbarwidget.h>
 #include <coreplugin/coreconstants.h>
-#include <coreplugin/settingsdatabase.h>
 #include <coreplugin/icore.h>
+#include <coreplugin/settingsdatabase.h>
+#include <coreplugin/statusbarmanager.h>
 #include <coreplugin/actionmanager/actionmanager.h>
 #include <coreplugin/actionmanager/actioncontainer.h>
 #include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/editormanager/editormanager_p.h>
+#include <coreplugin/menubarfilter.h>
 #include <coreplugin/progressmanager/progressmanager.h>
 #include <coreplugin/progressmanager/futureprogress.h>
 #include <extensionsystem/pluginmanager.h>
@@ -50,45 +56,81 @@
 #include <utils/qtcassert.h>
 #include <utils/utilsicons.h>
 
-#include <QSettings>
-#include <QtPlugin>
-#include <QFuture>
 #include <QAction>
+#include <QSettings>
 
-#ifdef Q_OS_OSX
+#ifdef Q_OS_MACOS
 #include "spotlightlocatorfilter.h"
 #endif
 
 namespace Core {
 namespace Internal {
 
+static Locator *m_instance = nullptr;
+
+const char kDirectoryFilterPrefix[] = "directory";
+const char kUrlFilterPrefix[] = "url";
+
+class LocatorData
+{
+public:
+    LocatorData();
+
+    LocatorManager m_locatorManager;
+    LocatorSettingsPage m_locatorSettingsPage;
+
+#ifdef WITH_JAVASCRIPTFILTER
+    JavaScriptFilter m_javaScriptFilter;
+#endif
+    OpenDocumentsFilter m_openDocumentsFilter;
+    FileSystemFilter m_fileSystemFilter;
+    ExecuteFilter m_executeFilter;
+    ExternalToolsFilter m_externalToolsFilter;
+    LocatorFiltersFilter m_locatorsFiltersFilter;
+    MenuBarFilter m_menubarFilter;
+    UrlLocatorFilter m_urlFilter{UrlLocatorFilter::tr("Web Search"), "RemoteHelpFilter"};
+    UrlLocatorFilter m_bugFilter{UrlLocatorFilter::tr("Qt Project Bugs"), "QtProjectBugs"};
+#ifdef Q_OS_MACOS
+    SpotlightLocatorFilter m_spotlightLocatorFilter;
+#endif
+};
+
+LocatorData::LocatorData()
+{
+    m_urlFilter.setShortcutString("r");
+    m_urlFilter.addDefaultUrl("https://www.bing.com/search?q=%1");
+    m_urlFilter.addDefaultUrl("https://www.google.com/search?q=%1");
+    m_urlFilter.addDefaultUrl("https://search.yahoo.com/search?p=%1");
+    m_urlFilter.addDefaultUrl("https://stackoverflow.com/search?q=%1");
+    m_urlFilter.addDefaultUrl(
+        "http://en.cppreference.com/mwiki/index.php?title=Special%3ASearch&search=%1");
+    m_urlFilter.addDefaultUrl("https://en.wikipedia.org/w/index.php?search=%1");
+
+    m_bugFilter.setShortcutString("bug");
+    m_bugFilter.addDefaultUrl("https://bugreports.qt.io/secure/QuickSearch.jspa?searchString=%1");
+}
+
 Locator::Locator()
 {
+    m_instance = this;
     m_refreshTimer.setSingleShot(false);
-    connect(&m_refreshTimer, &QTimer::timeout, this, [this]() { refresh(); });
+    connect(&m_refreshTimer, &QTimer::timeout, this, [this]() { refresh(filters()); });
 }
 
 Locator::~Locator()
 {
-    m_corePlugin->removeObject(m_openDocumentsFilter);
-    m_corePlugin->removeObject(m_fileSystemFilter);
-    m_corePlugin->removeObject(m_executeFilter);
-    m_corePlugin->removeObject(m_settingsPage);
-    m_corePlugin->removeObject(m_externalToolsFilter);
-    delete m_openDocumentsFilter;
-    delete m_fileSystemFilter;
-    delete m_executeFilter;
-    delete m_settingsPage;
-    delete m_externalToolsFilter;
+    delete m_locatorData;
     qDeleteAll(m_customFilters);
 }
 
-void Locator::initialize(CorePlugin *corePlugin, const QStringList &, QString *)
+Locator *Locator::instance()
 {
-    m_corePlugin = corePlugin;
+    return m_instance;
+}
 
-    m_settingsPage = new LocatorSettingsPage(this);
-    m_corePlugin->addObject(m_settingsPage);
+void Locator::initialize()
+{
+    m_locatorData = new LocatorData;
 
     QAction *action = new QAction(Utils::Icons::ZOOM.icon(), tr("Locate..."), this);
     Command *cmd = ActionManager::registerAction(action, Constants::LOCATE);
@@ -100,38 +142,16 @@ void Locator::initialize(CorePlugin *corePlugin, const QStringList &, QString *)
     ActionContainer *mtools = ActionManager::actionContainer(Constants::M_TOOLS);
     mtools->addAction(cmd);
 
-    auto locatorWidget = new LocatorWidget(this);
-    StatusBarWidget *view = new StatusBarWidget;
-    view->setWidget(locatorWidget);
-    view->setContext(Context("LocatorWidget"));
-    view->setPosition(StatusBarWidget::First);
-    m_corePlugin->addAutoReleasedObject(view);
-
-    new LocatorManager(locatorWidget);
-
-    m_openDocumentsFilter = new OpenDocumentsFilter;
-    m_corePlugin->addObject(m_openDocumentsFilter);
-
-    m_fileSystemFilter = new FileSystemFilter();
-    m_corePlugin->addObject(m_fileSystemFilter);
-
-    m_executeFilter = new ExecuteFilter();
-    m_corePlugin->addObject(m_executeFilter);
-
-    m_externalToolsFilter = new ExternalToolsFilter;
-    m_corePlugin->addObject(m_externalToolsFilter);
-
-    m_corePlugin->addAutoReleasedObject(new LocatorFiltersFilter(this));
-#ifdef Q_OS_OSX
-    m_corePlugin->addAutoReleasedObject(new SpotlightLocatorFilter);
-#endif
-
+    auto locatorWidget = LocatorManager::createLocatorInputWidget(ICore::mainWindow());
+    locatorWidget->setObjectName("LocatorInput"); // used for UI introduction
+    StatusBarManager::addStatusBarWidget(locatorWidget, StatusBarManager::First,
+                                         Context("LocatorWidget"));
     connect(ICore::instance(), &ICore::saveSettingsRequested, this, &Locator::saveSettings);
 }
 
 void Locator::extensionsInitialized()
 {
-    m_filters = ExtensionSystem::PluginManager::getObjects<ILocatorFilter>();
+    m_filters = ILocatorFilter::allLocatorFilters();
     Utils::sort(m_filters, [](const ILocatorFilter *first, const ILocatorFilter *second) -> bool {
         if (first->priority() != second->priority())
             return first->priority() < second->priority();
@@ -157,25 +177,33 @@ bool Locator::delayedInitialize()
 void Locator::loadSettings()
 {
     SettingsDatabase *settings = ICore::settingsDatabase();
-    settings->beginGroup(QLatin1String("QuickOpen"));
-    m_refreshTimer.setInterval(settings->value(QLatin1String("RefreshInterval"), 60).toInt() * 60000);
+    settings->beginGroup("QuickOpen");
+    m_refreshTimer.setInterval(settings->value("RefreshInterval", 60).toInt() * 60000);
 
-    foreach (ILocatorFilter *filter, m_filters) {
+    for (ILocatorFilter *filter : qAsConst(m_filters)) {
         if (settings->contains(filter->id().toString())) {
             const QByteArray state = settings->value(filter->id().toString()).toByteArray();
             if (!state.isEmpty())
                 filter->restoreState(state);
         }
     }
-    settings->beginGroup(QLatin1String("CustomFilters"));
+    settings->beginGroup("CustomFilters");
     QList<ILocatorFilter *> customFilters;
     const QStringList keys = settings->childKeys();
     int count = 0;
-    Id baseId(Constants::CUSTOM_FILTER_BASEID);
-    foreach (const QString &key, keys) {
-        ILocatorFilter *filter = new DirectoryFilter(baseId.withSuffix(++count));
+    const Id directoryBaseId(Constants::CUSTOM_DIRECTORY_FILTER_BASEID);
+    const Id urlBaseId(Constants::CUSTOM_URL_FILTER_BASEID);
+    for (const QString &key : keys) {
+        ++count;
+        ILocatorFilter *filter;
+        if (key.startsWith(kDirectoryFilterPrefix)) {
+            filter = new DirectoryFilter(directoryBaseId.withSuffix(count));
+        } else {
+            auto urlFilter = new UrlLocatorFilter(urlBaseId.withSuffix(count));
+            urlFilter->setIsCustomFilter(true);
+            filter = urlFilter;
+        }
         filter->restoreState(settings->value(key).toByteArray());
-        m_filters.append(filter);
         customFilters.append(filter);
     }
     setCustomFilters(customFilters);
@@ -185,7 +213,41 @@ void Locator::loadSettings()
     if (m_refreshTimer.interval() > 0)
         m_refreshTimer.start();
     m_settingsInitialized = true;
-    emit filtersChanged();
+    setFilters(m_filters + customFilters);
+}
+
+void Locator::updateFilterActions()
+{
+    QMap<Id, QAction *> actionCopy = m_filterActionMap;
+    m_filterActionMap.clear();
+    // register new actions, update existent
+    for (ILocatorFilter *filter : qAsConst(m_filters)) {
+        if (filter->shortcutString().isEmpty() || filter->isHidden())
+            continue;
+        Id filterId = filter->id();
+        Id actionId = filter->actionId();
+        QAction *action = nullptr;
+        if (!actionCopy.contains(filterId)) {
+            // register new action
+            action = new QAction(filter->displayName(), this);
+            Command *cmd = ActionManager::registerAction(action, actionId);
+            cmd->setAttribute(Command::CA_UpdateText);
+            connect(action, &QAction::triggered, this, [filter] {
+                LocatorManager::showFilter(filter);
+            });
+        } else {
+            action = actionCopy.take(filterId);
+            action->setText(filter->displayName());
+        }
+        m_filterActionMap.insert(filterId, action);
+    }
+
+    // unregister actions that are deleted now
+    const auto end = actionCopy.end();
+    for (auto it = actionCopy.begin(); it != end; ++it) {
+        ActionManager::unregisterAction(it.value(), it.key().withPrefix("Locator."));
+        delete it.value();
+    }
 }
 
 void Locator::updateEditorManagerPlaceholderText()
@@ -211,7 +273,7 @@ void Locator::updateEditorManagerPlaceholderText()
           "</body></html>")
          .arg(openCommand->keySequence().toString(QKeySequence::NativeText))
          .arg(locateCommand->keySequence().toString(QKeySequence::NativeText))
-         .arg(m_fileSystemFilter->shortcutString());
+         .arg(m_locatorData->m_fileSystemFilter.shortcutString());
 
     QString classes;
     // not nice, but anyhow
@@ -233,29 +295,33 @@ void Locator::updateEditorManagerPlaceholderText()
     EditorManagerPrivate::setPlaceholderText(placeholderText.arg(classes, methods));
 }
 
-void Locator::saveSettings()
+void Locator::saveSettings() const
 {
-    if (m_settingsInitialized) {
-        SettingsDatabase *s = ICore::settingsDatabase();
-        s->beginTransaction();
-        s->beginGroup(QLatin1String("QuickOpen"));
-        s->remove(QString());
-        s->setValue(QLatin1String("RefreshInterval"), refreshInterval());
-        foreach (ILocatorFilter *filter, m_filters) {
-            if (!m_customFilters.contains(filter))
-                s->setValue(filter->id().toString(), filter->saveState());
-        }
-        s->beginGroup(QLatin1String("CustomFilters"));
-        int i = 0;
-        foreach (ILocatorFilter *filter, m_customFilters) {
-            s->setValue(QLatin1String("directory") + QString::number(i),
-                        filter->saveState());
-            ++i;
-        }
-        s->endGroup();
-        s->endGroup();
-        s->endTransaction();
+    if (!m_settingsInitialized)
+        return;
+
+    SettingsDatabase *s = ICore::settingsDatabase();
+    s->beginTransaction();
+    s->beginGroup("QuickOpen");
+    s->remove(QString());
+    s->setValue("RefreshInterval", refreshInterval());
+    for (ILocatorFilter *filter : m_filters) {
+        if (!m_customFilters.contains(filter))
+            s->setValue(filter->id().toString(), filter->saveState());
     }
+    s->beginGroup("CustomFilters");
+    int i = 0;
+    for (ILocatorFilter *filter : m_customFilters) {
+        const char *prefix = filter->id().name().startsWith(
+                                 Constants::CUSTOM_DIRECTORY_FILTER_BASEID)
+                                 ? kDirectoryFilterPrefix
+                                 : kUrlFilterPrefix;
+        s->setValue(prefix + QString::number(i), filter->saveState());
+        ++i;
+    }
+    s->endGroup();
+    s->endGroup();
+    s->endTransaction();
 }
 
 /*!
@@ -263,7 +329,7 @@ void Locator::saveSettings()
 */
 QList<ILocatorFilter *> Locator::filters()
 {
-    return m_filters;
+    return m_instance->m_filters;
 }
 
 /*!
@@ -278,6 +344,7 @@ QList<ILocatorFilter *> Locator::customFilters()
 void Locator::setFilters(QList<ILocatorFilter *> f)
 {
     m_filters = f;
+    updateFilterActions();
     updateEditorManagerPlaceholderText(); // possibly some shortcut changed
     emit filtersChanged();
 }
@@ -287,7 +354,7 @@ void Locator::setCustomFilters(QList<ILocatorFilter *> filters)
     m_customFilters = filters;
 }
 
-int Locator::refreshInterval()
+int Locator::refreshInterval() const
 {
     return m_refreshTimer.interval() / 60000;
 }
@@ -305,12 +372,22 @@ void Locator::setRefreshInterval(int interval)
 
 void Locator::refresh(QList<ILocatorFilter *> filters)
 {
-    if (filters.isEmpty())
-        filters = m_filters;
-    QFuture<void> task = Utils::map(filters, &ILocatorFilter::refresh, Utils::MapReduceOption::Unordered);
-    FutureProgress *progress =
-        ProgressManager::addTask(task, tr("Updating Locator Caches"), Constants::TASK_INDEX);
-    connect(progress, &FutureProgress::finished, this, &Locator::saveSettings);
+    if (m_refreshTask.isRunning()) {
+        m_refreshTask.cancel();
+        // this is not ideal because some of the previous filters might have finished, but we
+        // currently cannot find out which part of a map-reduce has finished
+        filters = Utils::filteredUnique(m_refreshingFilters + filters);
+    }
+    m_refreshingFilters = filters;
+    m_refreshTask = Utils::map(filters, &ILocatorFilter::refresh, Utils::MapReduceOption::Unordered);
+    ProgressManager::addTask(m_refreshTask, tr("Updating Locator Caches"), Constants::TASK_INDEX);
+    Utils::onFinished(m_refreshTask, this, [this](const QFuture<void> &future) {
+        if (!future.isCanceled()) {
+            saveSettings();
+            m_refreshingFilters.clear();
+            m_refreshTask = QFuture<void>();
+        }
+    });
 }
 
 } // namespace Internal

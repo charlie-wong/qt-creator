@@ -37,6 +37,8 @@
 #include <coreplugin/icore.h>
 #include <coreplugin/messagebox.h>
 
+#include <QWidget>
+
 enum {
     debug = false
 };
@@ -60,7 +62,7 @@ int StatesEditorModel::count() const
 QModelIndex StatesEditorModel::index(int row, int column, const QModelIndex &parent) const
 {
     if (m_statesEditorView.isNull())
-        return QModelIndex();
+        return {};
 
 
     int internalNodeId = 0;
@@ -100,7 +102,7 @@ QVariant StatesEditorModel::data(const QModelIndex &index, int role) const
     switch (role) {
     case StateNameRole: {
             if (index.row() == 0) {
-                return QString(tr("base state", "Implicit default state"));
+                return tr("base state", "Implicit default state");
             } else {
                 if (stateNode.hasVariantProperty("name"))
                     return stateNode.variantProperty("name").value();
@@ -128,6 +130,17 @@ QVariant StatesEditorModel::data(const QModelIndex &index, int role) const
             return QString();
     }
 
+    case IsDefault: {
+        QmlModelState modelState(stateNode);
+        if (modelState.isValid())
+            return modelState.isDefault();
+        return false;
+    }
+
+    case ModelHasDefaultState: {
+        return hasDefaultState();
+    }
+
     }
 
     return QVariant();
@@ -140,7 +153,9 @@ QHash<int, QByteArray> StatesEditorModel::roleNames() const
         {StateImageSourceRole, "stateImageSource"},
         {InternalNodeId, "internalNodeId"},
         {HasWhenCondition, "hasWhenCondition"},
-        {WhenConditionString, "whenConditionString"}
+        {WhenConditionString, "whenConditionString"},
+        {IsDefault, "isDefault"},
+        {ModelHasDefaultState, "modelHasDefaultState"}
     };
     return roleNames;
 }
@@ -155,7 +170,6 @@ void StatesEditorModel::insertState(int stateIndex)
         endInsertRows();
 
         emit dataChanged(index(updateIndex, 0), index(updateIndex, 0));
-        emit countChanged();
     }
 }
 
@@ -168,14 +182,11 @@ void StatesEditorModel::updateState(int beginIndex, int endIndex)
 void StatesEditorModel::removeState(int stateIndex)
 {
     if (stateIndex >= 0) {
-        const int updateIndex = stateIndex + 1;
-        beginRemoveRows(QModelIndex(), updateIndex, updateIndex);
-
-
+        beginRemoveRows(QModelIndex(), 0, stateIndex);
         endRemoveRows();
 
-        emit dataChanged(createIndex(updateIndex, 0), createIndex(updateIndex, 0));
-        emit countChanged();
+        beginResetModel();
+        endResetModel();
     }
 }
 
@@ -185,10 +196,14 @@ void StatesEditorModel::renameState(int internalNodeId, const QString &newName)
         return;
 
     if (newName.isEmpty() ||! m_statesEditorView->validStateName(newName)) {
-        Core::AsynchronousMessageBox::warning(tr("Invalid state name"),
-                                               newName.isEmpty() ?
-                                                   tr("The empty string as a name is reserved for the base state.") :
-                                                   tr("Name already used in another state"));
+        QTimer::singleShot(0, [newName]{
+            Core::AsynchronousMessageBox::warning(
+                        tr("Invalid state name"),
+                        newName.isEmpty() ?
+                            tr("The empty string as a name is reserved for the base state.") :
+                            tr("Name already used in another state"));
+        });
+        reset();
     } else {
         m_statesEditorView->renameState(internalNodeId, newName);
     }
@@ -212,6 +227,26 @@ QStringList StatesEditorModel::autoComplete(const QString &text, int pos, bool e
         return model->rewriterView()->autoComplete(text, pos, explicitComplete);
 
     return QStringList();
+}
+
+QVariant StatesEditorModel::stateModelNode()
+{
+    return QVariant::fromValue(m_statesEditorView->currentStateNode());
+}
+
+void StatesEditorModel::setStateAsDefault(int internalNodeId)
+{
+    m_statesEditorView->setStateAsDefault(internalNodeId);
+}
+
+void StatesEditorModel::resetDefaultState()
+{
+    m_statesEditorView->resetDefaultState();
+}
+
+bool StatesEditorModel::hasDefaultState() const
+{
+    return m_statesEditorView->hasDefaultState();
 }
 
 } // namespace QmlDesigner

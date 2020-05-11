@@ -27,7 +27,11 @@
 #include "gtestconstants.h"
 #include "gtestoutputreader.h"
 #include "gtestsettings.h"
-#include "../testframeworkmanager.h"
+#include "../autotestplugin.h"
+#include "../itestframework.h"
+#include "../testsettings.h"
+
+#include <utils/algorithm.h>
 
 namespace Autotest {
 namespace Internal {
@@ -35,22 +39,52 @@ namespace Internal {
 TestOutputReader *GTestConfiguration::outputReader(const QFutureInterface<TestResultPtr> &fi,
                                                    QProcess *app) const
 {
-    return new GTestOutputReader(fi, app, buildDirectory());
+    return new GTestOutputReader(fi, app, buildDirectory(), projectFile());
 }
 
-QStringList GTestConfiguration::argumentsForTestRunner() const
+QStringList filterInterfering(const QStringList &provided, QStringList *omitted)
 {
-    static const Core::Id id
-            = Core::Id(Constants::FRAMEWORK_PREFIX).withSuffix(GTest::Constants::FRAMEWORK_NAME);
+    static const QSet<QString> knownInterferingOptions { "--gtest_list_tests",
+                                                         "--gtest_filter=",
+                                                         "--gtest_also_run_disabled_tests",
+                                                         "--gtest_repeat=",
+                                                         "--gtest_shuffle",
+                                                         "--gtest_random_seed=",
+                                                         "--gtest_output=",
+                                                         "--gtest_stream_result_to=",
+                                                         "--gtest_break_on_failure",
+                                                         "--gtest_throw_on_failure",
+                                                         "--gtest_print_time="
+                                                         };
 
+    QSet<QString> allowed = Utils::filtered(Utils::toSet(provided), [] (const QString &arg) {
+        return Utils::allOf(knownInterferingOptions, [&arg] (const QString &interfering) {
+            return !arg.startsWith(interfering);
+        });
+    });
+
+    if (omitted) {
+        QSet<QString> providedSet = Utils::toSet(provided);
+        providedSet.subtract(allowed);
+        omitted->append(Utils::toList(providedSet));
+    }
+    return Utils::toList(allowed);
+}
+
+QStringList GTestConfiguration::argumentsForTestRunner(QStringList *omitted) const
+{
     QStringList arguments;
+    if (AutotestPlugin::settings()->processArgs) {
+        arguments << filterInterfering(runnable().commandLineArguments.split(
+                                           ' ', QString::SkipEmptyParts), omitted);
+    }
+
     const QStringList &testSets = testCases();
-    if (testSets.size())
+    if (!testSets.isEmpty())
         arguments << "--gtest_filter=" + testSets.join(':');
 
-    TestFrameworkManager *manager = TestFrameworkManager::instance();
-    auto gSettings = qSharedPointerCast<GTestSettings>(manager->settingsForTestFramework(id));
-    if (gSettings.isNull())
+    auto gSettings = dynamic_cast<GTestSettings *>(framework()->frameworkSettings());
+    if (!gSettings)
         return arguments;
 
     if (gSettings->runDisabled)
@@ -62,11 +96,25 @@ QStringList GTestConfiguration::argumentsForTestRunner() const
     if (gSettings->throwOnFailure)
         arguments << "--gtest_throw_on_failure";
 
-    if (runMode() == DebuggableTestConfiguration::Debug) {
+    if (isDebugRunMode()) {
         if (gSettings->breakOnFailure)
             arguments << "--gtest_break_on_failure";
     }
     return arguments;
+}
+
+Utils::Environment GTestConfiguration::filteredEnvironment(const Utils::Environment &original) const
+{
+    const QStringList interfering{"GTEST_FILTER", "GTEST_ALSO_RUN_DISABLED_TESTS",
+                                  "GTEST_REPEAT", "GTEST_SHUFFLE", "GTEST_RANDOM_SEED",
+                                  "GTEST_OUTPUT", "GTEST_BREAK_ON_FAILURE", "GTEST_PRINT_TIME",
+                                  "GTEST_CATCH_EXCEPTIONS"};
+    Utils::Environment result = original;
+    if (!result.hasKey("GTEST_COLOR"))
+        result.set("GTEST_COLOR", "1");  // use colored output by default
+    for (const QString &key : interfering)
+        result.unset(key);
+    return result;
 }
 
 } // namespace Internal

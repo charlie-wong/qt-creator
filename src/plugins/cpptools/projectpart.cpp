@@ -25,6 +25,8 @@
 
 #include "projectpart.h"
 
+#include <utils/algorithm.h>
+
 #include <QFile>
 #include <QDir>
 #include <QTextStream>
@@ -33,26 +35,21 @@ namespace CppTools {
 
 void ProjectPart::updateLanguageFeatures()
 {
-    const bool hasQt = qtVersion != NoQt;
-    languageFeatures.cxx11Enabled = languageVersion >= CXX11;
-    languageFeatures.cxxEnabled = languageVersion >= CXX98;
-    languageFeatures.c99Enabled = languageVersion >= C99;
-    languageFeatures.objCEnabled = languageExtensions.testFlag(ObjectiveCExtensions);
+    const bool hasCxx = languageVersion >= Utils::LanguageVersion::CXX98;
+    const bool hasQt = hasCxx && qtVersion != Utils::QtVersion::None;
+    languageFeatures.cxx11Enabled = languageVersion >= Utils::LanguageVersion::CXX11;
+    languageFeatures.cxx14Enabled = languageVersion >= Utils::LanguageVersion::CXX14;
+    languageFeatures.cxxEnabled = hasCxx;
+    languageFeatures.c99Enabled = languageVersion >= Utils::LanguageVersion::C99;
+    languageFeatures.objCEnabled = languageExtensions.testFlag(Utils::LanguageExtension::ObjectiveC);
     languageFeatures.qtEnabled = hasQt;
     languageFeatures.qtMocRunEnabled = hasQt;
     if (!hasQt) {
         languageFeatures.qtKeywordsEnabled = false;
     } else {
-        const QByteArray noKeywordsMacro = "#define QT_NO_KEYWORDS";
-        const int noKeywordsIndex = projectDefines.indexOf(noKeywordsMacro);
-        if (noKeywordsIndex == -1) {
-            languageFeatures.qtKeywordsEnabled = true;
-        } else {
-            const char nextChar = projectDefines.at(noKeywordsIndex + noKeywordsMacro.length());
-            // Detect "#define QT_NO_KEYWORDS" and "#define QT_NO_KEYWORDS 1", but exclude
-            // "#define QT_NO_KEYWORDS_FOO"
-            languageFeatures.qtKeywordsEnabled = nextChar != '\n' && nextChar != ' ';
-        }
+        languageFeatures.qtKeywordsEnabled = !Utils::contains(
+                    projectMacros,
+                    [] (const ProjectExplorer::Macro &macro) { return macro.key == "QT_NO_KEYWORDS"; });
     }
 }
 

@@ -30,15 +30,16 @@
 namespace CppTools { namespace Tests { class TemporaryCopiedDir; } }
 
 namespace Autotest {
-namespace Internal {
 
 class TestTreeModel;
+
+namespace Internal {
 
 class AutoTestUnitTests : public QObject
 {
     Q_OBJECT
 public:
-    explicit AutoTestUnitTests(TestTreeModel *model, QObject *parent = 0);
+    explicit AutoTestUnitTests(TestTreeModel *model, QObject *parent = nullptr);
 
 signals:
 
@@ -51,11 +52,14 @@ private slots:
     void testCodeParserSwitchStartup_data();
     void testCodeParserGTest();
     void testCodeParserGTest_data();
+    void testCodeParserBoostTest();
+    void testCodeParserBoostTest_data();
 
 private:
-    TestTreeModel *m_model;
-    CppTools::Tests::TemporaryCopiedDir *m_tmpDir;
-    bool m_isQt4;
+    TestTreeModel *m_model = nullptr;
+    CppTools::Tests::TemporaryCopiedDir *m_tmpDir = nullptr;
+    bool m_isQt4 = false;
+    bool m_checkBoost = false;
 };
 
 } // namespace Internal

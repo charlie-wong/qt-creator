@@ -37,8 +37,6 @@
 
 #include <coreplugin/icore.h>
 
-#include <extensionsystem/pluginmanager.h>
-
 #include <utils/algorithm.h>
 #include <utils/qtcassert.h>
 
@@ -73,9 +71,9 @@ static bool hasOtherUsers(Core::Id id, const QVariant &v, Kit *k)
     });
 }
 
-ProjectImporter::ProjectImporter(const Utils::FileName &path) : m_projectPath(path)
+ProjectImporter::ProjectImporter(const Utils::FilePath &path) : m_projectPath(path)
 {
-    useTemporaryKitInformation(ToolChainKitInformation::id(),
+    useTemporaryKitAspect(ToolChainKitAspect::id(),
                                [this](Kit *k, const QVariantList &vl) { cleanupTemporaryToolChains(k, vl); },
                                [this](Kit *k, const QVariantList &vl) { persistTemporaryToolChains(k, vl); });
 }
@@ -86,11 +84,11 @@ ProjectImporter::~ProjectImporter()
         removeProject(k);
 }
 
-QList<BuildInfo *> ProjectImporter::import(const Utils::FileName &importPath, bool silent)
+const QList<BuildInfo> ProjectImporter::import(const Utils::FilePath &importPath, bool silent)
 {
-    QList<BuildInfo *> result;
+    QList<BuildInfo> result;
 
-    const QLoggingCategory log("qtc.projectexplorer.import");
+    const QLoggingCategory log("qtc.projectexplorer.import", QtWarningMsg);
     qCDebug(log) << "ProjectImporter::import" << importPath << silent;
 
     QFileInfo fi = importPath.toFileInfo();
@@ -99,12 +97,20 @@ QList<BuildInfo *> ProjectImporter::import(const Utils::FileName &importPath, bo
         return result;
     }
 
-    const Utils::FileName absoluteImportPath = Utils::FileName::fromString(fi.absoluteFilePath());
+    const Utils::FilePath absoluteImportPath = Utils::FilePath::fromString(fi.absoluteFilePath());
 
+    const auto handleFailure = [this, importPath, silent] {
+        if (silent)
+            return;
+        QMessageBox::critical(Core::ICore::mainWindow(), tr("No Build Found"),
+                              tr("No build found in %1 matching project %2.")
+                              .arg(importPath.toUserOutput(), projectFilePath().toUserOutput()));
+    };
     qCDebug(log) << "Examining directory" << absoluteImportPath.toString();
     QList<void *> dataList = examineDirectory(absoluteImportPath);
     if (dataList.isEmpty()) {
         qCDebug(log) << "Nothing to import found in" << absoluteImportPath.toString();
+        handleFailure();
         return result;
     }
 
@@ -126,14 +132,17 @@ QList<BuildInfo *> ProjectImporter::import(const Utils::FileName &importPath, bo
 
         foreach (Kit *k, kitList) {
             qCDebug(log) << "Creating buildinfos for kit" << k->displayName();
-            QList<BuildInfo *> infoList = buildInfoListForKit(k, data);
+            const QList<BuildInfo> infoList = buildInfoList(data);
             if (infoList.isEmpty()) {
                 qCDebug(log) << "No build infos for kit" << k->displayName();
                 continue;
             }
 
-            foreach (BuildInfo *i, infoList) {
-                if (!Utils::contains(result, [i](const BuildInfo *o) { return (*i) == (*o); }))
+            auto factory = BuildConfigurationFactory::find(k, projectFilePath());
+            for (BuildInfo i : infoList) {
+                i.kitId = k->id();
+                i.factory = factory;
+                if (!result.contains(i))
                     result += i;
             }
         }
@@ -143,11 +152,8 @@ QList<BuildInfo *> ProjectImporter::import(const Utils::FileName &importPath, bo
         deleteDirectoryData(dd);
     dataList.clear();
 
-    if (result.isEmpty() && !silent)
-        QMessageBox::critical(Core::ICore::mainWindow(),
-                              QCoreApplication::translate("ProjectExplorer::ProjectImporter", "No Build Found"),
-                              QCoreApplication::translate("ProjectExplorer::ProjectImporter", "No build found in %1 matching project %2.")
-                .arg(importPath.toUserOutput()).arg(projectFilePath().toUserOutput()));
+    if (result.isEmpty())
+        handleFailure();
 
     return result;
 }
@@ -169,7 +175,7 @@ Target *ProjectImporter::preferredTarget(const QList<Target *> &possibleTargets)
             return t;
         if (pickedFallback)
             continue;
-        if (DeviceTypeKitInformation::deviceTypeId(t->kit()) == Constants::DESKTOP_DEVICE_TYPE) {
+        if (DeviceTypeKitAspect::deviceTypeId(t->kit()) == Constants::DESKTOP_DEVICE_TYPE) {
             activeTarget = t;
             pickedFallback = true;
         }
@@ -194,6 +200,7 @@ void ProjectImporter::markKitAsTemporary(Kit *k) const
 
 void ProjectImporter::makePersistent(Kit *k) const
 {
+    QTC_ASSERT(k, return);
     if (!k->hasValue(KIT_IS_TEMPORARY))
         return;
 
@@ -231,6 +238,7 @@ void ProjectImporter::makePersistent(Kit *k) const
 
 void ProjectImporter::cleanupKit(Kit *k) const
 {
+    QTC_ASSERT(k, return);
     foreach (const TemporaryInformationHandler &tih, m_temporaryHandlers) {
         const Core::Id fid = fullId(tih.id);
         const QVariantList temporaryValues
@@ -250,6 +258,7 @@ void ProjectImporter::cleanupKit(Kit *k) const
 
 void ProjectImporter::addProject(Kit *k) const
 {
+    QTC_ASSERT(k, return);
     if (!k->hasValue(KIT_IS_TEMPORARY))
         return;
 
@@ -261,6 +270,7 @@ void ProjectImporter::addProject(Kit *k) const
 
 void ProjectImporter::removeProject(Kit *k) const
 {
+    QTC_ASSERT(k, return);
     if (!k->hasValue(KIT_IS_TEMPORARY))
         return;
 
@@ -278,31 +288,24 @@ void ProjectImporter::removeProject(Kit *k) const
 
 bool ProjectImporter::isTemporaryKit(Kit *k) const
 {
+    QTC_ASSERT(k, return false);
     return k->hasValue(KIT_IS_TEMPORARY);
 }
 
 Kit *ProjectImporter::createTemporaryKit(const KitSetupFunction &setup) const
 {
-    Kit *k = new Kit;
     UpdateGuard guard(*this);
-    {
+    const auto init = [&](Kit *k) {
         KitGuard kitGuard(k);
-        k->setUnexpandedDisplayName(QCoreApplication::translate("ProjectExplorer::ProjectImporter", "Imported Kit"));;
-
-        // Set up values:
-        foreach (KitInformation *ki, KitManager::kitInformation())
-            ki->setup(k);
-
+        k->setUnexpandedDisplayName(QCoreApplication::translate("ProjectExplorer::ProjectImporter",
+                                                                "Imported Kit"));
+        k->setup();
         setup(k);
-
-        foreach (KitInformation *ki, KitManager::kitInformation())
-            ki->fix(k);
-
+        k->fix();
         markKitAsTemporary(k);
         addProject(k);
-    } // ~KitGuard, sending kitUpdated
-    KitManager::registerKit(k); // potentially adds kits to other targetsetuppages
-    return k;
+    }; // ~KitGuard, sending kitUpdated
+    return KitManager::registerKit(init); // potentially adds kits to other targetsetuppages
 }
 
 bool ProjectImporter::findTemporaryHandler(Core::Id id) const
@@ -322,7 +325,7 @@ void ProjectImporter::cleanupTemporaryToolChains(Kit *k, const QVariantList &vl)
         ToolChain *tc = toolChainFromVariant(v);
         QTC_ASSERT(tc, continue);
         ToolChainManager::deregisterToolChain(tc);
-        ToolChainKitInformation::setToolChain(k, nullptr);
+        ToolChainKitAspect::setToolChain(k, nullptr);
     }
 }
 
@@ -331,13 +334,13 @@ void ProjectImporter::persistTemporaryToolChains(Kit *k, const QVariantList &vl)
     for (const QVariant &v : vl) {
         ToolChain *tmpTc = toolChainFromVariant(v);
         QTC_ASSERT(tmpTc, continue);
-        ToolChain *actualTc = ToolChainKitInformation::toolChain(k, tmpTc->language());
+        ToolChain *actualTc = ToolChainKitAspect::toolChain(k, tmpTc->language());
         if (tmpTc && actualTc != tmpTc)
             ToolChainManager::deregisterToolChain(tmpTc);
     }
 }
 
-void ProjectImporter::useTemporaryKitInformation(Core::Id id,
+void ProjectImporter::useTemporaryKitAspect(Core::Id id,
                                                  ProjectImporter::CleanupFunction cleanup,
                                                  ProjectImporter::PersistFunction persist)
 {
@@ -347,6 +350,7 @@ void ProjectImporter::useTemporaryKitInformation(Core::Id id,
 
 void ProjectImporter::addTemporaryData(Core::Id id, const QVariant &cleanupData, Kit *k) const
 {
+    QTC_ASSERT(k, return);
     QTC_ASSERT(findTemporaryHandler(id), return);
     const Core::Id fid = fullId(id);
 
@@ -365,15 +369,12 @@ bool ProjectImporter::hasKitWithTemporaryData(Core::Id id, const QVariant &data)
     });
 }
 
-static ProjectImporter::ToolChainData
-createToolChains(const Utils::FileName &toolChainPath, const Core::Id &language)
+static ProjectImporter::ToolChainData createToolChains(const ToolChainDescription &tcd)
 {
-    const QList<ToolChainFactory *> factories
-            = ExtensionSystem::PluginManager::getObjects<ToolChainFactory>();
     ProjectImporter::ToolChainData data;
 
-    for (ToolChainFactory *factory : factories) {
-        data.tcs = factory->autoDetect(toolChainPath, language);
+    for (ToolChainFactory *factory : ToolChainFactory::allToolChainFactories()) {
+        data.tcs = factory->detectForImport(tcd);
         if (data.tcs.isEmpty())
             continue;
 
@@ -388,23 +389,22 @@ createToolChains(const Utils::FileName &toolChainPath, const Core::Id &language)
 }
 
 ProjectImporter::ToolChainData
-ProjectImporter::findOrCreateToolChains(const Utils::FileName &toolChainPath,
-                                        const Core::Id &language) const
+ProjectImporter::findOrCreateToolChains(const ToolChainDescription &tcd) const
 {
     ToolChainData result;
-    result.tcs = ToolChainManager::toolChains([toolChainPath, language](const ToolChain *tc) {
-        return tc->language() == language && tc->compilerCommand() == toolChainPath;
+    result.tcs = ToolChainManager::toolChains([&tcd](const ToolChain *tc) {
+        return tc->language() == tcd.language && tc->compilerCommand() == tcd.compilerPath;
     });
     for (const ToolChain *tc : result.tcs) {
         const QByteArray tcId = tc->id();
-        result.areTemporary = result.areTemporary ? true : hasKitWithTemporaryData(ToolChainKitInformation::id(), tcId);
+        result.areTemporary = result.areTemporary ? true : hasKitWithTemporaryData(ToolChainKitAspect::id(), tcId);
     }
     if (!result.tcs.isEmpty())
         return result;
 
     // Create a new toolchain:
     UpdateGuard guard(*this);
-    return createToolChains(toolChainPath, language);
+    return createToolChains(tcd);
 }
 
 } // namespace ProjectExplorer

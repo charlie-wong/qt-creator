@@ -23,8 +23,7 @@
 **
 ****************************************************************************/
 
-#ifndef DesignDocument_h
-#define DesignDocument_h
+#pragma once
 
 #include <model.h>
 #include <rewriterview.h>
@@ -32,18 +31,19 @@
 #include <componenttextmodifier.h>
 #include <subcomponentmanager.h>
 
+#include <coreplugin/icontext.h>
+
 #include <QObject>
 #include <QString>
 
 #include <QStackedWidget>
 
 QT_BEGIN_NAMESPACE
-class QWidget;
 class QPlainTextEdit;
 QT_END_NAMESPACE
 
 namespace ProjectExplorer {
-class Kit;
+class Target;
 }
 
 namespace QmlDesigner {
@@ -59,8 +59,8 @@ class QMLDESIGNERCORE_EXPORT DesignDocument: public QObject
 {
     Q_OBJECT
 public:
-    DesignDocument(QObject *parent = 0);
-    ~DesignDocument();
+    DesignDocument(QObject *parent = nullptr);
+    ~DesignDocument() override;
 
     QString displayName() const;
     QString simplfiedDisplayName() const;
@@ -76,7 +76,7 @@ public:
     Model *currentModel() const;
     Model *documentModel() const;
 
-    QString contextHelpId() const;
+    void contextHelp(const Core::IContext::HelpCallback &callback) const;
     QList<DocumentMessage> qmlParseWarnings() const;
     bool hasQmlParseWarnings() const;
     QList<DocumentMessage> qmlParseErrors() const;
@@ -89,13 +89,15 @@ public:
 
     TextEditor::BaseTextEditor *textEditor() const;
     QPlainTextEdit *plainTextEdit() const;
-    Utils::FileName fileName() const;
-    ProjectExplorer::Kit *currentKit() const;
+    Utils::FilePath fileName() const;
+    ProjectExplorer::Target *currentTarget() const;
     bool isDocumentLoaded() const;
 
     void resetToDocumentModel();
 
     void changeToDocumentModel();
+
+    bool isQtForMCUsProject() const;
 
 signals:
     void displayNameChanged(const QString &newFileName);
@@ -114,13 +116,12 @@ public:
     void selectAll();
     void undo();
     void redo();
-    void updateActiveQtVersion();
-    void updateCurrentProject();
+    void updateActiveTarget();
     void changeToSubComponent(const ModelNode &componentNode);
     void changeToMaster();
 
 private: // functions
-    void updateFileName(const Utils::FileName &oldFileName, const Utils::FileName &newFileName);
+    void updateFileName(const Utils::FilePath &oldFileName, const Utils::FilePath &newFileName);
 
     void changeToInFileComponentModel(ComponentTextModifier *textModifer);
 
@@ -151,10 +152,7 @@ private: // variables
     QScopedPointer<RewriterView> m_rewriterView;
 
     bool m_documentLoaded;
-    ProjectExplorer::Kit *m_currentKit;
+    ProjectExplorer::Target *m_currentTarget;
 };
 
 } // namespace QmlDesigner
-
-
-#endif // DesignDocument_h

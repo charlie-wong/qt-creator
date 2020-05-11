@@ -25,6 +25,8 @@
 
 #include "vcsbaseeditorconfig.h"
 
+#include <utils/utilsicons.h>
+
 #include <QComboBox>
 #include <QAction>
 #include <QHBoxLayout>
@@ -47,7 +49,7 @@ public:
         Int
     };
 
-    SettingMappingData() : boolSetting(0), m_type(Invalid)
+    SettingMappingData() : boolSetting(nullptr)
     { }
 
     SettingMappingData(bool *setting) : boolSetting(setting), m_type(Bool)
@@ -71,7 +73,7 @@ public:
     };
 
 private:
-    Type m_type;
+    Type m_type = Invalid;
 };
 
 class VcsBaseEditorConfigPrivate
@@ -104,7 +106,7 @@ public:
     that should trigger the rerun of the VCS operation.
 */
 
-VcsBaseEditorConfig::ComboBoxItem::ComboBoxItem(const QString &text, const QVariant &val) :
+VcsBaseEditorConfig::ChoiceItem::ChoiceItem(const QString &text, const QVariant &val) :
     displayText(text),
     value(val)
 {
@@ -132,6 +134,14 @@ void VcsBaseEditorConfig::setBaseArguments(const QStringList &b)
     d->m_baseArguments = b;
 }
 
+QAction *VcsBaseEditorConfig::addReloadButton()
+{
+    auto action = new QAction(Utils::Icons::RELOAD_TOOLBAR.icon(), tr("Reload"), d->m_toolBar);
+    connect(action, &QAction::triggered, this, &VcsBaseEditorConfig::argumentsChanged);
+    addAction(action);
+    return action;
+}
+
 QStringList VcsBaseEditorConfig::arguments() const
 {
     // Compile effective arguments
@@ -156,20 +166,20 @@ QAction *VcsBaseEditorConfig::addToggleButton(const QStringList &options,
     action->setToolTip(tooltip);
     action->setCheckable(true);
     connect(action, &QAction::toggled, this, &VcsBaseEditorConfig::argumentsChanged);
-    const QList<QAction *> actions = d->m_toolBar->actions();
-    // Insert the action before line/column and split actions.
-    d->m_toolBar->insertAction(actions.at(qMax(actions.count() - 2, 0)), action);
+    addAction(action);
     d->m_optionMappings.append(OptionMapping(options, action));
     return action;
 }
 
-QComboBox *VcsBaseEditorConfig::addComboBox(const QStringList &options,
-                                            const QList<ComboBoxItem> &items)
+QComboBox *VcsBaseEditorConfig::addChoices(const QString &title,
+                                           const QStringList &options,
+                                           const QList<ChoiceItem> &items)
 {
     auto cb = new QComboBox;
-    foreach (const ComboBoxItem &item, items)
+    cb->setToolTip(title);
+    for (const ChoiceItem &item : items)
         cb->addItem(item.displayText, item.value);
-    connect(cb, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+    connect(cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &VcsBaseEditorConfig::argumentsChanged);
     d->m_toolBar->addWidget(cb);
     d->m_optionMappings.append(OptionMapping(options, cb));
@@ -181,9 +191,8 @@ void VcsBaseEditorConfig::mapSetting(QAction *button, bool *setting)
     if (!d->m_settingMapping.contains(button) && button) {
         d->m_settingMapping.insert(button, Internal::SettingMappingData(setting));
         if (setting) {
-            button->blockSignals(true);
+            QSignalBlocker blocker(button);
             button->setChecked(*setting);
-            button->blockSignals(false);
         }
     }
 }
@@ -193,11 +202,10 @@ void VcsBaseEditorConfig::mapSetting(QComboBox *comboBox, QString *setting)
     if (!d->m_settingMapping.contains(comboBox) && comboBox) {
         d->m_settingMapping.insert(comboBox, Internal::SettingMappingData(setting));
         if (setting) {
-            comboBox->blockSignals(true);
+            QSignalBlocker blocker(comboBox);
             const int itemIndex = comboBox->findData(*setting);
             if (itemIndex != -1)
                 comboBox->setCurrentIndex(itemIndex);
-            comboBox->blockSignals(false);
         }
     }
 }
@@ -212,9 +220,8 @@ void VcsBaseEditorConfig::mapSetting(QComboBox *comboBox, int *setting)
     if (!setting || *setting < 0 || *setting >= comboBox->count())
         return;
 
-    comboBox->blockSignals(true);
+    QSignalBlocker blocker(comboBox);
     comboBox->setCurrentIndex(*setting);
-    comboBox->blockSignals(false);
 }
 
 void VcsBaseEditorConfig::handleArgumentsChanged()
@@ -248,20 +255,24 @@ const QList<VcsBaseEditorConfig::OptionMapping> &VcsBaseEditorConfig::optionMapp
 
 QStringList VcsBaseEditorConfig::argumentsForOption(const OptionMapping &mapping) const
 {
-    const QAction *action = qobject_cast<const QAction *>(mapping.object);
+    auto action = qobject_cast<const QAction *>(mapping.object);
     if (action && action->isChecked())
         return mapping.options;
 
-    const QComboBox *cb = qobject_cast<const QComboBox *>(mapping.object);
-    if (cb) {
-        const QString value = cb->itemData(cb->currentIndex()).toString();
-        QStringList args;
-        foreach (const QString &option, mapping.options)
-            args << option.arg(value);
+    QStringList args;
+    auto cb = qobject_cast<const QComboBox *>(mapping.object);
+    if (!cb)
         return args;
-    }
 
-    return QStringList();
+    const QString value = cb->itemData(cb->currentIndex()).toString();
+    if (value.isEmpty())
+        return args;
+
+    if (mapping.options.isEmpty())
+        args += value.split(' ');
+    else
+        args += mapping.options.first().arg(value);
+    return args;
 }
 
 void VcsBaseEditorConfig::updateMappedSettings()
@@ -278,14 +289,14 @@ void VcsBaseEditorConfig::updateMappedSettings()
             }
             case Internal::SettingMappingData::String :
             {
-                const QComboBox *cb = qobject_cast<const QComboBox *>(optMapping.object);
+                auto cb = qobject_cast<const QComboBox *>(optMapping.object);
                 if (cb && cb->currentIndex() != -1)
                     *settingData.stringSetting = cb->itemData(cb->currentIndex()).toString();
                 break;
             }
             case Internal::SettingMappingData::Int:
             {
-                const QComboBox *cb = qobject_cast<const QComboBox *>(optMapping.object);
+                auto cb = qobject_cast<const QComboBox *>(optMapping.object);
                 if (cb && cb->currentIndex() != -1)
                     *settingData.intSetting = cb->currentIndex();
                 break;
@@ -294,6 +305,11 @@ void VcsBaseEditorConfig::updateMappedSettings()
             } // end switch ()
         }
     }
+}
+
+void VcsBaseEditorConfig::addAction(QAction *action)
+{
+    d->m_toolBar->addAction(action);
 }
 
 } // namespace VcsBase

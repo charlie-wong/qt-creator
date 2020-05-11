@@ -27,6 +27,7 @@ import QtQuick 2.1
 import QtQuick.Controls 1.1
 import QtQuick.Controls.Styles 1.0
 import QtQuickDesignerTheme 1.0
+import HelperWidgets 2.0
 
 Item {
     Rectangle {
@@ -46,11 +47,13 @@ Item {
             width: itemLibraryIconWidth  // to be set in Qml context
             height: itemLibraryIconHeight   // to be set in Qml context
             source: itemLibraryIconPath     // to be set by model
+
+            cache: false // Allow thumbnail to be dynamically updated
         }
 
         Text {
             id: text
-            font.pixelSize: 9
+            font.pixelSize: Theme.smallFontPixelSize()
             elide: Text.ElideMiddle
             wrapMode: Text.WordWrap
             anchors.top: itemIcon.bottom
@@ -69,9 +72,11 @@ Item {
             renderType: Text.NativeRendering
         }
 
-        MouseArea {
+        ToolTipArea {
             id: mouseRegion
             anchors.fill: parent
+            tooltip: itemName
+
 
             onPressed: {
                 rootView.startDragAndDrop(mouseRegion, itemLibraryEntry)

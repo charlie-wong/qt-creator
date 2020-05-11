@@ -38,6 +38,7 @@ QT_FORWARD_DECLARE_CLASS(QDebug)
 namespace Utils {
 
 class SynchronousProcessPrivate;
+class CommandLine;
 
 /* Result of SynchronousProcess execution */
 class QTCREATOR_UTILS_EXPORT SynchronousProcessResponse
@@ -89,7 +90,7 @@ public:
     };
 
     SynchronousProcess();
-    virtual ~SynchronousProcess();
+    ~SynchronousProcess() override;
 
     /* Timeout for hanging processes (triggers after no more output
      * occurs on stderr/stdout). */
@@ -126,10 +127,10 @@ public:
     void setExitCodeInterpreter(const ExitCodeInterpreter &interpreter);
     ExitCodeInterpreter exitCodeInterpreter() const;
 
-    // Starts an nested event loop and runs the binary with the arguments
-    SynchronousProcessResponse run(const QString &binary, const QStringList &args);
-    // Starts the binary with the arguments blocking the UI fully
-    SynchronousProcessResponse runBlocking(const QString &binary, const QStringList &args);
+    // Starts a nested event loop and runs the command
+    SynchronousProcessResponse run(const CommandLine &cmd, const QByteArray &writeData = {});
+    // Starts the command blocking the UI fully
+    SynchronousProcessResponse runBlocking(const CommandLine &cmd);
 
     // Create a (derived) processes with flags applied.
     static QSharedPointer<QProcess> createProcess(unsigned flags);
@@ -138,8 +139,10 @@ public:
     // detection similar SynchronousProcess' handling (taking effect after no more output
     // occurs on stderr/stdout as opposed to waitForFinished()). Returns false if a timeout
     // occurs. Checking of the process' exit state/code still has to be done.
-    static bool readDataFromProcess(QProcess &p, int timeoutS,
-                                    QByteArray *rawStdOut = 0, QByteArray *rawStdErr = 0,
+    static bool readDataFromProcess(QProcess &p,
+                                    int timeoutS,
+                                    QByteArray *rawStdOut = nullptr,
+                                    QByteArray *rawStdErr = nullptr,
                                     bool timeOutMessageBox = false);
     // Stop a process by first calling terminate() (allowing for signal handling) and
     // then kill().

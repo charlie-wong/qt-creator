@@ -29,32 +29,62 @@
 #include "debuggerconstants.h"
 #include "debuggeritem.h"
 #include "debuggerprotocol.h"
-#include "debuggerstartparameters.h"
+#include "breakhandler.h"
+#include "threadshandler.h"
 
+#include <coreplugin/icontext.h>
 #include <projectexplorer/devicesupport/idevice.h>
-#include <projectexplorer/runnables.h>
+#include <projectexplorer/runcontrol.h>
 #include <texteditor/textmark.h>
+#include <utils/fileutils.h>
 
-#include <QObject>
 #include <QProcess>
 
 QT_BEGIN_NAMESPACE
 class QDebug;
 class QPoint;
-class QAbstractItemModel;
 QT_END_NAMESPACE
 
 namespace Core { class IOptionsPage; }
 
 namespace Utils {
 class MacroExpander;
-class ProcessHandle;
+class Perspective;
 } // Utils
 
 namespace Debugger {
 
-class RemoteSetupResult;
 class DebuggerRunTool;
+
+enum DebuggerState
+{
+    DebuggerNotReady,          // Debugger not started
+
+    EngineSetupRequested,      // Engine starts
+    EngineSetupFailed,
+    EngineSetupOk,
+
+    EngineRunRequested,
+    EngineRunFailed,
+
+    InferiorUnrunnable,        // Used in the core dump adapter
+
+    InferiorRunRequested,      // Debuggee requested to run
+    InferiorRunOk,             // Debuggee running
+    InferiorRunFailed,         // Debuggee not running
+
+    InferiorStopRequested,     // Debuggee running, stop requested
+    InferiorStopOk,            // Debuggee stopped
+    InferiorStopFailed,        // Debuggee not stopped, will kill debugger
+
+    InferiorShutdownRequested,
+    InferiorShutdownFinished,
+
+    EngineShutdownRequested,
+    EngineShutdownFinished,
+
+    DebuggerFinished
+};
 
 DEBUGGER_EXPORT QDebug operator<<(QDebug str, DebuggerState state);
 
@@ -66,46 +96,92 @@ class DisassemblerAgent;
 class MemoryAgent;
 class WatchItem;
 class BreakHandler;
+class BreakpointParameters;
 class LocationMark;
+class LogWindow;
 class ModulesHandler;
 class RegisterHandler;
-class StackHandler;
-class StackFrame;
+class PeripheralRegisterHandler;
+class Section;
 class SourceFilesHandler;
-class ThreadsHandler;
+class StackFrame;
+class StackHandler;
+class Symbol;
 class WatchHandler;
-class Breakpoint;
-class QmlAdapter;
-class QmlCppEngine;
+class WatchTreeView;
 class DebuggerToolTipContext;
+class DebuggerToolTipManager;
 class MemoryViewSetupData;
-class Terminal;
-class ThreadId;
+class TerminalRunner;
 
-class DebuggerRunParameters : public DebuggerStartParameters
+class DebuggerRunParameters
 {
 public:
-    DebuggerRunParameters() {}
-    DebuggerRunParameters(const DebuggerStartParameters &sp) : DebuggerStartParameters(sp) {}
+    DebuggerStartMode startMode = NoStartMode;
+    DebuggerCloseMode closeMode = KillAtClose;
 
-    DebuggerEngineType masterEngineType = NoEngineType;
+    ProjectExplorer::Runnable inferior;
+    QString displayName; // Used in the Snapshots view.
+    Utils::ProcessHandle attachPID;
+    QStringList solibSearchPath;
+
+    // Used by Qml debugging.
+    QUrl qmlServer;
+
+    // Used by general remote debugging.
+    QString remoteChannel;
+    bool useExtendedRemote = false; // Whether to use GDB's target extended-remote or not.
+    Utils::FilePath symbolFile;
+
+    // Used by Mer plugin (3rd party)
+    QMap<QString, QString> sourcePathMap;
+
+    // Used by baremetal plugin
+    QString commandsForReset; // commands used for resetting the inferior
+    bool useContinueInsteadOfRun = false; // if connected to a hw debugger run is not possible but continue is used
+    QString commandsAfterConnect; // additional commands to post after connection to debug target
+
+    // Used by Valgrind
+    QStringList expectedSignals;
+
+    // For QNX debugging
+    bool useCtrlCStub = false;
+
+    // Used by Android to avoid false positives on warnOnRelease
+    bool skipExecutableValidation = false;
+    bool useTargetAsync = false;
+    Utils::FilePaths additionalSearchDirectories;
+
+    // Used by iOS.
+    QString platform;
+    QString deviceSymbolsRoot;
+    bool continueAfterAttach = false;
+    Utils::FilePath sysRoot;
+
+    // Used by general core file debugging. Public access requested in QTCREATORBUG-17158.
+    QString coreFile;
+
+    // Macro-expanded and passed to debugger startup.
+    QString additionalStartupCommands;
+
     DebuggerEngineType cppEngineType = NoEngineType;
 
-    DebuggerLanguages languages = NoLanguage;
+    bool isQmlDebugging = false;
     bool breakOnMain = false;
     bool multiProcess = false; // Whether to set detach-on-fork off.
+    bool useTerminal = false;
 
-    ProjectExplorer::StandardRunnable debugger;
+    ProjectExplorer::Runnable debugger;
     QString overrideStartScript; // Used in attach to core and remote debugging
     QString startMessage; // First status message shown.
     QString debugInfoLocation; // Gdb "set-debug-file-directory".
     QStringList debugSourceLocation; // Gdb "directory"
-    QString serverStartScript;
+    QString qtPackageSourceLocation;
     bool isSnapshot = false; // Set if created internally.
     ProjectExplorer::Abi toolChainAbi;
 
-    QString projectSourceDirectory;
-    QStringList projectSourceFiles;
+    Utils::FilePath projectSourceDirectory;
+    Utils::FilePaths projectSourceFiles;
 
     // Used by Script debugging
     QString interpreter;
@@ -116,10 +192,15 @@ public:
 
     bool nativeMixedEnabled = false;
 
-    Utils::MacroExpander *macroExpander = 0;
+    bool isCppDebugging() const;
+    bool isNativeMixedDebugging() const;
+
+    Utils::MacroExpander *macroExpander = nullptr;
 
     // For Debugger testing.
     int testCase = 0;
+
+    QStringList validationErrors;
 };
 
 class UpdateParameters
@@ -142,19 +223,19 @@ public:
 class Location
 {
 public:
-    Location() {}
+    Location() = default;
     Location(quint64 address) { m_address = address; }
-    Location(const QString &file) { m_fileName = file; }
-    Location(const QString &file, int line, bool marker = true)
+    Location(const Utils::FilePath &file) { m_fileName = file; }
+    Location(const Utils::FilePath &file, int line, bool marker = true)
         { m_lineNumber = line; m_fileName = file; m_needsMarker = marker; }
     Location(const StackFrame &frame, bool marker = true);
-    QString fileName() const { return m_fileName; }
+    Utils::FilePath fileName() const { return m_fileName; }
     QString functionName() const { return m_functionName; }
     QString from() const { return m_from; }
     int lineNumber() const { return m_lineNumber; }
     void setNeedsRaise(bool on) { m_needsRaise = on; }
     void setNeedsMarker(bool on) { m_needsMarker = on; }
-    void setFileName(const QString &fileName) { m_fileName = fileName; }
+    void setFileName(const Utils::FilePath &fileName) { m_fileName = fileName; }
     void setUseAssembler(bool on) { m_hasDebugInfo = !on; }
     bool needsRaise() const { return m_needsRaise; }
     bool needsMarker() const { return m_needsMarker; }
@@ -168,24 +249,10 @@ private:
     bool m_needsRaise = true;
     bool m_hasDebugInfo = true;
     int m_lineNumber = -1;
-    QString m_fileName;
+    Utils::FilePath m_fileName;
     QString m_functionName;
     QString m_from;
     quint64 m_address = 0;
-};
-
-enum LocationType { UnknownLocation, LocationByFile, LocationByAddress };
-
-class ContextData
-{
-public:
-    bool isValid() const { return type != UnknownLocation; }
-
-public:
-    LocationType type = UnknownLocation;
-    QString fileName;
-    int lineNumber = 0;
-    quint64 address = 0;
 };
 
 class DebuggerEngine : public QObject
@@ -193,13 +260,18 @@ class DebuggerEngine : public QObject
     Q_OBJECT
 
 public:
-    explicit DebuggerEngine();
-    virtual ~DebuggerEngine();
+    DebuggerEngine();
+    ~DebuggerEngine() override;
+
+    void setRunTool(DebuggerRunTool *runTool);
+    void setRunParameters(const DebuggerRunParameters &runParameters);
+
+    void setRunId(const QString &id);
+    QString runId() const;
 
     const DebuggerRunParameters &runParameters() const;
-    DebuggerRunParameters &runParameters();
-    virtual void setRunTool(DebuggerRunTool *runTool);
-    DebuggerRunTool *runTool() const;
+    void setCompanionEngine(DebuggerEngine *engine);
+    void setSecondaryEngine();
 
     void start();
 
@@ -213,7 +285,6 @@ public:
         ExitRequest = DebuggerCommand::ExitRequest,
         RunRequest = DebuggerCommand::RunRequest,
         LosesChild = DebuggerCommand::LosesChild,
-        RebuildBreakpointModel = DebuggerCommand::RebuildBreakpointModel,
         InUpdateLocals = DebuggerCommand::InUpdateLocals,
         NativeCommand = DebuggerCommand::NativeCommand,
         Silent = DebuggerCommand::Silent
@@ -225,7 +296,9 @@ public:
     void updateWatchData(const QString &iname); // FIXME: Merge with above.
     virtual void selectWatchData(const QString &iname);
 
+    virtual void validateRunParameters(DebuggerRunParameters &) {}
     virtual void prepareForRestart() {}
+    virtual void abortDebuggerProcess() {} // second attempt
 
     virtual void watchPoint(const QPoint &pnt);
     virtual void runCommand(const DebuggerCommand &cmd);
@@ -246,17 +319,18 @@ public:
     virtual void requestModuleSections(const QString &moduleName);
 
     virtual void reloadRegisters();
+    virtual void reloadPeripheralRegisters();
     virtual void reloadSourceFiles();
     virtual void reloadFullStack();
     virtual void loadAdditionalQmlStack();
     virtual void reloadDebuggingHelpers();
 
     virtual void setRegisterValue(const QString &name, const QString &value);
+    virtual void setPeripheralRegisterValue(quint64 address, quint64 value);
     virtual void addOptionPages(QList<Core::IOptionsPage*> *) const;
     virtual bool hasCapability(unsigned cap) const = 0;
     virtual void debugLastCommand() {}
 
-    virtual bool isSynchronous() const;
     virtual QString qtNamespace() const;
     void setQtNamespace(const QString &ns);
 
@@ -264,166 +338,202 @@ public:
     virtual void updateAll();
     virtual void updateLocals();
 
+    Core::Context debuggerContext() const;
+    virtual Core::Context languageContext() const { return {}; }
+    QString displayName() const;
+
     virtual bool stateAcceptsBreakpointChanges() const { return true; }
-    virtual void attemptBreakpointSynchronization();
-    virtual bool acceptsBreakpoint(Breakpoint bp) const = 0;
-    virtual void insertBreakpoint(Breakpoint bp);  // FIXME: make pure
-    virtual void removeBreakpoint(Breakpoint bp);  // FIXME: make pure
-    virtual void changeBreakpoint(Breakpoint bp);  // FIXME: make pure
+    virtual bool acceptsBreakpoint(const BreakpointParameters &bp) const = 0;
+    virtual void insertBreakpoint(const Breakpoint &bp) = 0;
+    virtual void removeBreakpoint(const Breakpoint &bp) = 0;
+    virtual void updateBreakpoint(const Breakpoint &bp) = 0;
+    virtual void enableSubBreakpoint(const SubBreakpoint &sbp, bool enabled);
 
     virtual bool acceptsDebuggerCommands() const { return true; }
-    virtual void executeDebuggerCommand(const QString &command, DebuggerLanguages languages);
+    virtual void executeDebuggerCommand(const QString &command);
 
     virtual void assignValueInDebugger(WatchItem *item,
         const QString &expr, const QVariant &value);
-    virtual void selectThread(Internal::ThreadId threadId) = 0;
+    virtual void selectThread(const Internal::Thread &thread) = 0;
 
-    virtual Internal::ModulesHandler *modulesHandler() const;
-    virtual Internal::RegisterHandler *registerHandler() const;
-    virtual Internal::StackHandler *stackHandler() const;
-    virtual Internal::ThreadsHandler *threadsHandler() const;
-    virtual Internal::WatchHandler *watchHandler() const;
-    virtual Internal::SourceFilesHandler *sourceFilesHandler() const;
-    virtual Internal::BreakHandler *breakHandler() const;
+    virtual void executeRecordReverse(bool) {}
+    virtual void executeReverse(bool) {}
 
-    virtual QAbstractItemModel *modulesModel() const;
-    virtual QAbstractItemModel *registerModel() const;
-    virtual QAbstractItemModel *stackModel() const;
-    virtual QAbstractItemModel *threadsModel() const;
-    virtual QAbstractItemModel *watchModel() const;
-    virtual QAbstractItemModel *sourceFilesModel() const;
+    ModulesHandler *modulesHandler() const;
+    RegisterHandler *registerHandler() const;
+    PeripheralRegisterHandler *peripheralRegisterHandler() const;
+    StackHandler *stackHandler() const;
+    ThreadsHandler *threadsHandler() const;
+    WatchHandler *watchHandler() const;
+    SourceFilesHandler *sourceFilesHandler() const;
+    BreakHandler *breakHandler() const;
+    LogWindow *logWindow() const;
+    DisassemblerAgent *disassemblerAgent() const;
 
     void progressPing();
-    void handleFinished();
-    void handleStartFailed();
     bool debuggerActionsEnabled() const;
-    static bool debuggerActionsEnabled(DebuggerState state);
+    virtual bool companionPreventsActions() const;
+
+    bool operatesByInstruction() const;
+    virtual void operateByInstructionTriggered(bool on); // FIXME: Remove.
 
     DebuggerState state() const;
-    DebuggerState lastGoodState() const;
     bool isDying() const;
 
     static QString stateName(int s);
 
     void notifyInferiorPid(const Utils::ProcessHandle &pid);
     qint64 inferiorPid() const;
+
     bool isReverseDebugging() const;
-    void handleCommand(int role, const QVariant &value);
+    void handleBeginOfRecordingReached();
+    void handleRecordingFailed();
+    void handleRecordReverse(bool);
+    void handleReverseDirection(bool);
 
     // Convenience
-    Q_SLOT virtual void showMessage(const QString &msg, int channel = LogDebug,
-        int timeout = -1) const;
-    Q_SLOT void showStatusMessage(const QString &msg, int timeout = -1) const;
+    void showMessage(const QString &msg, int channel = LogDebug, int timeout = -1) const;
+    void showStatusMessage(const QString &msg, int timeout = -1) const;
 
     virtual void resetLocation();
     virtual void gotoLocation(const Internal::Location &location);
+    void gotoCurrentLocation();
     virtual void quitDebugger(); // called when pressing the stop button
-    virtual void abortDebugger(); // called from the debug menu action
+    void abortDebugger();
+    void updateUi(bool isCurrentEngine);
 
-    void updateViews();
-    bool isSlaveEngine() const;
-    bool isMasterEngine() const;
-    DebuggerEngine *masterEngine() const;
-    virtual DebuggerEngine *activeEngine() { return this; }
-    virtual DebuggerEngine *cppEngine() { return 0; }
+    bool isPrimaryEngine() const;
 
     virtual bool canDisplayTooltip() const;
 
-    virtual void notifyInferiorIll();
-
-    QString toFileInProject(const QUrl &fileUrl);
-    void updateBreakpointMarker(const Breakpoint &bp);
-    void removeBreakpointMarker(const Breakpoint &bp);
-
     QString expand(const QString &string) const;
     QString nativeStartupCommands() const;
+    Utils::Perspective *perspective() const;
+    void updateMarkers();
 
-    bool prepareCommand();
+    void updateToolTips();
+    DebuggerToolTipManager *toolTipManager();
+
+signals:
+    void engineStarted();
+    void engineFinished();
+    void requestRunControlFinish();
+    void requestRunControlStop();
+    void attachToCoreRequested(const QString &coreFile);
+    void appendMessageRequested(const QString &msg,
+                                Utils::OutputFormat format,
+                                bool appendNewLine) const;
 
 protected:
-    // The base notify*() function implementation should be sufficient
-    // in most cases, but engines are free to override them to do some
-    // engine specific cleanup like stopping timers etc.
-    virtual void notifyEngineSetupOk();
-    virtual void notifyEngineSetupFailed();
-    virtual void notifyEngineRunFailed();
+    void notifyEngineSetupOk();
+    void notifyEngineSetupFailed();
+    void notifyEngineRunFailed();
 
-    virtual void notifyEngineRequestRemoteSetup();
-    public:
-    virtual void notifyEngineRemoteServerRunning(const QString &, int pid);
-    virtual void notifyEngineRemoteSetupFinished(const RemoteSetupResult &result);
-
-    protected:
-    virtual void notifyInferiorSetupOk();
-    virtual void notifyInferiorSetupFailed();
-
-    virtual void notifyEngineRunAndInferiorRunOk();
-    virtual void notifyEngineRunAndInferiorStopOk();
-    virtual void notifyEngineRunOkAndInferiorUnrunnable(); // Called by CoreAdapter.
+    void notifyEngineRunAndInferiorRunOk();
+    void notifyEngineRunAndInferiorStopOk();
+    void notifyEngineRunOkAndInferiorUnrunnable(); // Called by CoreAdapter.
 
     // Use notifyInferiorRunRequested() plus notifyInferiorRunOk() instead.
-    //virtual void notifyInferiorSpontaneousRun();
+    // void notifyInferiorSpontaneousRun();
 
-    virtual void notifyInferiorRunRequested();
-    virtual void notifyInferiorRunOk();
-    virtual void notifyInferiorRunFailed();
+    void notifyInferiorRunRequested();
+    void notifyInferiorRunOk();
+    void notifyInferiorRunFailed();
 
-    virtual void notifyInferiorStopOk();
-    virtual void notifyInferiorSpontaneousStop();
-    virtual void notifyInferiorStopFailed();
+    void notifyInferiorIll();
+    void notifyInferiorExited();
 
-    public:
-    virtual void notifyInferiorExited();
+    void notifyInferiorStopOk();
+    void notifyInferiorSpontaneousStop();
+    void notifyInferiorStopFailed();
+
+public:
+    void updateState();
+    QString formatStartParameters() const;
+    WatchTreeView *inspectorView();
+    void updateLocalsWindow(bool showReturn);
+    void raiseWatchersWindow();
+    QString debuggerName() const;
+
+    bool isRegistersWindowVisible() const;
+    bool isPeripheralRegistersWindowVisible() const;
+    bool isModulesWindowVisible() const;
+
+    void openMemoryEditor();
+
+    static void showModuleSymbols(const QString &moduleName, const QVector<Symbol> &symbols);
+    static void showModuleSections(const QString &moduleName, const QVector<Section> &sections);
+
+    void handleExecDetach();
+    void handleExecContinue();
+    void handleExecInterrupt();
+    void handleUserStop();
+    void handleAbort();
+    void handleReset();
+    void handleExecStepIn();
+    void handleExecStepOver();
+    void handleExecStepOut();
+    void handleExecReturn();
+    void handleExecJumpToLine();
+    void handleExecRunToLine();
+    void handleExecRunToSelectedFunction();
+    void handleAddToWatchWindow();
+    void handleFrameDown();
+    void handleFrameUp();
+
+    // Breakpoint state transitions
+    void notifyBreakpointInsertProceeding(const Breakpoint &bp);
+    void notifyBreakpointInsertOk(const Breakpoint &bp);
+    void notifyBreakpointInsertFailed(const Breakpoint &bp);
+    void notifyBreakpointChangeOk(const Breakpoint &bp);
+    void notifyBreakpointChangeProceeding(const Breakpoint &bp);
+    void notifyBreakpointChangeFailed(const Breakpoint &bp);
+    void notifyBreakpointPending(const Breakpoint &bp);
+    void notifyBreakpointRemoveProceeding(const Breakpoint &bp);
+    void notifyBreakpointRemoveOk(const Breakpoint &bp);
+    void notifyBreakpointRemoveFailed(const Breakpoint &bp);
+    void notifyBreakpointNeedsReinsertion(const Breakpoint &bp);
+
+protected:
+    void setDebuggerName(const QString &name);
     void notifyDebuggerProcessFinished(int exitCode, QProcess::ExitStatus exitStatus,
                                        const QString &backendName);
 
-    void setRemoteParameters(const RemoteSetupResult &result);
-
-protected:
     virtual void setState(DebuggerState state, bool forced = false);
 
-    virtual void notifyInferiorShutdownOk();
-    virtual void notifyInferiorShutdownFailed();
+    void notifyInferiorShutdownFinished();
 
-    virtual void notifyEngineSpontaneousShutdown();
-    virtual void notifyEngineShutdownOk();
-    virtual void notifyEngineShutdownFailed();
+    void notifyEngineSpontaneousShutdown();
+    void notifyEngineShutdownFinished();
 
-    virtual void notifyEngineIll();
+    void notifyEngineIll();
 
     virtual void setupEngine() = 0;
-    virtual void setupInferior() = 0;
     virtual void runEngine() = 0;
     virtual void shutdownInferior() = 0;
     virtual void shutdownEngine() = 0;
     virtual void resetInferior() {}
 
-    virtual void detachDebugger();
-    virtual void executeStep();
-    virtual void executeStepOut();
-    virtual void executeNext();
-    virtual void executeStepI();
-    virtual void executeNextI();
-    virtual void executeReturn();
+    virtual void detachDebugger() {}
+    virtual void executeStepOver(bool /*byInstruction*/ = false) {}
+    virtual void executeStepIn(bool /*byInstruction*/ = false) {}
+    virtual void executeStepOut() {}
+    virtual void executeReturn() {}
 
-    virtual void continueInferior();
-    virtual void interruptInferior();
-    virtual void requestInterruptInferior();
+    virtual void continueInferior() {}
+    virtual void interruptInferior() {}
+    void requestInterruptInferior();
 
-    virtual void executeRunToLine(const Internal::ContextData &data);
-    virtual void executeRunToFunction(const QString &functionName);
-    virtual void executeJumpToLine(const Internal::ContextData &data);
+    virtual void executeRunToLine(const Internal::ContextData &) {}
+    virtual void executeRunToFunction(const QString &) {}
+    virtual void executeJumpToLine(const Internal::ContextData &) {}
 
     virtual void frameUp();
     virtual void frameDown();
 
     virtual void doUpdateLocals(const UpdateParameters &params);
 
-    void setTargetState(DebuggerState state);
-    void setMasterEngine(DebuggerEngine *masterEngine);
-
-    ProjectExplorer::RunControl *runControl() const;
-    Terminal *terminal() const;
+    TerminalRunner *terminal() const;
 
     static QString msgStopped(const QString &reason = QString());
     static QString msgStoppedBySignal(const QString &meaning, const QString &name);
@@ -433,41 +543,41 @@ protected:
     bool showStoppedBySignalMessageBox(const QString meaning, QString name);
     void showStoppedByExceptionMessageBox(const QString &description);
 
-    bool isStateDebugging() const;
-    void setStateDebugging(bool on);
-
-    void validateExecutable();
-
-    virtual void setupSlaveInferior();
-    virtual void setupSlaveEngine();
-    virtual void runSlaveEngine();
-    virtual void shutdownSlaveEngine();
-
-    virtual void slaveEngineStateChanged(DebuggerEngine *engine,
-        DebuggerState state);
-
     void updateLocalsView(const GdbMi &all);
     void checkState(DebuggerState state, const char *file, int line);
     bool isNativeMixedEnabled() const;
     bool isNativeMixedActive() const;
     bool isNativeMixedActiveFrame() const;
+    void startDying() const;
+
+    ProjectExplorer::IDevice::ConstPtr device() const;
+    DebuggerEngine *companionEngine() const;
 
 private:
-    // Wrapper engine needs access to state of its subengines.
-    friend class QmlCppEngine;
     friend class DebuggerPluginPrivate;
-    friend class QmlAdapter;
-
     friend class DebuggerEnginePrivate;
     friend class LocationMark;
+    friend class PeripheralRegisterHandler;
     DebuggerEnginePrivate *d;
+};
+
+class CppDebuggerEngine : public DebuggerEngine
+{
+public:
+    CppDebuggerEngine() {}
+    ~CppDebuggerEngine() override {}
+
+    void validateRunParameters(DebuggerRunParameters &rp) override;
+    Core::Context languageContext() const override;
 };
 
 class LocationMark : public TextEditor::TextMark
 {
 public:
-    LocationMark(DebuggerEngine *engine, const QString &file, int line);
+    LocationMark(DebuggerEngine *engine, const Utils::FilePath &file, int line);
     void removedFromEditor() override { updateLineNumber(0); }
+
+    void updateIcon();
 
 private:
     bool isDraggable() const override;
@@ -475,8 +585,6 @@ private:
 
     QPointer<DebuggerEngine> m_engine;
 };
-
-ProjectExplorer::RunControl *createAndScheduleRun(const DebuggerRunParameters &rp, ProjectExplorer::Kit *kit);
 
 } // namespace Internal
 } // namespace Debugger

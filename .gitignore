@@ -27,8 +27,9 @@
 *~
 .#*
 .DS_Store
-/.qmake.cache
-/.qmake.stash
+.qmake.cache
+.qmake.stash
+.vscode
 Makefile*
 Thumbs.db
 core
@@ -45,12 +46,17 @@ wrapper.sh
 *.pyqtc.user*
 *.qbs.user*
 *.qmlproject.user*
-/share/qtcreator/externaltools
+CMakeLists.txt.user*
+/share/qtcreator/examples/
+/share/qtcreator/externaltools/
 /share/qtcreator/fonts/
 /share/qtcreator/generic-highlighter/
+/share/qtcreator/qmldesigner/QtProject/
 /src/app/Info.plist
 /src/plugins/**/*.json
 /src/plugins/coreplugin/ide_version.h
+/src/libs/qt-breakpad/bin
+/.cmake/
 app_version.h
 phony.c
 
@@ -95,6 +101,12 @@ phony.c
 *.jsc
 *.qmlc
 
+# Squish generated files
+/tests/system/suite_*/config.xml
+
+# Clang tooling files
+compile_commands.json
+
 # Directories to ignore
 # ---------------------
 
@@ -103,6 +115,7 @@ phony.c
 .pch/
 .rcc/
 .uic/
+.clangd/
 /*-debug/
 /*-release/
 /dist/gdb/*.gz
@@ -110,9 +123,10 @@ phony.c
 /dist/gdb/qtcreator-*/
 /dist/gdb/source/
 /dist/gdb/staging/
-/doc/qtcreator/
-/doc/qtcreator-dev/
-/doc/pluginhowto/html/
+/doc/qbs/
+/doc/html/qtcreator/
+/doc/html/qtcreator-dev/
+/doc/html/qtdesignstudio/
 /lib/
 /lib64/
 /libexec/
@@ -155,8 +169,6 @@ tmp/
 /tests/auto/aggregation/tst_aggregation
 /tests/auto/algorithm/tst_algorithm
 /tests/auto/changeset/tst_changeset
-/tests/auto/clangstaticanalyzer/clangstaticanalyzerlogfilereader/tst_clangstaticanalyzerlogfilereader
-/tests/auto/clangstaticanalyzer/clangstaticanalyzerrunner/tst_clangstaticanalyzerrunnertest
 /tests/auto/cplusplus/ast/tst_ast
 /tests/auto/cplusplus/c99/tst_c99
 /tests/auto/cplusplus/checksymbols/tst_checksymbols
@@ -214,6 +226,7 @@ tmp/
 /tests/auto/qtcprocess/tst_qtcprocess
 /tests/auto/runextensions/tst_runextensions
 /tests/auto/sdktool/tst_sdktool
+/tests/auto/ssh/tst_ssh
 /tests/auto/timeline/timelineabstractrenderer/tst_timelineabstractrenderer
 /tests/auto/timeline/timelineitemsrenderpass/tst_timelineitemsrenderpass
 /tests/auto/timeline/timelinemodel/tst_timelinemodel
@@ -259,12 +272,8 @@ tmp/
 /tests/manual/proparser/testreader
 /tests/manual/qml-ast2dot/qml-ast2dot
 /tests/manual/shootout/shootout
-/tests/manual/ssh/errorhandling/errorhandling
-/tests/manual/ssh/remoteprocess/remoteprocess
-/tests/manual/ssh/sftp/sftp
 /tests/manual/ssh/sftpfsmodel/sftpfsmodel
 /tests/manual/ssh/shell/shell
-/tests/manual/ssh/tunnel/tunnel
 /tests/tools/qml-ast2dot/qml-ast2dot
 /tests/unit/echoserver/echo
 /tests/unit/unittest/unittest

@@ -29,20 +29,16 @@
 
 using namespace TextEditor;
 
-FunctionHintProposal::FunctionHintProposal(int cursorPos, IFunctionHintProposalModel *model)
+FunctionHintProposal::FunctionHintProposal(int cursorPos, FunctionHintProposalModelPtr model)
     : IAssistProposal(cursorPos)
     , m_model(model)
-{}
-
-FunctionHintProposal::~FunctionHintProposal()
-{}
-
-bool FunctionHintProposal::isFragile() const
 {
-    return true;
+    setFragile(true);
 }
 
-IAssistProposalModel *FunctionHintProposal::model() const
+FunctionHintProposal::~FunctionHintProposal() = default;
+
+ProposalModelPtr FunctionHintProposal::model() const
 {
     return m_model;
 }

@@ -26,8 +26,10 @@
 #pragma once
 
 #include "../projectexplorer_export.h"
+#include <projectexplorer/projectnodes.h>
 
 #include <coreplugin/generatedfile.h>
+#include <coreplugin/jsexpander.h>
 
 #include <utils/wizard.h>
 #include <utils/macroexpander.h>
@@ -36,7 +38,24 @@
 
 namespace ProjectExplorer {
 
+class JsonWizard;
 class JsonWizardGenerator;
+
+namespace Internal {
+
+class JsonWizardJsExtension : public QObject
+{
+    Q_OBJECT
+public:
+    JsonWizardJsExtension(JsonWizard *wizard);
+
+    Q_INVOKABLE QVariant value(const QString &name) const;
+
+private:
+    JsonWizard *m_wizard;
+};
+
+} // namespace Internal
 
 // Documentation inside.
 class PROJECTEXPLORER_EXPORT JsonWizard : public Utils::Wizard
@@ -46,7 +65,7 @@ class PROJECTEXPLORER_EXPORT JsonWizard : public Utils::Wizard
 public:
     class GeneratorFile {
     public:
-        GeneratorFile() : generator(nullptr) { }
+        GeneratorFile() = default;
         GeneratorFile(const Core::GeneratedFile &f, JsonWizardGenerator *g) :
             file(f), generator(g)
         { }
@@ -54,9 +73,9 @@ public:
         bool isValid() const { return generator; }
 
         Core::GeneratedFile file;
-        JsonWizardGenerator *generator;
+        JsonWizardGenerator *generator = nullptr;
     };
-    typedef QList<GeneratorFile> GeneratorFiles;
+    using GeneratorFiles = QList<GeneratorFile>;
     Q_PROPERTY(GeneratorFiles generateFileList READ generateFileList)
 
     explicit JsonWizard(QWidget *parent = nullptr);
@@ -108,7 +127,6 @@ signals:
     void filesReady(const JsonWizard::GeneratorFiles &files); // emitted just after files are in final state on disk.
     void filesPolished(const JsonWizard::GeneratorFiles &files); // emitted just after additional files (e.g. settings) not directly related to the project were created.
     void allDone(const JsonWizard::GeneratorFiles &files); // emitted just after the wizard is done with the files. They are ready to be opened.
-
 public slots:
     void accept() override;
     void reject() override;
@@ -120,11 +138,13 @@ private:
     QString stringify(const QVariant &v) const override;
     QString evaluate(const QVariant &v) const override ;
     void openFiles(const GeneratorFiles &files);
+    void openProjectForNode(ProjectExplorer::Node *node);
 
     QList<JsonWizardGenerator *> m_generators;
 
     GeneratorFiles m_files;
     Utils::MacroExpander m_expander;
+    Core::JsExpander m_jsExpander;
 };
 
 } // namespace ProjectExplorer

@@ -30,6 +30,8 @@
 #include "idevice.h"
 #include "idevicefactory.h"
 
+#include <QApplication>
+
 namespace ProjectExplorer {
 class ProjectExplorerPlugin;
 
@@ -37,28 +39,24 @@ namespace Internal { class DesktopDeviceFactory; }
 
 class PROJECTEXPLORER_EXPORT DesktopDevice : public IDevice
 {
+    Q_DECLARE_TR_FUNCTIONS(ProjectExplorer::DesktopDevice)
+
 public:
     IDevice::DeviceInfo deviceInformation() const override;
 
-    QString displayType() const override;
     IDeviceWidget *createWidget() override;
-    QList<Core::Id> actionIds() const override;
-    QString displayNameForActionId(Core::Id actionId) const override;
-    void executeAction(Core::Id actionId, QWidget *parent = 0) override;
     bool canAutoDetectPorts() const override;
     bool canCreateProcessModel() const override;
     DeviceProcessList *createProcessListModel(QObject *parent) const override;
     bool canCreateProcess() const override { return true; }
+    ProjectExplorer::PortsGatheringMethod::Ptr portsGatheringMethod() const override;
     DeviceProcess *createProcess(QObject *parent) const override;
     DeviceProcessSignalOperation::Ptr signalOperation() const override;
     DeviceEnvironmentFetcher::Ptr environmentFetcher() const override;
-    Connection toolControlChannel(const ControlChannelHint &) const override;
-
-    IDevice::Ptr clone() const override;
+    QUrl toolControlChannel(const ControlChannelHint &) const override;
 
 protected:
     DesktopDevice();
-    DesktopDevice(const DesktopDevice &other);
 
     friend class ProjectExplorerPlugin;
     friend class Internal::DesktopDeviceFactory;

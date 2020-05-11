@@ -34,28 +34,22 @@
 #include <QMultiHash>
 #include <QTimer>
 
-QT_BEGIN_NAMESPACE
-class QLabel;
-class QSettings;
-QT_END_NAMESPACE
-
 namespace Core {
 
 namespace Internal {
 
 class Action;
 class ActionContainerPrivate;
-class MainWindow;
 
 class ActionManagerPrivate : public QObject
 {
     Q_OBJECT
 
 public:
-    typedef QHash<Id, Action *> IdCmdMap;
-    typedef QHash<Id, ActionContainerPrivate *> IdContainerMap;
+    using IdCmdMap = QHash<Id, Action *>;
+    using IdContainerMap = QHash<Id, ActionContainerPrivate *>;
 
-    ~ActionManagerPrivate();
+    ~ActionManagerPrivate() override;
 
     void setContext(const Context &context);
     bool hasContext(int context) const;

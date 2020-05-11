@@ -26,16 +26,16 @@
 
 #include "androidmanager.h"
 
-#include "utils/algorithm.h"
-#include "utils/environment.h"
-#include "utils/qtcassert.h"
-#include "utils/runextensions.h"
-#include "utils/synchronousprocess.h"
+#include <utils/algorithm.h>
+#include <utils/environment.h>
+#include <utils/qtcassert.h>
+#include <utils/runextensions.h>
+#include <utils/synchronousprocess.h>
 
 #include <QLoggingCategory>
 
 namespace {
-Q_LOGGING_CATEGORY(androidToolLog, "qtc.android.sdkManager")
+static Q_LOGGING_CATEGORY(androidToolLog, "qtc.android.sdkManager", QtWarningMsg)
 }
 
 namespace Android {
@@ -46,8 +46,8 @@ using namespace Utils;
 class AndroidToolOutputParser
 {
 public:
-    void parseTargetListing(const QString &output, const FileName &sdkLocation,
-                            SdkPlatformList *platformList);
+    void parseTargetListing(const QString &output, const FilePath &sdkLocation,
+                            SdkPlatformList &platformList);
 
     QList<SdkPlatform> m_installedPlatforms;
 };
@@ -57,13 +57,12 @@ public:
     environment. Returns \c true for successful execution. Command's output is copied to \a
     output.
  */
-static bool androidToolCommand(Utils::FileName toolPath, const QStringList &args,
-                               const Environment &environment, QString *output)
+static bool androidToolCommand(Utils::FilePath toolPath, const QStringList &args,
+                               const QProcessEnvironment &environment, QString *output)
 {
-    QString androidToolPath = toolPath.toString();
     SynchronousProcess proc;
-    proc.setProcessEnvironment(environment.toProcessEnvironment());
-    SynchronousProcessResponse response = proc.runBlocking(androidToolPath, args);
+    proc.setProcessEnvironment(environment);
+    SynchronousProcessResponse response = proc.runBlocking({toolPath, args});
     if (response.result == SynchronousProcessResponse::Finished) {
         if (output)
             *output = response.allOutput();
@@ -92,21 +91,24 @@ AndroidToolManager::AndroidToolManager(const AndroidConfig &config) :
 
 }
 
-AndroidToolManager::~AndroidToolManager()
-{
+AndroidToolManager::~AndroidToolManager() = default;
 
-}
-
-SdkPlatformList AndroidToolManager::availableSdkPlatforms() const
+SdkPlatformList AndroidToolManager::availableSdkPlatforms(bool *ok) const
 {
+    bool success = false;
     SdkPlatformList list;
     QString targetListing;
     if (androidToolCommand(m_config.androidToolPath(), QStringList({"list",  "target"}),
-                           androidToolEnvironment(), &targetListing)) {
-        m_parser->parseTargetListing(targetListing, m_config.sdkLocation(), &list);
+                           AndroidConfigurations::toolsEnvironment(m_config), &targetListing)) {
+        m_parser->parseTargetListing(targetListing, m_config.sdkLocation(), list);
+        success = true;
     } else {
         qCDebug(androidToolLog) << "Android tool target listing failed";
     }
+
+    if (ok)
+        *ok = success;
+
     return list;
 }
 
@@ -115,21 +117,20 @@ void AndroidToolManager::launchAvdManager() const
     QProcess::startDetached(m_config.androidToolPath().toString(), QStringList("avd"));
 }
 
-QFuture<AndroidConfig::CreateAvdInfo>
-AndroidToolManager::createAvd(AndroidConfig::CreateAvdInfo info) const
+QFuture<CreateAvdInfo> AndroidToolManager::createAvd(CreateAvdInfo info) const
 {
     return Utils::runAsync(&AndroidToolManager::createAvdImpl, info,
-                           m_config.androidToolPath(), androidToolEnvironment());
+                           m_config.androidToolPath(),
+                           AndroidConfigurations::toolsEnvironment(m_config));
 }
 
 bool AndroidToolManager::removeAvd(const QString &name) const
 {
     SynchronousProcess proc;
     proc.setTimeoutS(5);
-    proc.setProcessEnvironment(androidToolEnvironment().toProcessEnvironment());
+    proc.setProcessEnvironment(AndroidConfigurations::toolsEnvironment(m_config));
     SynchronousProcessResponse response
-            = proc.runBlocking(m_config.androidToolPath().toString(),
-                               QStringList({"delete", "avd", "-n", name}));
+            = proc.runBlocking({m_config.androidToolPath(), {"delete", "avd", "-n", name}});
     return response.result == SynchronousProcessResponse::Finished && response.exitCode == 0;
 }
 
@@ -137,31 +138,17 @@ QFuture<AndroidDeviceInfoList> AndroidToolManager::androidVirtualDevicesFuture()
 {
     return Utils::runAsync(&AndroidToolManager::androidVirtualDevices,
                            m_config.androidToolPath(), m_config.sdkLocation(),
-                           androidToolEnvironment());
+                           AndroidConfigurations::toolsEnvironment(m_config));
 }
 
-Environment AndroidToolManager::androidToolEnvironment() const
-{
-    Environment env = Environment::systemEnvironment();
-    Utils::FileName jdkLocation = m_config.openJDKLocation();
-    if (!jdkLocation.isEmpty()) {
-        env.set(QLatin1String("JAVA_HOME"), jdkLocation.toUserOutput());
-        Utils::FileName binPath = jdkLocation;
-        binPath.appendPath(QLatin1String("bin"));
-        env.prependOrSetPath(binPath.toUserOutput());
-    }
-    return env;
-}
-
-AndroidConfig::CreateAvdInfo AndroidToolManager::createAvdImpl(AndroidConfig::CreateAvdInfo info,
-                                                               FileName androidToolPath,
-                                                               Environment env)
+CreateAvdInfo AndroidToolManager::createAvdImpl(CreateAvdInfo info, FilePath androidToolPath,
+                                                QProcessEnvironment env)
 {
     QProcess proc;
-    proc.setProcessEnvironment(env.toProcessEnvironment());
+    proc.setProcessEnvironment(env);
     QStringList arguments;
     arguments << QLatin1String("create") << QLatin1String("avd")
-              << QLatin1String("-t") << AndroidConfig::apiLevelNameFor(info.target)
+              << QLatin1String("-t") << QString("android-%1").arg(info.systemImage->apiLevel())
               << QLatin1String("-n") << info.name
               << QLatin1String("-b") << info.abi;
     if (info.sdcardSize > 0)
@@ -206,13 +193,13 @@ AndroidConfig::CreateAvdInfo AndroidToolManager::createAvdImpl(AndroidConfig::Cr
     return info;
 }
 
-AndroidDeviceInfoList AndroidToolManager::androidVirtualDevices(const Utils::FileName &androidTool,
-                                                                const FileName &sdkLocationPath,
-                                                                const Environment &environment)
+AndroidDeviceInfoList AndroidToolManager::androidVirtualDevices(const Utils::FilePath &androidTool,
+                                                                const FilePath &sdkLocationPath,
+                                                                const QProcessEnvironment &env)
 {
     AndroidDeviceInfoList devices;
     QString output;
-    if (!androidToolCommand(androidTool, QStringList({"list", "avd"}), environment, &output))
+    if (!androidToolCommand(androidTool, QStringList({"list", "avd"}), env, &output))
         return devices;
 
     QStringList avds = output.split('\n');
@@ -255,9 +242,8 @@ AndroidDeviceInfoList AndroidToolManager::androidVirtualDevices(const Utils::Fil
                 if (lastIndex == -1) // skip line
                     break;
                 QString tmp = line.mid(lastIndex).remove(QLatin1Char(')')).trimmed();
-                Utils::FileName platformPath = sdkLocationPath;
-                platformPath.appendPath(QString("/platforms/android-%1").arg(tmp));
-                dev.sdk = AndroidManager::findApiLevel(platformPath);
+                dev.sdk = AndroidManager::findApiLevel(
+                    sdkLocationPath.pathAppended(QString("/platforms/android-%1").arg(tmp)));
             }
             if (line.contains(QLatin1String("Tag/ABI:"))) {
                 int lastIndex = line.lastIndexOf(QLatin1Char('/')) + 1;
@@ -286,60 +272,70 @@ AndroidDeviceInfoList AndroidToolManager::androidVirtualDevices(const Utils::Fil
 }
 
 void AndroidToolOutputParser::parseTargetListing(const QString &output,
-                                                 const Utils::FileName &sdkLocation,
-                                                 SdkPlatformList *platformList)
+                                                 const Utils::FilePath &sdkLocation,
+                                                 SdkPlatformList &platformList)
 {
-    if (!platformList)
-        return;
-
-    auto addSystemImage = [](const QStringList& abiList, SdkPlatform &platform) {
+    auto addSystemImage = [](const QStringList& abiList, SdkPlatform *platform) {
+        QTC_ASSERT(platform, return);
         foreach (auto imageAbi, abiList) {
-            SystemImage image;
-            image.abiName = imageAbi;
-            image.apiLevel = platform.apiLevel;
-            platform.systemImages.append(image);
+            auto image = new SystemImage(QVersionNumber(), "", imageAbi, platform);
+            platform->addSystemImage(image);
         }
     };
 
-    SdkPlatform platform;
-    QStringList abiList;
-    foreach (const QString &l, output.split('\n')) {
-        const QString line = l.trimmed();
+    class {
+    public:
+        QStringList abiList;
+        QVersionNumber revision;
+        int apiLevel = -1;
+        QString description;
+        Utils::FilePath installedLocation;
+
+        void clear() {
+            abiList.clear();
+            revision = QVersionNumber();
+            apiLevel = -1;
+            description.clear();
+            installedLocation.clear();
+        }
+    } platformParams;
+
+    QStringList outputLines = output.split('\n');
+    for (int index = 0; index < outputLines.count(); ++index) {
+        const QString line = outputLines.at(index).trimmed();
         if (line.startsWith(QLatin1String("id:")) && line.contains(QLatin1String("android-"))) {
             int index = line.indexOf(QLatin1String("\"android-"));
             if (index == -1)
                 continue;
             QString androidTarget = line.mid(index + 1, line.length() - index - 2);
             const QString tmp = androidTarget.mid(androidTarget.lastIndexOf(QLatin1Char('-')) + 1);
-            Utils::FileName platformPath = sdkLocation;
-            platformPath.appendPath(QString("/platforms/android-%1").arg(tmp));
-            platform.installedLocation = platformPath;
-            platform.apiLevel = AndroidManager::findApiLevel(platformPath);
+            platformParams.installedLocation = sdkLocation.pathAppended(QString("/platforms/android-%1").arg(tmp));
+            platformParams.apiLevel = AndroidManager::findApiLevel(platformParams.installedLocation);
         } else if (line.startsWith(QLatin1String("Name:"))) {
-            platform.name = line.mid(6);
+            platformParams.description = line.mid(6);
+        } else if (line.startsWith(QLatin1String("Revision:"))) {
+            platformParams.revision = QVersionNumber::fromString(line.mid(10));
         } else if (line.startsWith(QLatin1String("Tag/ABIs :"))) {
-            abiList = cleanAndroidABIs(line.mid(10).trimmed().split(QLatin1String(", ")));
+            platformParams.abiList = cleanAndroidABIs(line.mid(10).trimmed().split(QLatin1String(", ")));
         } else if (line.startsWith(QLatin1String("ABIs"))) {
-            abiList = cleanAndroidABIs(line.mid(6).trimmed().split(QLatin1String(", ")));
-        } else if (line.startsWith(QLatin1String("---")) || line.startsWith(QLatin1String("==="))) {
-            if (platform.apiLevel == -1)
+            platformParams.abiList = cleanAndroidABIs(line.mid(6).trimmed().split(QLatin1String(", ")));
+        } else if (line.startsWith(QLatin1String("---"))
+                   || line.startsWith(QLatin1String("==="))
+                   || index == outputLines.count() - 1) {
+            if (platformParams.apiLevel == -1)
                 continue;
-
-            addSystemImage(abiList, platform);
-            *platformList << platform;
-
-            platform = SdkPlatform();
-            abiList.clear();
+            auto platform = new SdkPlatform(platformParams.revision,
+                                            QString("platforms;android-%1").arg(platformParams.apiLevel),
+                                            platformParams.apiLevel);
+            platform->setState(AndroidSdkPackage::Installed);
+            platform->setDescriptionText(platformParams.description);
+            platform->setInstalledLocation(platformParams.installedLocation);
+            addSystemImage(platformParams.abiList, platform);
+            platformList << platform;
+            platformParams.clear();
         }
     }
-
-    // The last parsed Platform.
-    if (platform.apiLevel != -1) {
-        addSystemImage(abiList, platform);
-        *platformList << platform;
-    }
-
-    Utils::sort(*platformList);
+    Utils::sort(platformList);
 }
 
 } // namespace Internal

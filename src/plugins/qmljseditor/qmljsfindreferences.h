@@ -49,23 +49,20 @@ public:
     class Usage
     {
     public:
-        Usage()
-            : line(0), col(0), len(0) {}
-
         Usage(const QString &path, const QString &lineText, int line, int col, int len)
             : path(path), lineText(lineText), line(line), col(col), len(len) {}
 
     public:
         QString path;
         QString lineText;
-        int line;
-        int col;
-        int len;
+        int line = 0;
+        int col = 0;
+        int len = 0;
     };
 
 public:
-    FindReferences(QObject *parent = 0);
-    virtual ~FindReferences();
+    FindReferences(QObject *parent = nullptr);
+    ~FindReferences() override;
 
 signals:
     void changed();
@@ -75,14 +72,13 @@ public:
     void renameUsages(const QString &fileName, quint32 offset,
                       const QString &replacement = QString());
 
-    static QList<Usage> findUsageOfType(const QString &fileName, const QString typeName);
+    static QList<Usage> findUsageOfType(const QString &fileName, const QString &typeName);
 
 private:
     void displayResults(int first, int last);
     void searchFinished();
     void cancel();
     void setPaused(bool paused);
-    void openEditor(const Core::SearchResultItem &item);
     void onReplaceButtonClicked(const QString &text, const QList<Core::SearchResultItem> &items, bool preserveCase);
 
     QPointer<Core::SearchResult> m_currentSearch;

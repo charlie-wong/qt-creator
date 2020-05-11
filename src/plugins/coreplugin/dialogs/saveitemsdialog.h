@@ -30,18 +30,11 @@
 
 #include "ui_saveitemsdialog.h"
 
-QT_BEGIN_NAMESPACE
-class QCheckBox;
-QT_END_NAMESPACE
-
 namespace Core {
 
 class IDocument;
-class EditorManager;
 
 namespace Internal {
-
-class MainWindow;
 
 class SaveItemsDialog : public QDialog
 {

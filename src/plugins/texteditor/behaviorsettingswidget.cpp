@@ -28,6 +28,9 @@
 
 #include "tabsettingswidget.h"
 
+#include <coreplugin/coreconstants.h>
+#include <coreplugin/icore.h>
+
 #include <texteditor/typingsettings.h>
 #include <texteditor/storagesettings.h>
 #include <texteditor/behaviorsettings.h>
@@ -59,7 +62,7 @@ BehaviorSettingsWidget::BehaviorSettingsWidget(QWidget *parent)
     QList<int> mibs = QTextCodec::availableMibs();
     Utils::sort(mibs);
     QList<int>::iterator firstNonNegative =
-        std::find_if(mibs.begin(), mibs.end(), std::bind2nd(std::greater_equal<int>(), 0));
+        std::find_if(mibs.begin(), mibs.end(), [](int n) { return n >=0; });
     if (firstNonNegative != mibs.end())
         std::rotate(mibs.begin(), firstNonNegative, mibs.end());
     foreach (int mib, mibs) {
@@ -81,7 +84,9 @@ BehaviorSettingsWidget::BehaviorSettingsWidget(QWidget *parent)
         d->m_codecs.prepend(QTextCodec::codecForLocale());
     }
 
-    auto currentIndexChanged = static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged);
+    d->m_ui.defaultLineEndings->addItems(ExtraEncodingSettings::lineTerminationModeNames());
+
+    auto currentIndexChanged = QOverload<int>::of(&QComboBox::currentIndexChanged);
     connect(d->m_ui.autoIndent, &QAbstractButton::toggled,
             this, &BehaviorSettingsWidget::slotTypingSettingsChanged);
     connect(d->m_ui.smartBackspaceBehavior, currentIndexChanged,
@@ -95,6 +100,8 @@ BehaviorSettingsWidget::BehaviorSettingsWidget(QWidget *parent)
     connect(d->m_ui.addFinalNewLine, &QAbstractButton::clicked,
             this, &BehaviorSettingsWidget::slotStorageSettingsChanged);
     connect(d->m_ui.cleanIndentation, &QAbstractButton::clicked,
+            this, &BehaviorSettingsWidget::slotStorageSettingsChanged);
+    connect(d->m_ui.skipTrailingWhitespace, &QAbstractButton::clicked,
             this, &BehaviorSettingsWidget::slotStorageSettingsChanged);
     connect(d->m_ui.mouseHiding, &QAbstractButton::clicked,
             this, &BehaviorSettingsWidget::slotBehaviorSettingsChanged);
@@ -132,17 +139,30 @@ void BehaviorSettingsWidget::setActive(bool active)
 
 void BehaviorSettingsWidget::setAssignedCodec(QTextCodec *codec)
 {
+    const QString codecName = Core::ICore::settings()->value(
+                Core::Constants::SETTINGS_DEFAULTTEXTENCODING).toString();
+
+    int rememberedSystemPosition = -1;
     for (int i = 0; i < d->m_codecs.size(); ++i) {
         if (codec == d->m_codecs.at(i)) {
-            d->m_ui.encodingBox->setCurrentIndex(i);
-            break;
+            if (d->m_ui.encodingBox->itemText(i) == codecName) {
+                d->m_ui.encodingBox->setCurrentIndex(i);
+                return;
+            } else { // we've got System matching encoding - but have explicitly set the codec
+                rememberedSystemPosition = i;
+            }
         }
     }
+    if (rememberedSystemPosition != -1)
+        d->m_ui.encodingBox->setCurrentIndex(rememberedSystemPosition);
 }
 
-QTextCodec *BehaviorSettingsWidget::assignedCodec() const
+QByteArray BehaviorSettingsWidget::assignedCodecName() const
 {
-    return d->m_codecs.at(d->m_ui.encodingBox->currentIndex());
+    return d->m_ui.encodingBox->currentIndex() == 0
+            ? QByteArray("System")   // we prepend System to the available codecs
+            : d->m_codecs.at(d->m_ui.encodingBox->currentIndex())->name();
+
 }
 
 void BehaviorSettingsWidget::setCodeStyle(ICodeStylePreferences *preferences)
@@ -172,6 +192,9 @@ void BehaviorSettingsWidget::setAssignedStorageSettings(const StorageSettings &s
     d->m_ui.inEntireDocument->setChecked(storageSettings.m_inEntireDocument);
     d->m_ui.cleanIndentation->setChecked(storageSettings.m_cleanIndentation);
     d->m_ui.addFinalNewLine->setChecked(storageSettings.m_addFinalNewLine);
+    d->m_ui.skipTrailingWhitespace->setChecked(storageSettings.m_skipTrailingWhitespace);
+    d->m_ui.ignoreFileTypes->setText(storageSettings.m_ignoreFileTypes);
+    d->m_ui.ignoreFileTypes->setEnabled(d->m_ui.skipTrailingWhitespace->isChecked());
 }
 
 void BehaviorSettingsWidget::assignedStorageSettings(StorageSettings *storageSettings) const
@@ -180,6 +203,8 @@ void BehaviorSettingsWidget::assignedStorageSettings(StorageSettings *storageSet
     storageSettings->m_inEntireDocument = d->m_ui.inEntireDocument->isChecked();
     storageSettings->m_cleanIndentation = d->m_ui.cleanIndentation->isChecked();
     storageSettings->m_addFinalNewLine = d->m_ui.addFinalNewLine->isChecked();
+    storageSettings->m_skipTrailingWhitespace = d->m_ui.skipTrailingWhitespace->isChecked();
+    storageSettings->m_ignoreFileTypes = d->m_ui.ignoreFileTypes->text();
 }
 
 void BehaviorSettingsWidget::updateConstrainTooltipsBoxTooltip() const
@@ -229,6 +254,16 @@ void BehaviorSettingsWidget::assignedExtraEncodingSettings(
         (ExtraEncodingSettings::Utf8BomSetting)d->m_ui.utf8BomBox->currentIndex();
 }
 
+void BehaviorSettingsWidget::setAssignedLineEnding(int lineEnding)
+{
+    d->m_ui.defaultLineEndings->setCurrentIndex(lineEnding);
+}
+
+int BehaviorSettingsWidget::assignedLineEnding() const
+{
+    return d->m_ui.defaultLineEndings->currentIndex();
+}
+
 TabSettingsWidget *BehaviorSettingsWidget::tabSettingsWidget() const
 {
     return d->m_ui.tabPreferencesWidget->tabSettingsWidget();
@@ -245,6 +280,10 @@ void BehaviorSettingsWidget::slotStorageSettingsChanged()
 {
     StorageSettings settings;
     assignedStorageSettings(&settings);
+
+    bool ignoreFileTypesEnabled = d->m_ui.cleanWhitespace->isChecked() && d->m_ui.skipTrailingWhitespace->isChecked();
+    d->m_ui.ignoreFileTypes->setEnabled(ignoreFileTypesEnabled);
+
     emit storageSettingsChanged(settings);
 }
 

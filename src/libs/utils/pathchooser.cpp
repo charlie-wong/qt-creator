@@ -27,6 +27,7 @@
 
 #include "environment.h"
 #include "qtcassert.h"
+#include "macroexpander.h"
 
 #include "synchronousprocess.h"
 #include "hostosinfo.h"
@@ -49,13 +50,15 @@
     This class has some validation logic for embedding into QWizardPage.
 */
 
+namespace Utils {
+
 static QString appBundleExpandedPath(const QString &path)
 {
-    if (Utils::HostOsInfo::hostOs() == Utils::OsTypeMac && path.endsWith(QLatin1String(".app"))) {
+    if (HostOsInfo::hostOs() == OsTypeMac && path.endsWith(".app")) {
         // possibly expand to Foo.app/Contents/MacOS/Foo
         QFileInfo info(path);
         if (info.isDir()) {
-            QString exePath = path + QLatin1String("/Contents/MacOS/") + info.completeBaseName();
+            QString exePath = path + "/Contents/MacOS/" + info.completeBaseName();
             if (QFileInfo::exists(exePath))
                 return exePath;
         }
@@ -63,9 +66,7 @@ static QString appBundleExpandedPath(const QString &path)
     return path;
 }
 
-Utils::PathChooser::AboutToShowContextMenuHandler Utils::PathChooser::s_aboutToShowContextMenuHandler;
-
-namespace Utils {
+PathChooser::AboutToShowContextMenuHandler PathChooser::s_aboutToShowContextMenuHandler;
 
 // ------------------ BinaryVersionToolTipEventFilter
 // Event filter to be installed on a lineedit used for entering
@@ -78,12 +79,12 @@ class BinaryVersionToolTipEventFilter : public QObject
 public:
     explicit BinaryVersionToolTipEventFilter(QLineEdit *le);
 
-    virtual bool eventFilter(QObject *, QEvent *);
+    bool eventFilter(QObject *, QEvent *) override;
 
     QStringList arguments() const { return m_arguments; }
     void setArguments(const QStringList &arguments) { m_arguments = arguments; }
 
-    static QString toolVersion(const QString &binary, const QStringList &arguments);
+    static QString toolVersion(const CommandLine &cmd);
 
 private:
     // Extension point for concatenating existing tooltips.
@@ -102,37 +103,38 @@ bool BinaryVersionToolTipEventFilter::eventFilter(QObject *o, QEvent *e)
 {
     if (e->type() != QEvent::ToolTip)
         return false;
-    QLineEdit *le = qobject_cast<QLineEdit *>(o);
+    auto le = qobject_cast<QLineEdit *>(o);
     QTC_ASSERT(le, return false);
 
     const QString binary = le->text();
     if (!binary.isEmpty()) {
-        const QString version = BinaryVersionToolTipEventFilter::toolVersion(QDir::cleanPath(binary), m_arguments);
+        const QString version = BinaryVersionToolTipEventFilter::toolVersion(
+                    CommandLine(QDir::cleanPath(binary), m_arguments));
         if (!version.isEmpty()) {
             // Concatenate tooltips.
-            QString tooltip = QLatin1String("<html><head/><body>");
+            QString tooltip = "<html><head/><body>";
             const QString defaultValue = defaultToolTip();
             if (!defaultValue.isEmpty()) {
-                tooltip += QLatin1String("<p>");
+                tooltip += "<p>";
                 tooltip += defaultValue;
-                tooltip += QLatin1String("</p>");
+                tooltip += "</p>";
             }
-            tooltip += QLatin1String("<pre>");
+            tooltip += "<pre>";
             tooltip += version;
-            tooltip += QLatin1String("</pre><body></html>");
+            tooltip += "</pre><body></html>";
             le->setToolTip(tooltip);
         }
     }
     return false;
 }
 
-QString BinaryVersionToolTipEventFilter::toolVersion(const QString &binary, const QStringList &arguments)
+QString BinaryVersionToolTipEventFilter::toolVersion(const CommandLine &cmd)
 {
-    if (binary.isEmpty())
+    if (cmd.executable().isEmpty())
         return QString();
     SynchronousProcess proc;
     proc.setTimeoutS(1);
-    SynchronousProcessResponse response = proc.runBlocking(binary, arguments);
+    SynchronousProcessResponse response = proc.runBlocking(cmd);
     if (response.result != SynchronousProcessResponse::Finished)
         return QString();
     return response.allOutput();
@@ -147,10 +149,10 @@ public:
         BinaryVersionToolTipEventFilter(pe->lineEdit()), m_pathChooser(pe) {}
 
 private:
-    virtual QString defaultToolTip() const
+    QString defaultToolTip() const override
         { return m_pathChooser->errorMessage(); }
 
-    const PathChooser *m_pathChooser;
+    const PathChooser *m_pathChooser = nullptr;
 };
 
 // ------------------ PathChooserPrivate
@@ -162,24 +164,26 @@ public:
 
     QString expandedPath(const QString &path) const;
 
-    QHBoxLayout *m_hLayout;
-    FancyLineEdit *m_lineEdit;
+    QHBoxLayout *m_hLayout = nullptr;
+    FancyLineEdit *m_lineEdit = nullptr;
 
-    PathChooser::Kind m_acceptingKind;
+    PathChooser::Kind m_acceptingKind = PathChooser::ExistingDirectory;
     QString m_dialogTitleOverride;
     QString m_dialogFilter;
     QString m_initialBrowsePathOverride;
-    QString m_baseDirectory;
+    FilePath m_baseDirectory;
     Environment m_environment;
-    BinaryVersionToolTipEventFilter *m_binaryVersionToolTipEventFilter;
+    BinaryVersionToolTipEventFilter *m_binaryVersionToolTipEventFilter = nullptr;
     QList<QAbstractButton *> m_buttons;
+    MacroExpander *m_macroExpander = globalMacroExpander();
+
+    bool m_isReadOnly = false;
+    bool m_isFileDialogOnly = false;
 };
 
-PathChooserPrivate::PathChooserPrivate() :
-    m_hLayout(new QHBoxLayout),
-    m_lineEdit(new FancyLineEdit),
-    m_acceptingKind(PathChooser::ExistingDirectory),
-    m_binaryVersionToolTipEventFilter(0)
+PathChooserPrivate::PathChooserPrivate()
+    : m_hLayout(new QHBoxLayout)
+    , m_lineEdit(new FancyLineEdit)
 {
 }
 
@@ -187,14 +191,19 @@ QString PathChooserPrivate::expandedPath(const QString &input) const
 {
     if (input.isEmpty())
         return input;
-    const QString path = FileName::fromUserInput(m_environment.expandVariables(input)).toString();
+
+    QString expandedInput = m_environment.expandVariables(input);
+    if (m_macroExpander)
+        expandedInput = m_macroExpander->expand(expandedInput);
+
+    const QString path = FilePath::fromUserInput(expandedInput).toString();
     if (path.isEmpty())
         return path;
 
     switch (m_acceptingKind) {
     case PathChooser::Command:
     case PathChooser::ExistingCommand: {
-        const FileName expanded = m_environment.searchInPath(path, QStringList(m_baseDirectory));
+        const FilePath expanded = m_environment.searchInPath(path, {m_baseDirectory});
         return expanded.isEmpty() ? path : expanded.toString();
     }
     case PathChooser::Any:
@@ -204,7 +213,7 @@ QString PathChooserPrivate::expandedPath(const QString &input) const
     case PathChooser::File:
     case PathChooser::SaveFile:
         if (!m_baseDirectory.isEmpty() && QFileInfo(path).isRelative())
-            return QFileInfo(m_baseDirectory + QLatin1Char('/') + path).absoluteFilePath();
+            return m_baseDirectory.pathAppended(path).toFileInfo().absoluteFilePath();
         break;
     }
     return path;
@@ -216,18 +225,21 @@ PathChooser::PathChooser(QWidget *parent) :
 {
     d->m_hLayout->setContentsMargins(0, 0, 0, 0);
 
-    d->m_lineEdit->setContextMenuPolicy(Qt::CustomContextMenu);
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    d->m_lineEdit->setContextMenuPolicy(Qt::NoContextMenu);
 
-    connect(d->m_lineEdit, &FancyLineEdit::customContextMenuRequested, this, &PathChooser::contextMenuRequested);
+    connect(this,
+            &FancyLineEdit::customContextMenuRequested,
+            this,
+            &PathChooser::contextMenuRequested);
     connect(d->m_lineEdit, &FancyLineEdit::validReturnPressed, this, &PathChooser::returnPressed);
     connect(d->m_lineEdit, &QLineEdit::textChanged, this,
             [this] { emit rawPathChanged(rawPath()); });
     connect(d->m_lineEdit, &FancyLineEdit::validChanged, this, &PathChooser::validChanged);
     connect(d->m_lineEdit, &QLineEdit::editingFinished, this, &PathChooser::editingFinished);
-    connect(d->m_lineEdit, &QLineEdit::textChanged, this, [this] { emit pathChanged(path()); });
+    connect(d->m_lineEdit, &QLineEdit::textChanged, this, [this] { emit pathChanged(d->m_lineEdit->text()); });
 
     d->m_lineEdit->setMinimumWidth(120);
-    d->m_lineEdit->setErrorColor(creatorTheme()->color(Theme::TextColorError));
     d->m_hLayout->addWidget(d->m_lineEdit);
     d->m_hLayout->setSizeConstraint(QLayout::SetMinimumSize);
 
@@ -262,6 +274,7 @@ void PathChooser::insertButton(int index, const QString &text, QObject *context,
     connect(button, &QAbstractButton::clicked, context, callback);
     d->m_hLayout->insertWidget(index + 1/*line edit*/, button);
     d->m_buttons.insert(index, button);
+    updateReadOnlyStateOfSubwidgets();
 }
 
 QString PathChooser::browseButtonLabel()
@@ -274,34 +287,24 @@ QAbstractButton *PathChooser::buttonAtIndex(int index) const
     return d->m_buttons.at(index);
 }
 
-QString PathChooser::baseDirectory() const
+void PathChooser::setBaseDirectory(const FilePath &base)
+{
+    if (d->m_baseDirectory == base)
+        return;
+    d->m_baseDirectory = base;
+    triggerChanged();
+}
+
+FilePath PathChooser::baseDirectory() const
 {
     return d->m_baseDirectory;
 }
 
-void PathChooser::setBaseDirectory(const QString &directory)
-{
-    if (d->m_baseDirectory == directory)
-        return;
-    d->m_baseDirectory = directory;
-    triggerChanged();
-}
-
-FileName PathChooser::baseFileName() const
-{
-    return FileName::fromString(d->m_baseDirectory);
-}
-
-void PathChooser::setBaseFileName(const FileName &base)
-{
-    setBaseDirectory(base.toString());
-}
-
 void PathChooser::setEnvironment(const Environment &env)
 {
-    QString oldExpand = path();
+    QString oldExpand = filePath().toString();
     d->m_environment = env;
-    if (path() != oldExpand) {
+    if (filePath().toString() != oldExpand) {
         triggerChanged();
         emit rawPathChanged(rawPath());
     }
@@ -312,19 +315,14 @@ QString PathChooser::rawPath() const
     return rawFileName().toString();
 }
 
-QString PathChooser::path() const
+FilePath PathChooser::rawFileName() const
 {
-    return fileName().toString();
+    return FilePath::fromString(QDir::fromNativeSeparators(d->m_lineEdit->text()));
 }
 
-FileName PathChooser::rawFileName() const
+FilePath PathChooser::filePath() const
 {
-    return FileName::fromString(QDir::fromNativeSeparators(d->m_lineEdit->text()));
-}
-
-FileName PathChooser::fileName() const
-{
-    return FileName::fromUserInput(d->expandedPath(rawFileName().toString()));
+    return FilePath::fromUserInput(d->expandedPath(rawFileName().toString()));
 }
 
 // FIXME: try to remove again
@@ -337,47 +335,47 @@ QString PathChooser::expandedDirectory(const QString &input, const Environment &
     if (path.isEmpty())
         return path;
     if (!baseDir.isEmpty() && QFileInfo(path).isRelative())
-        return QFileInfo(baseDir + QLatin1Char('/') + path).absoluteFilePath();
+        return QFileInfo(baseDir + '/' + path).absoluteFilePath();
     return path;
 }
 
 void PathChooser::setPath(const QString &path)
 {
-    d->m_lineEdit->setText(QDir::toNativeSeparators(path));
+    d->m_lineEdit->setTextKeepingActiveCursor(QDir::toNativeSeparators(path));
 }
 
-void PathChooser::setFileName(const FileName &fn)
+void PathChooser::setFilePath(const FilePath &fn)
 {
-    d->m_lineEdit->setText(fn.toUserOutput());
-}
-
-void PathChooser::setErrorColor(const QColor &errorColor)
-{
-    d->m_lineEdit->setErrorColor(errorColor);
-}
-
-void PathChooser::setOkColor(const QColor &okColor)
-{
-    d->m_lineEdit->setOkColor(okColor);
+    d->m_lineEdit->setTextKeepingActiveCursor(fn.toUserOutput());
 }
 
 bool PathChooser::isReadOnly() const
 {
-    return d->m_lineEdit->isReadOnly();
+    return d->m_isReadOnly;
 }
 
 void PathChooser::setReadOnly(bool b)
 {
-    d->m_lineEdit->setReadOnly(b);
-    foreach (QAbstractButton *button, d->m_buttons)
-        button->setEnabled(!b);
+    d->m_isReadOnly = b;
+    updateReadOnlyStateOfSubwidgets();
+}
+
+bool PathChooser::isFileDialogOnly() const
+{
+    return d->m_isFileDialogOnly;
+}
+
+void PathChooser::setFileDialogOnly(bool b)
+{
+    d->m_isFileDialogOnly = b;
+    updateReadOnlyStateOfSubwidgets();
 }
 
 void PathChooser::slotBrowse()
 {
     emit beforeBrowsing();
 
-    QString predefined = path();
+    QString predefined = filePath().toString();
     QFileInfo fi(predefined);
 
     if (!predefined.isEmpty() && !fi.isDir()) {
@@ -442,6 +440,10 @@ void PathChooser::slotBrowse()
         break;
     }
 
+    // work around QTBUG-61004 / QTCREATORBUG-22906
+    window()->raise();
+    window()->activateWindow();
+
     // Delete trailing slashes unless it is "/"|"\\", only
     if (!newPath.isEmpty()) {
         newPath = QDir::toNativeSeparators(newPath);
@@ -456,14 +458,29 @@ void PathChooser::slotBrowse()
 
 void PathChooser::contextMenuRequested(const QPoint &pos)
 {
-    if (QMenu *menu = d->m_lineEdit->createStandardContextMenu()) {
+    if (!d->m_lineEdit->rect().contains(pos))
+        return;
+    QMenu *menu = d->m_lineEdit->createStandardContextMenu();
+    if (!menu)
+        menu = new QMenu;
+    if (s_aboutToShowContextMenuHandler)
+        s_aboutToShowContextMenuHandler(this, menu);
+    if (!menu->actions().isEmpty()) {
         menu->setAttribute(Qt::WA_DeleteOnClose);
-
-        if (s_aboutToShowContextMenuHandler)
-            s_aboutToShowContextMenuHandler(this, menu);
-
-        menu->popup(d->m_lineEdit->mapToGlobal(pos));
+        menu->popup(mapToGlobal(pos));
+    } else {
+        delete menu;
     }
+}
+
+void PathChooser::updateReadOnlyStateOfSubwidgets()
+{
+    const bool readOnlyLineEdit = d->m_isReadOnly || d->m_isFileDialogOnly;
+    d->m_lineEdit->setEnabled(!readOnlyLineEdit);
+    d->m_lineEdit->setReadOnly(readOnlyLineEdit);
+    setFocusPolicy(d->m_lineEdit->focusPolicy());
+    for (QAbstractButton *button : qAsConst(d->m_buttons))
+        button->setEnabled(!d->m_isReadOnly);
 }
 
 bool PathChooser::isValid() const
@@ -484,16 +501,6 @@ void PathChooser::triggerChanged()
 void PathChooser::setAboutToShowContextMenuHandler(PathChooser::AboutToShowContextMenuHandler handler)
 {
     s_aboutToShowContextMenuHandler = handler;
-}
-
-QColor PathChooser::errorColor() const
-{
-    return d->m_lineEdit->errorColor();
-}
-
-QColor PathChooser::okColor() const
-{
-    return d->m_lineEdit->okColor();
 }
 
 FancyLineEdit::ValidationFunction PathChooser::defaultValidationFunction() const
@@ -521,7 +528,7 @@ bool PathChooser::validatePath(FancyLineEdit *edit, QString *errorMessage) const
 
     // Check if existing
     switch (d->m_acceptingKind) {
-    case PathChooser::ExistingDirectory: // fall through
+    case PathChooser::ExistingDirectory:
         if (!fi.exists()) {
             if (errorMessage)
                 *errorMessage = tr("The path \"%1\" does not exist.").arg(QDir::toNativeSeparators(expandedPath));
@@ -533,7 +540,7 @@ bool PathChooser::validatePath(FancyLineEdit *edit, QString *errorMessage) const
             return false;
         }
         break;
-    case PathChooser::File: // fall through
+    case PathChooser::File:
         if (!fi.exists()) {
             if (errorMessage)
                 *errorMessage = tr("The path \"%1\" does not exist.").arg(QDir::toNativeSeparators(expandedPath));
@@ -576,7 +583,7 @@ bool PathChooser::validatePath(FancyLineEdit *edit, QString *errorMessage) const
             return false;
         }
         break;
-    case PathChooser::Command: // fall through
+    case PathChooser::Command:
         if (fi.exists() && !fi.isExecutable()) {
             if (errorMessage)
                 *errorMessage = tr("Cannot execute \"%1\".").arg(QDir::toNativeSeparators(expandedPath));
@@ -639,6 +646,7 @@ QString PathChooser::promptDialogTitle() const
 void PathChooser::setPromptDialogFilter(const QString &filter)
 {
     d->m_dialogFilter = filter;
+    d->m_lineEdit->validate();
 }
 
 QString PathChooser::promptDialogFilter() const
@@ -663,24 +671,29 @@ FancyLineEdit *PathChooser::lineEdit() const
 {
     // HACK: Make it work with HistoryCompleter.
     if (d->m_lineEdit->objectName().isEmpty())
-        d->m_lineEdit->setObjectName(objectName() + QLatin1String("LineEdit"));
+        d->m_lineEdit->setObjectName(objectName() + "LineEdit");
     return d->m_lineEdit;
 }
 
 QString PathChooser::toolVersion(const QString &binary, const QStringList &arguments)
 {
-    return BinaryVersionToolTipEventFilter::toolVersion(binary, arguments);
+    return BinaryVersionToolTipEventFilter::toolVersion({binary, arguments});
 }
 
 void PathChooser::installLineEditVersionToolTip(QLineEdit *le, const QStringList &arguments)
 {
-    BinaryVersionToolTipEventFilter *ef = new BinaryVersionToolTipEventFilter(le);
+    auto ef = new BinaryVersionToolTipEventFilter(le);
     ef->setArguments(arguments);
 }
 
 void PathChooser::setHistoryCompleter(const QString &historyKey, bool restoreLastItemFromHistory)
 {
     d->m_lineEdit->setHistoryCompleter(historyKey, restoreLastItemFromHistory);
+}
+
+void PathChooser::setMacroExpander(MacroExpander *macroExpander)
+{
+    d->m_macroExpander = macroExpander;
 }
 
 QStringList PathChooser::commandVersionArguments() const
@@ -695,7 +708,7 @@ void PathChooser::setCommandVersionArguments(const QStringList &arguments)
     if (arguments.isEmpty()) {
         if (d->m_binaryVersionToolTipEventFilter) {
             delete d->m_binaryVersionToolTipEventFilter;
-            d->m_binaryVersionToolTipEventFilter = 0;
+            d->m_binaryVersionToolTipEventFilter = nullptr;
         }
     } else {
         if (!d->m_binaryVersionToolTipEventFilter)

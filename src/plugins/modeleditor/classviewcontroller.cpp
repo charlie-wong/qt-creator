@@ -38,7 +38,7 @@ ClassViewController::ClassViewController(QObject *parent)
 {
 }
 
-QSet<QString> ClassViewController::findClassDeclarations(const QString &fileName)
+QSet<QString> ClassViewController::findClassDeclarations(const QString &fileName, int line, int column)
 {
     QSet<QString> classNames;
 
@@ -48,37 +48,42 @@ QSet<QString> ClassViewController::findClassDeclarations(const QString &fileName
     // scan original file
     CPlusPlus::Document::Ptr document = snapshot.document(fileName);
     if (!document.isNull())
-        appendClassDeclarationsFromDocument(document, &classNames);
+        appendClassDeclarationsFromDocument(document, line, column, &classNames);
 
-    QString otherFileName = CppTools::correspondingHeaderOrSource(fileName);
+    if (line <= 0) {
+        QString otherFileName = CppTools::correspondingHeaderOrSource(fileName);
 
-    // scan other file
-    document = snapshot.document(otherFileName);
-    if (!document.isNull())
-        appendClassDeclarationsFromDocument(document, &classNames);
-
+        // scan other file
+        document = snapshot.document(otherFileName);
+        if (!document.isNull())
+            appendClassDeclarationsFromDocument(document, -1, -1, &classNames);
+    }
     return classNames;
 }
 
 void ClassViewController::appendClassDeclarationsFromDocument(CPlusPlus::Document::Ptr document,
-                                                            QSet<QString> *classNames)
+                                                              int line, int column,
+                                                              QSet<QString> *classNames)
 {
     int total = document->globalSymbolCount();
     for (int i = 0; i < total; ++i) {
         CPlusPlus::Symbol *symbol = document->globalSymbolAt(i);
-        appendClassDeclarationsFromSymbol(symbol, classNames);
+        appendClassDeclarationsFromSymbol(symbol, line, column, classNames);
     }
 }
 
 void ClassViewController::appendClassDeclarationsFromSymbol(CPlusPlus::Symbol *symbol,
-                                                          QSet<QString> *classNames)
+                                                            int line, int column,
+                                                            QSet<QString> *classNames)
 {
-    if (symbol->isClass()) {
+    if (symbol->isClass()
+            && (line <= 0 || (symbol->line() == line && symbol->column() == column + 1)))
+    {
         CPlusPlus::Overview overview;
         QString className = overview.prettyName(
                     CPlusPlus::LookupContext::fullyQualifiedName(symbol));
         // Ignore private class created by Q_OBJECT macro
-        if (!className.endsWith(QStringLiteral("::QPrivateSignal")))
+        if (!className.endsWith("::QPrivateSignal"))
             classNames->insert(className);
     }
 
@@ -87,7 +92,7 @@ void ClassViewController::appendClassDeclarationsFromSymbol(CPlusPlus::Symbol *s
         int total = scope->memberCount();
         for (int i = 0; i < total; ++i) {
             CPlusPlus::Symbol *member = scope->memberAt(i);
-            appendClassDeclarationsFromSymbol(member, classNames);
+            appendClassDeclarationsFromSymbol(member, line, column, classNames);
         }
     }
 }

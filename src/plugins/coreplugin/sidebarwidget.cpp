@@ -48,15 +48,14 @@ public:
     explicit SideBarComboBox(SideBarWidget *sideBarWidget) : m_sideBarWidget(sideBarWidget) {}
 
 private:
-    virtual const Command *command(const QString &text) const
+    const Command *command(const QString &text) const override
         { return m_sideBarWidget->command(text); }
 
     SideBarWidget *m_sideBarWidget;
 };
 
 SideBarWidget::SideBarWidget(SideBar *sideBar, const QString &id)
-    : m_currentItem(0)
-    , m_sideBar(sideBar)
+    : m_sideBar(sideBar)
 {
     m_comboBox = new SideBarComboBox(this);
     m_comboBox->setMinimumContentsLength(15);
@@ -81,8 +80,8 @@ SideBarWidget::SideBarWidget(SideBar *sideBar, const QString &id)
     connect(m_closeAction, &QAction::triggered, this, &SideBarWidget::closeMe);
     m_toolbar->addAction(m_closeAction);
 
-    QVBoxLayout *lay = new QVBoxLayout();
-    lay->setMargin(0);
+    auto lay = new QVBoxLayout();
+    lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
     setLayout(lay);
     lay->addWidget(m_toolbar);
@@ -90,7 +89,7 @@ SideBarWidget::SideBarWidget(SideBar *sideBar, const QString &id)
     QStringList titleList = m_sideBar->availableItemTitles();
     Utils::sort(titleList);
     QString t = id;
-    if (titleList.count()) {
+    if (!titleList.isEmpty()) {
         foreach (const QString &itemTitle, titleList)
             m_comboBox->addItem(itemTitle, m_sideBar->idForTitle(itemTitle));
 
@@ -100,13 +99,11 @@ SideBarWidget::SideBarWidget(SideBar *sideBar, const QString &id)
     }
     setCurrentItem(t);
 
-    connect(m_comboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+    connect(m_comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SideBarWidget::setCurrentIndex);
 }
 
-SideBarWidget::~SideBarWidget()
-{
-}
+SideBarWidget::~SideBarWidget() = default;
 
 QString SideBarWidget::currentItemTitle() const
 {
@@ -128,9 +125,8 @@ void SideBarWidget::setCurrentItem(const QString &id)
         if (idx < 0)
             idx = 0;
 
-        bool blocked = m_comboBox->blockSignals(true);
+        QSignalBlocker blocker(m_comboBox);
         m_comboBox->setCurrentIndex(idx);
-        m_comboBox->blockSignals(blocked);
     }
 
     SideBarItem *item = m_sideBar->item(id);
@@ -149,7 +145,7 @@ void SideBarWidget::setCurrentItem(const QString &id)
 
 void SideBarWidget::updateAvailableItems()
 {
-    bool blocked = m_comboBox->blockSignals(true);
+    QSignalBlocker blocker(m_comboBox);
     QString currentTitle = m_comboBox->currentText();
     m_comboBox->clear();
     QStringList titleList = m_sideBar->availableItemTitles();
@@ -167,7 +163,6 @@ void SideBarWidget::updateAvailableItems()
 
     m_comboBox->setCurrentIndex(idx);
     m_splitAction->setEnabled(titleList.count() > 1);
-    m_comboBox->blockSignals(blocked);
 }
 
 void SideBarWidget::removeCurrentItem()
@@ -178,14 +173,14 @@ void SideBarWidget::removeCurrentItem()
     QWidget *w = m_currentItem->widget();
     w->hide();
     layout()->removeWidget(w);
-    w->setParent(0);
+    w->setParent(nullptr);
     m_sideBar->makeItemAvailable(m_currentItem);
 
     // Delete custom toolbar widgets
     qDeleteAll(m_addedToolBarActions);
     m_addedToolBarActions.clear();
 
-    m_currentItem = 0;
+    m_currentItem = nullptr;
 }
 
 void SideBarWidget::setCurrentIndex(int)
@@ -199,12 +194,12 @@ Command *SideBarWidget::command(const QString &title) const
 {
     const QString id = m_sideBar->idForTitle(title);
     if (id.isEmpty())
-        return 0;
+        return nullptr;
     const QMap<QString, Command*> shortcutMap = m_sideBar->shortcutMap();
     QMap<QString, Command*>::const_iterator r = shortcutMap.find(id);
     if (r != shortcutMap.end())
         return r.value();
-    return 0;
+    return nullptr;
 }
 
 void SideBarWidget::setCloseIcon(const QIcon &icon)

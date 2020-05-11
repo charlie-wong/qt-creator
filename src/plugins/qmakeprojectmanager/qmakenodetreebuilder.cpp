@@ -37,13 +37,12 @@
 #include <utils/algorithm.h>
 #include <utils/qtcassert.h>
 
-#include <QApplication>
-#include <QStyle>
-
 using namespace Core;
 using namespace ProjectExplorer;
 using namespace QtSupport;
 using namespace Utils;
+
+using namespace QmakeProjectManager::Internal;
 
 namespace {
 
@@ -96,6 +95,8 @@ public:
 
     QVector<FileTypeData> fileTypeData;
     QIcon projectIcon;
+    QIcon productIcon;
+    QIcon groupIcon;
 };
 
 void clearQmakeStaticData();
@@ -106,23 +107,17 @@ QmakeStaticData::QmakeStaticData()
     const unsigned count = sizeof(fileTypeDataStorage)/sizeof(FileTypeDataStorage);
     fileTypeData.reserve(count);
 
-    // Overlay the SP_DirIcon with the custom icons
-    const QSize desiredSize = QSize(16, 16);
-
-    const QPixmap dirPixmap = QApplication::style()->standardIcon(QStyle::SP_DirIcon).pixmap(desiredSize);
-    for (unsigned i = 0 ; i < count; ++i) {
-        const QIcon overlayIcon(QLatin1String(fileTypeDataStorage[i].icon));
-        QIcon folderIcon;
-        folderIcon.addPixmap(FileIconProvider::overlayIcon(dirPixmap, overlayIcon));
-        const QString desc = QCoreApplication::translate("QmakeProjectManager::QmakePriFile", fileTypeDataStorage[i].typeName);
-        const QString filter = QString::fromUtf8(fileTypeDataStorage[i].addFileFilter);
-        fileTypeData.push_back(QmakeStaticData::FileTypeData(fileTypeDataStorage[i].type,
-                                                                 desc, filter, folderIcon));
+    for (const FileTypeDataStorage &fileType : fileTypeDataStorage) {
+        const QString desc = QCoreApplication::translate("QmakeProjectManager::QmakePriFile", fileType.typeName);
+        const QString filter = QString::fromUtf8(fileType.addFileFilter);
+        fileTypeData.push_back(QmakeStaticData::FileTypeData(fileType.type,
+                                                             desc, filter,
+                                                             Core::FileIconProvider::directoryIcon(QLatin1String(fileType.icon))));
     }
     // Project icon
-    const QIcon projectBaseIcon(ProjectExplorer::Constants::FILEOVERLAY_QT);
-    const QPixmap projectPixmap = FileIconProvider::overlayIcon(dirPixmap, projectBaseIcon);
-    projectIcon.addPixmap(projectPixmap);
+    projectIcon = Core::FileIconProvider::directoryIcon(ProjectExplorer::Constants::FILEOVERLAY_QT);
+    productIcon = Core::FileIconProvider::directoryIcon(ProjectExplorer::Constants::FILEOVERLAY_PRODUCT);
+    groupIcon = Core::FileIconProvider::directoryIcon(ProjectExplorer::Constants::FILEOVERLAY_GROUP);
 
     qAddPostRoutine(clearQmakeStaticData);
 }
@@ -133,89 +128,141 @@ void clearQmakeStaticData()
 {
     qmakeStaticData()->fileTypeData.clear();
     qmakeStaticData()->projectIcon = QIcon();
+    qmakeStaticData()->productIcon = QIcon();
+    qmakeStaticData()->groupIcon = QIcon();
 }
 
 } // namespace
 
 namespace QmakeProjectManager {
 
-static void createTree(const QmakePriFile *pri, QmakePriFileNode *node, const FileNameList &toExclude)
+static QIcon iconForProfile(const QmakeProFile *proFile)
+{
+    return proFile->projectType() == ProjectType::SubDirsTemplate ? qmakeStaticData()->projectIcon
+                                                                  : qmakeStaticData()->productIcon;
+}
+
+static void createTree(QmakeBuildSystem *buildSystem,
+                       const QmakePriFile *pri,
+                       QmakePriFileNode *node,
+                       const FilePaths &toExclude)
 {
     QTC_ASSERT(pri, return);
     QTC_ASSERT(node, return);
 
     node->setDisplayName(pri->displayName());
-    node->setIcon(qmakeStaticData()->projectIcon);
 
     // .pro/.pri-file itself:
-    node->addNode(new FileNode(pri->filePath(), FileType::Project, false));
+    node->addNode(std::make_unique<FileNode>(pri->filePath(), FileType::Project));
 
     // other normal files:
     const QVector<QmakeStaticData::FileTypeData> &fileTypes = qmakeStaticData()->fileTypeData;
+    FilePaths generatedFiles;
+    const auto proFile = dynamic_cast<const QmakeProFile *>(pri);
     for (int i = 0; i < fileTypes.size(); ++i) {
         FileType type = fileTypes.at(i).type;
-        const QSet<FileName> &newFilePaths = Utils::filtered(pri->files(type), [&toExclude](const Utils::FileName &fn) {
-            return !Utils::contains(toExclude, [&fn](const Utils::FileName &ex) { return fn.isChildOf(ex); });
+        const SourceFiles &newFilePaths = Utils::filtered(pri->files(type), [&toExclude](const SourceFile &fn) {
+            return !Utils::contains(toExclude, [&fn](const Utils::FilePath &ex) { return fn.first.isChildOf(ex); });
         });
+        if (proFile) {
+            for (const SourceFile &fp : newFilePaths) {
+                for (const ExtraCompiler *ec : proFile->extraCompilers()) {
+                    if (ec->source() == fp.first)
+                        generatedFiles << ec->targets();
+                }
+            }
+        }
 
         if (!newFilePaths.isEmpty()) {
-            auto vfolder = new VirtualFolderNode(pri->filePath().parentDir(), Node::DefaultVirtualFolderPriority - i);
+            auto vfolder = std::make_unique<VirtualFolderNode>(pri->filePath().parentDir());
+            vfolder->setPriority(Node::DefaultVirtualFolderPriority - i);
             vfolder->setIcon(fileTypes.at(i).icon);
             vfolder->setDisplayName(fileTypes.at(i).typeName);
             vfolder->setAddFileFilter(fileTypes.at(i).addFileFilter);
 
             if (type == FileType::Resource) {
-                for (const FileName &file : newFilePaths) {
-                    auto vfs = pri->project()->qmakeVfs();
+                for (const auto &file : newFilePaths) {
+                    auto vfs = buildSystem->qmakeVfs();
                     QString contents;
                     QString errorMessage;
                     // Prefer the cumulative file if it's non-empty, based on the assumption
                     // that it contains more "stuff".
-                    vfs->readFile(file.toString(), QMakeVfs::VfsCumulative, &contents, &errorMessage);
+                    int cid = vfs->idForFileName(file.first.toString(), QMakeVfs::VfsCumulative);
+                    vfs->readFile(cid, &contents, &errorMessage);
                     // If the cumulative evaluation botched the file too much, try the exact one.
-                    if (contents.isEmpty())
-                        vfs->readFile(file.toString(), QMakeVfs::VfsExact, &contents, &errorMessage);
-                    auto resourceNode = new ResourceEditor::ResourceTopLevelNode(file, false, contents, vfolder);
-                    vfolder->addNode(resourceNode);
+                    if (contents.isEmpty()) {
+                        int eid = vfs->idForFileName(file.first.toString(), QMakeVfs::VfsExact);
+                        vfs->readFile(eid, &contents, &errorMessage);
+                    }
+                    auto topLevel = std::make_unique<ResourceEditor::ResourceTopLevelNode>
+                                     (file.first, vfolder->filePath(), contents);
+                    topLevel->setEnabled(file.second == FileOrigin::ExactParse);
+                    const QString baseName = file.first.toFileInfo().completeBaseName();
+                    topLevel->setIsGenerated(baseName.startsWith("qmake_")
+                            || baseName.endsWith("_qmlcache"));
+                    vfolder->addNode(std::move(topLevel));
                 }
             } else {
-                for (const FileName &fn : newFilePaths) {
+                for (const auto &fn : newFilePaths) {
                     // Qmake will flag everything in SOURCES as source, even when the
                     // qt quick compiler moves qrc files into it:-/ Get better data based on
                     // the filename.
-                    type = FileNode::fileTypeForFileName(fn);
-                    vfolder->addNestedNode(new FileNode(fn, type, false));
+                    type = FileNode::fileTypeForFileName(fn.first);
+                    auto fileNode = std::make_unique<FileNode>(fn.first, type);
+                    fileNode->setEnabled(fn.second == FileOrigin::ExactParse);
+                    vfolder->addNestedNode(std::move(fileNode));
                 }
                 for (FolderNode *fn : vfolder->folderNodes())
                     fn->compress();
             }
-            node->addNode(vfolder);
+            node->addNode(std::move(vfolder));
         }
     }
 
+    if (!generatedFiles.empty()) {
+        QTC_CHECK(proFile);
+        const FilePath baseDir = generatedFiles.size() == 1 ? generatedFiles.first().parentDir()
+                                                            : buildSystem->buildDir(proFile->filePath());
+        auto genFolder = std::make_unique<VirtualFolderNode>(baseDir);
+        genFolder->setDisplayName(QCoreApplication::translate("QmakeProjectManager::QmakePriFile",
+                                                              "Generated Files"));
+        genFolder->setIsGenerated(true);
+        for (const FilePath &fp : generatedFiles) {
+            auto fileNode = std::make_unique<FileNode>(fp, FileNode::fileTypeForFileName(fp));
+            fileNode->setIsGenerated(true);
+            genFolder->addNestedNode(std::move(fileNode));
+        }
+        node->addNode(std::move(genFolder));
+    }
+
     // Virtual folders:
-    for (const QmakePriFile *c : pri->children()) {
-        QmakePriFileNode *newNode = nullptr;
-        if (dynamic_cast<const QmakeProFile *>(c))
-            newNode = new QmakeProFileNode(c->project(), c->filePath());
-        else
-            newNode = new QmakePriFileNode(c->project(), node->proFileNode(), c->filePath());
-        createTree(c, newNode, toExclude);
-        node->addNode(newNode);
+    for (QmakePriFile *c : pri->children()) {
+        std::unique_ptr<QmakePriFileNode> newNode;
+        if (auto pf = dynamic_cast<QmakeProFile *>(c)) {
+            newNode = std::make_unique<QmakeProFileNode>(c->buildSystem(), c->filePath(), pf);
+            newNode->setIcon(iconForProfile(pf));
+        } else {
+            newNode = std::make_unique<QmakePriFileNode>(c->buildSystem(), node->proFileNode(),
+                                                         c->filePath(), c);
+            newNode->setIcon(qmakeStaticData->groupIcon);
+        }
+        createTree(buildSystem, c, newNode.get(), toExclude);
+        node->addNode(std::move(newNode));
     }
 }
 
-QmakeProFileNode *QmakeNodeTreeBuilder::buildTree(QmakeProject *project)
+std::unique_ptr<QmakeProFileNode> QmakeNodeTreeBuilder::buildTree(QmakeBuildSystem *buildSystem)
 {
     // Remove qmake implementation details that litter up the project data:
-    Target *t = project->activeTarget();
-    Kit *k = t ? t->kit() : KitManager::defaultKit();
-    BaseQtVersion *qt = k ? QtKitInformation::qtVersion(k) : nullptr;
+    BaseQtVersion *qt = QtKitAspect::qtVersion(buildSystem->kit());
 
-    const FileNameList toExclude = qt ? qt->directoriesToIgnoreInProjectTree() : FileNameList();
+    const FilePaths toExclude = qt ? qt->directoriesToIgnoreInProjectTree() : FilePaths();
 
-    auto root = new QmakeProFileNode(project, project->projectFilePath());
-    createTree(project->rootProFile(), root, toExclude);
+    auto root = std::make_unique<QmakeProFileNode>(buildSystem,
+                                                   buildSystem->projectFilePath(),
+                                                   buildSystem->rootProFile());
+    root->setIcon(iconForProfile(buildSystem->rootProFile()));
+    createTree(buildSystem, buildSystem->rootProFile(), root.get(), toExclude);
 
     return root;
 }

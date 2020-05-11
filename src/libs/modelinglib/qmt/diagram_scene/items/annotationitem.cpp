@@ -60,7 +60,7 @@ public:
 
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
     {
-        QMT_CHECK(option);
+        QMT_ASSERT(option, return);
 
         QStyleOptionGraphicsItem option2(*option);
         option2.state &= ~(QStyle::State_Selected | QStyle::State_HasFocus);
@@ -87,9 +87,9 @@ QRectF AnnotationItem::boundingRect() const
 
 void AnnotationItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
-    Q_UNUSED(painter);
-    Q_UNUSED(option);
-    Q_UNUSED(widget);
+    Q_UNUSED(painter)
+    Q_UNUSED(option)
+    Q_UNUSED(widget)
 }
 
 void AnnotationItem::update()
@@ -161,10 +161,10 @@ void AnnotationItem::setPosAndRect(const QPointF &originalPos, const QRectF &ori
 void AnnotationItem::alignItemSizeToRaster(Side adjustHorizontalSide, Side adjustVerticalSide,
                                            double rasterWidth, double rasterHeight)
 {
-    Q_UNUSED(adjustHorizontalSide);
-    Q_UNUSED(adjustVerticalSide);
-    Q_UNUSED(rasterWidth);
-    Q_UNUSED(rasterHeight);
+    Q_UNUSED(adjustHorizontalSide)
+    Q_UNUSED(adjustVerticalSide)
+    Q_UNUSED(rasterWidth)
+    Q_UNUSED(rasterHeight)
 }
 
 void AnnotationItem::moveDelta(const QPointF &delta)
@@ -213,15 +213,41 @@ void AnnotationItem::setFocusSelected(bool focusSelected)
     }
 }
 
+QRectF AnnotationItem::getSecondarySelectionBoundary()
+{
+    return QRectF();
+}
+
+void AnnotationItem::setBoundarySelected(const QRectF &boundary, bool secondary)
+{
+    if (boundary.contains(mapRectToScene(boundingRect()))) {
+        if (secondary)
+            setSecondarySelected(true);
+        else
+            setSelected(true);
+    }
+}
+
 bool AnnotationItem::isEditable() const
 {
     return true;
+}
+
+bool AnnotationItem::isEditing() const
+{
+    return m_textItem && m_textItem->hasFocus();
 }
 
 void AnnotationItem::edit()
 {
     if (m_textItem)
         m_textItem->setFocus();
+}
+
+void AnnotationItem::finishEdit()
+{
+    if (m_textItem)
+        m_textItem->clearFocus();
 }
 
 void AnnotationItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
@@ -260,7 +286,7 @@ void AnnotationItem::updateSelectionMarker()
         if (m_selectionMarker->scene())
             m_selectionMarker->scene()->removeItem(m_selectionMarker);
         delete m_selectionMarker;
-        m_selectionMarker = 0;
+        m_selectionMarker = nullptr;
     }
 }
 

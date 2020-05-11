@@ -34,6 +34,8 @@ Product {
                 // replace the magic qmake incantations
                 content = content.replace(/(\n#define IDE_VERSION_DISPLAY_DEF) .+\n/, "$1 "
                         + product.moduleProperty("qtc", "qtcreator_display_version") + "\n");
+                content = content.replace(/(\n#define IDE_VERSION_COMPAT_DEF) .+\n/, "$1 "
+                        + product.moduleProperty("qtc", "qtcreator_compat_version") + "\n");
                 content = content.replace(/(\n#define IDE_VERSION) .+\n/, "$1 "
                         + product.moduleProperty("qtc", "qtcreator_version") + "\n");
                 content = content.replace(/(\n#define IDE_VERSION_MAJOR) .+\n/, "$1 "
@@ -42,6 +44,14 @@ Product {
                         + product.moduleProperty("qtc", "ide_version_minor") + "\n");
                 content = content.replace(/(\n#define IDE_VERSION_RELEASE) .+\n/, "$1 "
                         + product.moduleProperty("qtc", "ide_version_release") + "\n");
+                content = content.replace("$${QTCREATOR_COPYRIGHT_YEAR}",
+                        product.moduleProperty("qtc", "qtcreator_copyright_year"));
+                content = content.replace("$${IDE_DISPLAY_NAME}",
+                        product.moduleProperty("qtc", "ide_display_name"));
+                content = content.replace("$${IDE_ID}",
+                        product.moduleProperty("qtc", "ide_id"));
+                content = content.replace("$${IDE_CASED_ID}",
+                        product.moduleProperty("qtc", "ide_cased_id"));
                 file = new TextFile(output.filePath, TextFile.WriteOnly);
                 file.truncate();
                 file.write(content);

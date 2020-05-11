@@ -42,13 +42,13 @@ class QTCREATOR_UTILS_EXPORT FancyMainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit FancyMainWindow(QWidget *parent = 0);
-    virtual ~FancyMainWindow();
+    explicit FancyMainWindow(QWidget *parent = nullptr);
+    ~FancyMainWindow() override;
 
     /* The widget passed in should have an objectname set
      * which will then be used as key for QSettings. */
     QDockWidget *addDockForWidget(QWidget *widget, bool immutable = false);
-    QList<QDockWidget *> dockWidgets() const;
+    const QList<QDockWidget *> dockWidgets() const;
 
     void setTrackingEnabled(bool enabled);
 
@@ -66,6 +66,10 @@ public:
     void addDockActionsToMenu(QMenu *menu);
 
     bool autoHideTitleBars() const;
+    void setAutoHideTitleBars(bool on);
+
+    bool isCentralWidgetShown() const;
+    void showCentralWidget(bool on);
 
 signals:
     // Emitted by resetLayoutAction(). Connect to a slot
@@ -76,9 +80,9 @@ public slots:
     void setDockActionsVisible(bool v);
 
 protected:
-    void hideEvent(QHideEvent *event);
-    void showEvent(QShowEvent *event);
-    void contextMenuEvent(QContextMenuEvent *event);
+    void hideEvent(QHideEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
 
 private:
     void onDockActionTriggered();

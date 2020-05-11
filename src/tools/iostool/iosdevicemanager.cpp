@@ -57,6 +57,8 @@
 #include <QDir>
 #include <QFile>
 #include <QProcess>
+#include <QRegularExpression>
+#include <QVersionNumber>
 
 #ifdef MOBILE_DEV_DIRECT_LINK
 #include "MobileDevice.h"
@@ -82,6 +84,7 @@ enum ADNCI_MSG {
 
 extern "C" {
 typedef unsigned int ServiceSocket; // match_port_t (i.e. natural_t) or socket (on windows, i.e sock_t)
+typedef unsigned int *ServiceConnRef;
 typedef unsigned int am_res_t; // mach_error_t
 
 #ifndef MOBILE_DEV_DIRECT_LINK
@@ -130,7 +133,6 @@ typedef am_res_t (MDEV_API *AMDeviceStopSessionPtr)(AMDeviceRef);
 typedef am_res_t (MDEV_API *AMDeviceDisconnectPtr)(AMDeviceRef);
 typedef am_res_t (MDEV_API *AMDeviceMountImagePtr)(AMDeviceRef, CFStringRef, CFDictionaryRef,
                                                         AMDeviceMountImageCallback, void *);
-typedef am_res_t (MDEV_API *AMDeviceStartServicePtr)(AMDeviceRef, CFStringRef, ServiceSocket *, void *);
 typedef am_res_t (MDEV_API *AMDeviceUninstallApplicationPtr)(ServiceSocket, CFStringRef, CFDictionaryRef,
                                                                 AMDeviceInstallApplicationCallback,
                                                                 void*);
@@ -139,9 +141,10 @@ typedef char * (MDEV_API *AMDErrorStringPtr)(am_res_t);
 typedef CFStringRef (MDEV_API *MISCopyErrorStringForErrorCodePtr)(am_res_t);
 typedef am_res_t (MDEV_API *USBMuxConnectByPortPtr)(unsigned int, int, ServiceSocket*);
 // secure Api's
-typedef am_res_t (MDEV_API *AMDeviceSecureStartServicePtr)(AMDeviceRef, CFStringRef, void *, ServiceSocket *);
+typedef am_res_t (MDEV_API *AMDeviceSecureStartServicePtr)(AMDeviceRef, CFStringRef, unsigned int *, ServiceConnRef *);
 typedef int (MDEV_API *AMDeviceSecureTransferPathPtr)(int, AMDeviceRef, CFURLRef, CFDictionaryRef, AMDeviceSecureInstallApplicationCallback, int);
 typedef int (MDEV_API *AMDeviceSecureInstallApplicationPtr)(int, AMDeviceRef, CFURLRef, CFDictionaryRef, AMDeviceSecureInstallApplicationCallback, int);
+typedef int (MDEV_API *AMDServiceConnectionGetSocketPtr)(ServiceConnRef);
 
 
 } // extern C
@@ -180,7 +183,6 @@ public :
     am_res_t deviceDisconnect(AMDeviceRef);
     am_res_t deviceMountImage(AMDeviceRef, CFStringRef, CFDictionaryRef,
                                     AMDeviceMountImageCallback, void *);
-    am_res_t deviceStartService(AMDeviceRef, CFStringRef, ServiceSocket *, void *);
     am_res_t deviceUninstallApplication(int, CFStringRef, CFDictionaryRef,
                                                                     AMDeviceInstallApplicationCallback,
                                                                     void*);
@@ -193,7 +195,8 @@ public :
     void addError(const char *msg);
 
     // Secure API's
-    am_res_t deviceSecureStartService(AMDeviceRef, CFStringRef, void *, ServiceSocket *);
+    am_res_t deviceSecureStartService(AMDeviceRef, CFStringRef, ServiceConnRef *);
+    int deviceConnectionGetSocket(ServiceConnRef);
     int deviceSecureTransferApplicationPath(int, AMDeviceRef, CFURLRef,
                                             CFDictionaryRef, AMDeviceSecureInstallApplicationCallback callback, int);
     int deviceSecureInstallApplication(int zero, AMDeviceRef device, CFURLRef url,
@@ -218,10 +221,10 @@ private:
     AMDeviceStopSessionPtr m_AMDeviceStopSession;
     AMDeviceDisconnectPtr m_AMDeviceDisconnect;
     AMDeviceMountImagePtr m_AMDeviceMountImage;
-    AMDeviceStartServicePtr m_AMDeviceStartService;
     AMDeviceSecureStartServicePtr m_AMDeviceSecureStartService;
     AMDeviceSecureTransferPathPtr m_AMDeviceSecureTransferPath;
     AMDeviceSecureInstallApplicationPtr m_AMDeviceSecureInstallApplication;
+    AMDServiceConnectionGetSocketPtr m_AMDServiceConnectionGetSocket;
     AMDeviceUninstallApplicationPtr m_AMDeviceUninstallApplication;
     AMDeviceLookupApplicationsPtr m_AMDeviceLookupApplications;
     AMDErrorStringPtr m_AMDErrorString;
@@ -259,6 +262,100 @@ static QString mobileDeviceErrorString(MobileDeviceLib *lib, am_res_t code)
     return s;
 }
 
+qint64 toBuildNumber(const QString &versionStr)
+{
+    QString buildNumber;
+    const QRegularExpression re("\\s\\((\\X+)\\)");
+    const QRegularExpressionMatch m = re.match(versionStr);
+    if (m.hasMatch())
+        buildNumber = m.captured(1);
+    return buildNumber.toLongLong(nullptr, 16);
+}
+
+static bool findXcodePath(QString *xcodePath)
+{
+    if (!xcodePath)
+        return false;
+
+    QProcess process;
+    process.start("/bin/bash", QStringList({"-c", "xcode-select -p"}));
+    if (!process.waitForFinished(3000))
+        return false;
+
+    *xcodePath = QString::fromLatin1(process.readAllStandardOutput()).trimmed();
+    return (process.exitStatus() == QProcess::NormalExit && QFile::exists(*xcodePath));
+}
+
+/*!
+ * \brief Finds the \e DeveloperDiskImage.dmg path corresponding to \a versionStr and \a buildStr.
+ *
+ * The algorithm sorts the \e DeviceSupport directories with decreasing order of their version and
+ * build number to find the appropriate \e DeviceSupport directory corresponding to \a versionStr
+ * and \a buildStr. Directories starting with major build number of \a versionStr are considered
+ * only, rest are filtered out.
+ *
+ * Returns \c true if \e DeveloperDiskImage.dmg is found, otherwise returns \c false. The absolute
+ * path to the \e DeveloperDiskImage.dmg is enumerated in \a path.
+ */
+static bool findDeveloperDiskImage(const QString &versionStr, const QString &buildStr,
+                                   QString *path = nullptr)
+{
+    const QVersionNumber deviceVersion = QVersionNumber::fromString(versionStr);
+    if (deviceVersion.isNull())
+        return false;
+
+    QString xcodePath;
+    if (!findXcodePath(&xcodePath)) {
+        if (debugAll)
+            qDebug() << "Error getting xcode installation path.";
+        return false;
+    }
+
+    // Returns device support directories matching the major version.
+    const auto findDeviceSupportDirs = [xcodePath, deviceVersion](const QString &subFolder) {
+        const QDir rootDir(QString("%1/%2").arg(xcodePath).arg(subFolder));
+        const QStringList filter(QString("%1.*").arg(deviceVersion.majorVersion()));
+        return rootDir.entryInfoList(filter, QDir::Dirs | QDir::NoDotAndDotDot);
+    };
+
+    // Compares version strings(considers build number) and return true if versionStrA > versionStrB.
+    const auto compareVersion = [](const QString &versionStrA, const QString &versionStrB) {
+        const auto versionA = QVersionNumber::fromString(versionStrA);
+        const auto versionB = QVersionNumber::fromString(versionStrB);
+        if (versionA == versionB)
+            return toBuildNumber(versionStrA) > toBuildNumber(versionStrB);
+        return versionA > versionB;
+    };
+
+    // To filter dirs without DeveloperDiskImage.dmg and dirs having higher version.
+    const auto filterDir = [compareVersion, versionStr, buildStr](const QFileInfo d) {
+        const auto devDiskImage = QString("%1/DeveloperDiskImage.dmg").arg(d.absoluteFilePath());
+        if (!QFile::exists(devDiskImage))
+            return true; // Dir's without DeveloperDiskImage.dmg
+        return compareVersion(d.fileName(), QString("%1 (%2)").arg(versionStr).arg(buildStr));
+    };
+
+    QFileInfoList deviceSupportDirs(findDeviceSupportDirs("iOS DeviceSupport"));
+    deviceSupportDirs << findDeviceSupportDirs("Platforms/iPhoneOS.platform/DeviceSupport");
+
+    // Remove dirs without DeveloperDiskImage.dmg and dirs having higher version.
+    auto endItr = std::remove_if(deviceSupportDirs.begin(), deviceSupportDirs.end(), filterDir);
+    deviceSupportDirs.erase(endItr, deviceSupportDirs.end());
+
+    if (deviceSupportDirs.isEmpty())
+        return false;
+
+    // Sort device support directories.
+    std::sort(deviceSupportDirs.begin(), deviceSupportDirs.end(),
+              [compareVersion](const QFileInfo &a, const QFileInfo &b) {
+        return compareVersion(a.fileName(), b.fileName());
+    });
+
+    if (path)
+        *path = QString("%1/DeveloperDiskImage.dmg").arg(deviceSupportDirs[0].absoluteFilePath());
+    return true;
+}
+
 extern "C" {
 typedef void (*DeviceAvailableCallback)(QString deviceId, AMDeviceRef, void *userData);
 }
@@ -286,7 +383,6 @@ public:
 
     bool connectDevice();
     bool disconnectDevice();
-    bool startService(const QString &service, ServiceSocket &fd);
     void stopService(ServiceSocket fd);
     void startDeviceLookup(int timeout);
     bool connectToPort(quint16 port, ServiceSocket *fd) override;
@@ -309,7 +405,6 @@ public:
 
 private:
     bool developerDiskImagePath(QString *path, QString *signaturePath);
-    bool findDeveloperDiskImage(QString *diskImagePath, QString versionString, QString buildString);
 
 private:
     bool checkRead(qptrdiff nRead, int &maxRetry);
@@ -328,6 +423,7 @@ public:
     void requestDeviceInfo(const QString &deviceId, int timeout);
     QStringList errors();
     void addError(QString errorMsg);
+    QString deviceId(AMDeviceRef device);
     void addDevice(AMDeviceRef device);
     void removeDevice(AMDeviceRef device);
     void checkPendingLookups();
@@ -559,11 +655,18 @@ void IosDeviceManagerPrivate::addError(QString errorMsg)
     emit q->errorMsg(errorMsg);
 }
 
-void IosDeviceManagerPrivate::addDevice(AMDeviceRef device)
+QString IosDeviceManagerPrivate::deviceId(AMDeviceRef device)
 {
     CFStringRef s = m_lib.deviceCopyDeviceIdentifier(device);
-    QString devId = QString::fromCFString(s);
+    // remove dashes as a hotfix for QTCREATORBUG-21291
+    const auto id = QString::fromCFString(s).remove('-');
     if (s) CFRelease(s);
+    return id;
+}
+
+void IosDeviceManagerPrivate::addDevice(AMDeviceRef device)
+{
+    const QString devId = deviceId(device);
     CFRetain(device);
 
     DeviceInterfaceType interfaceType = static_cast<DeviceInterfaceType>(lib()->deviceGetInterfaceType(device));
@@ -608,10 +711,7 @@ void IosDeviceManagerPrivate::addDevice(AMDeviceRef device)
 
 void IosDeviceManagerPrivate::removeDevice(AMDeviceRef device)
 {
-    CFStringRef s = m_lib.deviceCopyDeviceIdentifier(device);
-    QString devId = QString::fromCFString(s);
-    if (s)
-        CFRelease(s);
+    const QString devId = deviceId(device);
     if (debugAll)
         qDebug() << "removeDevice " << devId;
     if (m_devices.contains(devId)) {
@@ -878,43 +978,21 @@ bool CommandSession::disconnectDevice()
     return true;
 }
 
-bool CommandSession::startService(const QString &serviceName, ServiceSocket &fd)
-{
-    bool success = true;
-
-    // Connect device. AMDeviceConnect + AMDeviceIsPaired + AMDeviceValidatePairing + AMDeviceStartSession
-    if (connectDevice()) {
-        fd = 0;
-        CFStringRef cfsService = serviceName.toCFString();
-        if (am_res_t error = lib()->deviceStartService(device, cfsService, &fd, 0)) {
-            addError(QString::fromLatin1("Starting service \"%1\" on device %2 failed, AMDeviceStartService returned %3 (0x%4)")
-                     .arg(serviceName).arg(deviceId).arg(mobileDeviceErrorString(lib(), error)).arg(QString::number(error, 16)));
-            success = false;
-            fd = -1;
-        }
-        disconnectDevice();
-        CFRelease(cfsService);
-    } else {
-        addError(QString::fromLatin1("Starting service \"%1\" on device %2 failed. Cannot connect to device.")
-                 .arg(serviceName).arg(deviceId));
-        success = false;
-    }
-    return success;
-}
-
 bool CommandSession::startServiceSecure(const QString &serviceName, ServiceSocket &fd)
 {
     bool success = true;
 
     // Connect device. AMDeviceConnect + AMDeviceIsPaired + AMDeviceValidatePairing + AMDeviceStartSession
     if (connectDevice()) {
-        fd = 0;
         CFStringRef cfsService = serviceName.toCFString();
-        if (am_res_t error = lib()->deviceSecureStartService(device, cfsService, &fd, 0)) {
+        ServiceConnRef ref;
+        if (am_res_t error = lib()->deviceSecureStartService(device, cfsService, &ref)) {
             addError(QString::fromLatin1("Starting(Secure) service \"%1\" on device %2 failed, AMDeviceStartSecureService returned %3 (0x%4)")
                      .arg(serviceName).arg(deviceId).arg(mobileDeviceErrorString(lib(), error)).arg(QString::number(error, 16)));
             success = false;
-            fd = -1;
+            fd = 0;
+        } else {
+            fd = lib()->deviceConnectionGetSocket(ref);
         }
         disconnectDevice();
         CFRelease(cfsService);
@@ -1127,7 +1205,7 @@ int CommandSession::handleChar(int fd, QByteArray &res, char c, int status)
         return 2;
     case 2:
     case 3:
-        if ((c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' | c > 'F')) {
+        if ((c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F')) {
             if (unexpectedChars < 15) {
                 addError(QString::fromLatin1("unexpected char %1 in readGdbReply as checksum")
                          .arg(QChar::fromLatin1(c)));
@@ -1197,8 +1275,8 @@ void CommandSession::reportProgress(CFDictionaryRef dict)
 
 void CommandSession::reportProgress2(int progress, const QString &status)
 {
-    Q_UNUSED(progress);
-    Q_UNUSED(status);
+    Q_UNUSED(progress)
+    Q_UNUSED(status)
 }
 
 QString CommandSession::commandName()
@@ -1232,7 +1310,6 @@ MobileDeviceLib *CommandSession::lib()
 
 bool CommandSession::developerDiskImagePath(QString *path, QString *signaturePath)
 {
-    bool success = false;
     if (device && path && connectDevice()) {
         CFPropertyListRef cfProductVersion = lib()->deviceCopyValue(device, 0, CFSTR("ProductVersion"));
         QString versionString;
@@ -1249,80 +1326,17 @@ bool CommandSession::developerDiskImagePath(QString *path, QString *signaturePat
         CFRelease(cfBuildVersion);
         disconnectDevice();
 
-        if (findDeveloperDiskImage(path, versionString, buildString)) {
-            success = QFile::exists(*path);
-            if (success && debugAll)
+        if (findDeveloperDiskImage(versionString, buildString, path)) {
+            if (debugAll)
                 qDebug() << "Developers disk image found at" << path;
-            if (success && signaturePath) {
+            if (signaturePath) {
                 *signaturePath = QString("%1.%2").arg(*path).arg("signature");
-                success = QFile::exists(*signaturePath);
+                return QFile::exists(*signaturePath);
             }
+            return true;
         }
     }
-    return success;
-}
-
-bool CommandSession::findDeveloperDiskImage(QString *diskImagePath, QString versionString, QString buildString)
-{
-    if (!diskImagePath || versionString.isEmpty())
-        return false;
-
-    *diskImagePath = QString();
-    QProcess process;
-    process.start("/bin/bash", QStringList() << "-c" << "xcode-select -p");
-    if (!process.waitForFinished(3000))
-        addError("Error getting xcode installation path. Command did not finish in time");
-
-    const QString xcodePath = QString::fromLatin1(process.readAllStandardOutput()).trimmed();
-
-    if (process.exitStatus() == QProcess::NormalExit && QFile::exists(xcodePath)) {
-
-        auto imageExists = [xcodePath](QString *foundPath, QString subFolder, QString version, QString build) -> bool {
-            Q_ASSERT(foundPath);
-            const QString subFolderPath = QString("%1/%2").arg(xcodePath).arg(subFolder);
-            if (QFile::exists(subFolderPath)) {
-                *foundPath = QString("%1/%2 (%3)/DeveloperDiskImage.dmg").arg(subFolderPath).arg(version).arg(build);
-                if (QFile::exists(*foundPath)) {
-                    return true;
-                }
-
-                QDir subFolderDir(subFolderPath);
-                QStringList nameFilterList;
-                nameFilterList << QString("%1 (*)").arg(version);
-                QFileInfoList builds = subFolderDir.entryInfoList(nameFilterList, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
-                foreach (QFileInfo buildPathInfo, builds) {
-                    *foundPath = QString("%1/DeveloperDiskImage.dmg").arg(buildPathInfo.absoluteFilePath());
-                    if (QFile::exists(*foundPath)) {
-                        return true;
-                    }
-                }
-
-                *foundPath = QString("%1/%2/DeveloperDiskImage.dmg").arg(subFolderPath).arg(version);
-                if (QFile::exists(*foundPath)) {
-                    return true;
-                }
-
-            }
-            *foundPath = QString();
-            return false;
-        };
-
-        QStringList versionParts = versionString.split(".", QString::SkipEmptyParts);
-        while (versionParts.count() > 0) {
-            if (imageExists(diskImagePath,"iOS DeviceSupport", versionParts.join("."), buildString))
-                break;
-            if (imageExists(diskImagePath,"Platforms/iPhoneOS.platform/DeviceSupport", versionParts.join("."), buildString))
-                break;
-
-            const QString latestImagePath = QString("%1/Platforms/iPhoneOS.platform/DeviceSupport/Latest/DeveloperDiskImage.dmg").arg(xcodePath);
-            if (QFile::exists(latestImagePath)) {
-                *diskImagePath = latestImagePath;
-                break;
-            }
-            versionParts.removeLast();
-        }
-    }
-    return !diskImagePath->isEmpty();
+    return false;
 }
 
 AppOpSession::AppOpSession(const QString &deviceId, const QString &bundlePath,
@@ -1445,8 +1459,8 @@ bool AppOpSession::runApp()
         addError(QString::fromLatin1("Running app \"%1\" failed. Mount developer disk failed.").arg(bundlePath));
         failure = true;
     }
-    if (!failure && !startService(QLatin1String("com.apple.debugserver"), gdbFd))
-        gdbFd = -1;
+    if (!failure && !startServiceSecure(QLatin1String("com.apple.debugserver"), gdbFd))
+        gdbFd = 0;
 
     if (gdbFd > 0) {
         // gdbServer protocol, see http://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html#Remote-Protocol
@@ -1735,9 +1749,6 @@ bool MobileDeviceLib::load()
     m_AMDeviceMountImage = reinterpret_cast<AMDeviceMountImagePtr>(lib.resolve("AMDeviceMountImage"));
     if (m_AMDeviceMountImage == 0)
         addError("MobileDeviceLib does not define AMDeviceMountImage");
-    m_AMDeviceStartService = reinterpret_cast<AMDeviceStartServicePtr>(lib.resolve("AMDeviceStartService"));
-    if (m_AMDeviceStartService == 0)
-        addError("MobileDeviceLib does not define AMDeviceStartService");
     m_AMDeviceSecureStartService = reinterpret_cast<AMDeviceSecureStartServicePtr>(lib.resolve("AMDeviceSecureStartService"));
     if (m_AMDeviceSecureStartService == 0)
         addError("MobileDeviceLib does not define AMDeviceSecureStartService");
@@ -1747,6 +1758,9 @@ bool MobileDeviceLib::load()
     m_AMDeviceSecureInstallApplication = reinterpret_cast<AMDeviceSecureInstallApplicationPtr>(lib.resolve("AMDeviceSecureInstallApplication"));
     if (m_AMDeviceSecureInstallApplication == 0)
         addError("MobileDeviceLib does not define AMDeviceSecureInstallApplication");
+    m_AMDServiceConnectionGetSocket = reinterpret_cast<AMDServiceConnectionGetSocketPtr>(lib.resolve("AMDServiceConnectionGetSocket"));
+    if (m_AMDServiceConnectionGetSocket == nullptr)
+        addError("MobileDeviceLib does not define AMDServiceConnectionGetSocket");
     m_AMDeviceUninstallApplication = reinterpret_cast<AMDeviceUninstallApplicationPtr>(lib.resolve("AMDeviceUninstallApplication"));
     if (m_AMDeviceUninstallApplication == 0)
         addError("MobileDeviceLib does not define AMDeviceUninstallApplication");
@@ -1885,15 +1899,6 @@ am_res_t MobileDeviceLib::deviceMountImage(AMDeviceRef device, CFStringRef image
     return -1;
 }
 
-am_res_t MobileDeviceLib::deviceStartService(AMDeviceRef device, CFStringRef serviceName,
-                                                   ServiceSocket *fdRef, void *extra)
-{
-    if (m_AMDeviceStartService)
-        return m_AMDeviceStartService(device, serviceName, fdRef, extra);
-    return -1;
-}
-
-
 am_res_t MobileDeviceLib::deviceUninstallApplication(int serviceFd, CFStringRef bundleId,
                                                            CFDictionaryRef options,
                                                            AMDeviceInstallApplicationCallback callback,
@@ -1944,12 +1949,11 @@ void MobileDeviceLib::addError(const char *msg)
     addError(QLatin1String(msg));
 }
 
-am_res_t MobileDeviceLib::deviceSecureStartService(AMDeviceRef device, CFStringRef serviceName, void *extra, ServiceSocket *fdRef)
+am_res_t MobileDeviceLib::deviceSecureStartService(AMDeviceRef device, CFStringRef serviceName, ServiceConnRef *fdRef)
 {
-    int returnCode = -1;
     if (m_AMDeviceSecureStartService)
-        returnCode = m_AMDeviceSecureStartService(device, serviceName, extra, fdRef);
-    return returnCode;
+        return m_AMDeviceSecureStartService(device, serviceName, nullptr, fdRef);
+    return 0;
 }
 
 int MobileDeviceLib::deviceSecureTransferApplicationPath(int zero, AMDeviceRef device, CFURLRef url, CFDictionaryRef dict, AMDeviceSecureInstallApplicationCallback callback, int args)
@@ -1967,6 +1971,13 @@ int MobileDeviceLib::deviceSecureInstallApplication(int zero, AMDeviceRef device
         returnCode = m_AMDeviceSecureInstallApplication(zero, device, url, options, callback, arg);
     }
     return returnCode;
+}
+
+int MobileDeviceLib::deviceConnectionGetSocket(ServiceConnRef ref) {
+    int fd = 0;
+    if (m_AMDServiceConnectionGetSocket)
+        fd = m_AMDServiceConnectionGetSocket(ref);
+    return fd;
 }
 
 void CommandSession::internalDeviceAvailableCallback(QString deviceId, AMDeviceRef device)

@@ -46,7 +46,7 @@ class QMLJSTOOLS_EXPORT ModelManager: public QmlJS::ModelManagerInterface
     Q_OBJECT
 
 public:
-    ModelManager(QObject *parent = 0);
+    ModelManager();
     ~ModelManager() override;
 
     void delayedInitialization();
@@ -54,7 +54,8 @@ protected:
     QHash<QString, QmlJS::Dialect> languageForSuffix() const override;
     void writeMessageInternal(const QString &msg) const override;
     WorkingCopy workingCopyInternal() const override;
-    void addTaskInternal(QFuture<void> result, const QString &msg, const char *taskId) const override;
+    void addTaskInternal(const QFuture<void> &result, const QString &msg,
+                         const char *taskId) const override;
     ProjectInfo defaultProjectInfoForProject(ProjectExplorer::Project *project) const override;
 private:
     void updateDefaultProjectInfo();
@@ -63,7 +64,5 @@ private:
 };
 
 } // namespace Internal
-
-QMLJSTOOLS_EXPORT void setupProjectInfoQmlBundles(QmlJS::ModelManagerInterface::ProjectInfo &projectInfo);
 
 } // namespace QmlJSTools

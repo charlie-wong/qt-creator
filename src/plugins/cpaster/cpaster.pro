@@ -6,31 +6,29 @@ HEADERS += cpasterplugin.h \
     pasteview.h \
     cpasterconstants.h \
     pastebindotcomprotocol.h \
-    pastebindotcaprotocol.h \
+    pastecodedotxyzprotocol.h \
     settings.h \
     pasteselectdialog.h \
     columnindicatortextedit.h \
     fileshareprotocol.h \
     fileshareprotocolsettingspage.h \
-    kdepasteprotocol.h \
+    stickynotespasteprotocol.h \
     urlopenprotocol.h \
-    codepasterservice.h \
-    authenticationdialog.h
+    codepasterservice.h
 
 SOURCES += cpasterplugin.cpp \
     settingspage.cpp \
     protocol.cpp \
     pasteview.cpp \
     pastebindotcomprotocol.cpp \
-    pastebindotcaprotocol.cpp \
+    pastecodedotxyzprotocol.cpp \
     settings.cpp \
     pasteselectdialog.cpp \
     columnindicatortextedit.cpp \
     fileshareprotocol.cpp \
     fileshareprotocolsettingspage.cpp \
-    kdepasteprotocol.cpp \
-    urlopenprotocol.cpp \
-    authenticationdialog.cpp
+    stickynotespasteprotocol.cpp \
+    urlopenprotocol.cpp
 
 FORMS += settingspage.ui \
     pasteselect.ui \

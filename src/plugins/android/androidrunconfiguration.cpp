@@ -24,39 +24,123 @@
 ****************************************************************************/
 
 #include "androidrunconfiguration.h"
+
+#include "androidconstants.h"
 #include "androidglobal.h"
 #include "androidtoolchain.h"
 #include "androidmanager.h"
+#include "adbcommandswidget.h"
 
+#include <projectexplorer/buildsystem.h>
 #include <projectexplorer/kitinformation.h>
+#include <projectexplorer/project.h>
 #include <projectexplorer/target.h>
-#include <qtsupport/qtoutputformatter.h>
+
 #include <qtsupport/qtkitinformation.h>
 
+#include <utils/detailswidget.h>
 #include <utils/qtcassert.h>
+#include <utils/qtcprocess.h>
+#include <utils/utilsicons.h>
 
+#include <QFormLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QSpacerItem>
+#include <QWidget>
+
+using namespace Android::Internal;
 using namespace ProjectExplorer;
+using namespace Utils;
 
 namespace Android {
 
-AndroidRunConfiguration::AndroidRunConfiguration(Target *parent, Core::Id id)
-    : RunConfiguration(parent, id)
+BaseStringListAspect::BaseStringListAspect(const QString &settingsKey, Core::Id id)
 {
+    setSettingsKey(settingsKey);
+    setId(id);
 }
 
-AndroidRunConfiguration::AndroidRunConfiguration(Target *parent, AndroidRunConfiguration *source)
-    : RunConfiguration(parent, source)
+BaseStringListAspect::~BaseStringListAspect() = default;
+
+void BaseStringListAspect::addToLayout(LayoutBuilder &builder)
 {
+    QTC_CHECK(!m_widget);
+    m_widget = new AdbCommandsWidget;
+    m_widget->setCommandList(m_value);
+    m_widget->setTitleText(m_label);
+    builder.addItem(m_widget.data());
+    connect(m_widget.data(), &AdbCommandsWidget::commandsChanged, this, [this] {
+        m_value = m_widget->commandsList();
+        emit changed();
+    });
 }
 
-QWidget *AndroidRunConfiguration::createConfigurationWidget()
+void BaseStringListAspect::fromMap(const QVariantMap &map)
 {
-    return 0;// no special running configurations
+    m_value = map.value(settingsKey()).toStringList();
 }
 
-Utils::OutputFormatter *AndroidRunConfiguration::createOutputFormatter() const
+void BaseStringListAspect::toMap(QVariantMap &data) const
 {
-    return new QtSupport::QtOutputFormatter(target()->project());
+    data.insert(settingsKey(), m_value);
+}
+
+QStringList BaseStringListAspect::value() const
+{
+    return m_value;
+}
+
+void BaseStringListAspect::setValue(const QStringList &value)
+{
+    m_value = value;
+    if (m_widget)
+        m_widget->setCommandList(m_value);
+}
+
+void BaseStringListAspect::setLabel(const QString &label)
+{
+    m_label = label;
+}
+
+
+AndroidRunConfiguration::AndroidRunConfiguration(Target *target, Core::Id id)
+    : RunConfiguration(target, id)
+{
+    auto envAspect = addAspect<EnvironmentAspect>();
+    envAspect->addSupportedBaseEnvironment(tr("Clean Environment"), {});
+
+    addAspect<ArgumentsAspect>();
+
+    auto amStartArgsAspect = addAspect<BaseStringAspect>();
+    amStartArgsAspect->setId(Constants::ANDROID_AMSTARTARGS);
+    amStartArgsAspect->setSettingsKey("Android.AmStartArgsKey");
+    amStartArgsAspect->setLabelText(tr("Activity manager start options:"));
+    amStartArgsAspect->setDisplayStyle(BaseStringAspect::LineEditDisplay);
+    amStartArgsAspect->setHistoryCompleter("Android.AmStartArgs.History");
+
+    auto warning = addAspect<BaseStringAspect>();
+    warning->setLabelPixmap(Icons::WARNING.pixmap());
+    warning->setValue(tr("If the \"am start\" options conflict, the application might not start."));
+
+    auto preStartShellCmdAspect = addAspect<BaseStringListAspect>();
+    preStartShellCmdAspect->setId(Constants::ANDROID_PRESTARTSHELLCMDLIST);
+    preStartShellCmdAspect->setSettingsKey("Android.PreStartShellCmdListKey");
+    preStartShellCmdAspect->setLabel(tr("Shell commands to run on Android device before application launch."));
+
+    auto postStartShellCmdAspect = addAspect<BaseStringListAspect>();
+    postStartShellCmdAspect->setId(Constants::ANDROID_POSTFINISHSHELLCMDLIST);
+    postStartShellCmdAspect->setSettingsKey("Android.PostStartShellCmdListKey");
+    postStartShellCmdAspect->setLabel(tr("Shell commands to run on Android device after application quits."));
+
+    setUpdater([this, target] {
+        const BuildTargetInfo bti = buildTargetInfo();
+        setDisplayName(bti.displayName);
+        setDefaultDisplayName(bti.displayName);
+        AndroidManager::updateGradleProperties(target, buildKey());
+    });
+
+    connect(target, &Target::buildSystemUpdated, this, &RunConfiguration::update);
 }
 
 } // namespace Android

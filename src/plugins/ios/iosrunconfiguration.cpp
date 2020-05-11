@@ -25,22 +25,19 @@
 
 #include "iosrunconfiguration.h"
 #include "iosconstants.h"
-#include "iosmanager.h"
-#include "iosdeploystep.h"
+#include "iosdevice.h"
 #include "simulatorcontrol.h"
 
-#include <projectexplorer/kitinformation.h>
-#include <projectexplorer/target.h>
-#include <projectexplorer/deployconfiguration.h>
-#include <projectexplorer/devicesupport/devicemanager.h>
+#include <projectexplorer/buildconfiguration.h>
 #include <projectexplorer/buildstep.h>
 #include <projectexplorer/buildsteplist.h>
+#include <projectexplorer/deployconfiguration.h>
+#include <projectexplorer/devicesupport/devicemanager.h>
+#include <projectexplorer/kitinformation.h>
+#include <projectexplorer/project.h>
+#include <projectexplorer/projectnodes.h>
 #include <projectexplorer/runconfigurationaspects.h>
-#include <qmakeprojectmanager/qmakebuildconfiguration.h>
-#include <qmakeprojectmanager/qmakeproject.h>
-#include <qmakeprojectmanager/qmakenodes.h>
-#include <qtsupport/qtoutputformatter.h>
-#include <qtsupport/qtkitinformation.h>
+#include <projectexplorer/target.h>
 
 #include <utils/algorithm.h>
 #include <utils/fileutils.h>
@@ -60,7 +57,6 @@
 #include <QWidget>
 
 using namespace ProjectExplorer;
-using namespace QmakeProjectManager;
 using namespace Utils;
 
 namespace Ios {
@@ -68,249 +64,166 @@ namespace Internal {
 
 static const QLatin1String deviceTypeKey("Ios.device_type");
 
+static QString displayName(const SimulatorInfo &device)
+{
+    return QString("%1, %2").arg(device.name).arg(device.runtimeName);
+}
+
 static IosDeviceType toIosDeviceType(const SimulatorInfo &device)
 {
     IosDeviceType iosDeviceType(IosDeviceType::SimulatedDevice,
                                 device.identifier,
-                                QString("%1, %2").arg(device.name).arg(device.runtimeName));
+                                displayName(device));
     return iosDeviceType;
 }
 
-class IosRunConfigurationWidget : public RunConfigWidget
+class IosDeviceTypeAspect : public ProjectConfigurationAspect
 {
 public:
-    IosRunConfigurationWidget(IosRunConfiguration *runConfiguration);
-    QString displayName() const override;
+    IosDeviceTypeAspect(IosRunConfiguration *runConfiguration);
 
-private:
-    void argumentsLineEditTextEdited();
+    void fromMap(const QVariantMap &map) override;
+    void toMap(QVariantMap &map) const override;
+    void addToLayout(ProjectExplorer::LayoutBuilder &builder) override;
+
+    IosDeviceType deviceType() const;
+    void setDeviceType(const IosDeviceType &deviceType);
+
     void updateValues();
     void setDeviceTypeIndex(int devIndex);
+    void deviceChanges();
+    void updateDeviceType();
 
-    IosRunConfiguration *m_runConfiguration;
+public:
+    IosDeviceType m_deviceType;
+    IosRunConfiguration *m_runConfiguration = nullptr;
     QStandardItemModel m_deviceTypeModel;
-    QLabel *m_deviceTypeLabel;
-    QLineEdit *m_executableLineEdit;
-    QComboBox *m_deviceTypeComboBox;
+    QLabel *m_deviceTypeLabel = nullptr;
+    QComboBox *m_deviceTypeComboBox = nullptr;
 };
 
-IosRunConfiguration::IosRunConfiguration(Target *parent, Core::Id id, const FileName &path)
-    : RunConfiguration(parent, id)
-    , m_profilePath(path)
+IosRunConfiguration::IosRunConfiguration(Target *target, Core::Id id)
+    : RunConfiguration(target, id)
 {
-    addExtraAspect(new ArgumentsAspect(this, QLatin1String("Ios.run_arguments")));
-    init();
+    auto executableAspect = addAspect<ExecutableAspect>();
+    executableAspect->setDisplayStyle(BaseStringAspect::LabelDisplay);
+
+    addAspect<ArgumentsAspect>();
+
+    m_deviceTypeAspect = addAspect<IosDeviceTypeAspect>(this);
+
+    setUpdater([this, target, executableAspect] {
+        IDevice::ConstPtr dev = DeviceKitAspect::device(target->kit());
+        const QString devName = dev.isNull() ? IosDevice::name() : dev->displayName();
+        setDefaultDisplayName(tr("Run on %1").arg(devName));
+        setDisplayName(tr("Run %1 on %2").arg(applicationName()).arg(devName));
+
+        executableAspect->setExecutable(localExecutable());
+
+        m_deviceTypeAspect->updateDeviceType();
+    });
 }
 
-IosRunConfiguration::IosRunConfiguration(Target *parent, IosRunConfiguration *source)
-    : RunConfiguration(parent, source)
-    , m_profilePath(source->m_profilePath)
+void IosDeviceTypeAspect::deviceChanges()
 {
-    init();
+    m_runConfiguration->update();
 }
 
-void IosRunConfiguration::init()
+void IosDeviceTypeAspect::updateDeviceType()
 {
-    QmakeProject *project = static_cast<QmakeProject *>(target()->project());
-    m_parseSuccess = project->validParse(m_profilePath);
-    m_parseInProgress = project->parseInProgress(m_profilePath);
-    m_lastIsEnabled = isEnabled();
-    m_lastDisabledReason = disabledReason();
-    updateDisplayNames();
-    connect(DeviceManager::instance(), &DeviceManager::updated,
-            this, &IosRunConfiguration::deviceChanges);
-    connect(KitManager::instance(), &KitManager::kitsChanged,
-            this, &IosRunConfiguration::deviceChanges);
-    connect(project, &QmakeProject::proFileUpdated,
-            this, &IosRunConfiguration::proFileUpdated);
-}
-
-void IosRunConfiguration::enabledCheck()
-{
-    bool newIsEnabled = isEnabled();
-    QString newDisabledReason = disabledReason();
-    if (newDisabledReason != m_lastDisabledReason || newIsEnabled != m_lastIsEnabled) {
-        m_lastDisabledReason = newDisabledReason;
-        m_lastIsEnabled = newIsEnabled;
-        emit enabledChanged();
-    }
-}
-
-void IosRunConfiguration::deviceChanges() {
-    updateDisplayNames();
-    enabledCheck();
-}
-
-void IosRunConfiguration::proFileUpdated(QmakeProFile *pro, bool success,
-                                         bool parseInProgress)
-{
-    if (m_profilePath != pro->filePath())
-        return;
-    m_parseSuccess = success;
-    m_parseInProgress = parseInProgress;
-    if (success && !parseInProgress) {
-        updateDisplayNames();
-        emit localExecutableChanged();
-    }
-    enabledCheck();
-}
-
-QWidget *IosRunConfiguration::createConfigurationWidget()
-{
-    return new IosRunConfigurationWidget(this);
-}
-
-OutputFormatter *IosRunConfiguration::createOutputFormatter() const
-{
-    return new QtSupport::QtOutputFormatter(target()->project());
-}
-
-QString IosRunConfiguration::commandLineArguments() const
-{
-    return extraAspect<ArgumentsAspect>()->arguments();
-}
-
-void IosRunConfiguration::updateDisplayNames()
-{
-    if (DeviceTypeKitInformation::deviceTypeId(target()->kit()) == Constants::IOS_DEVICE_TYPE)
+    if (DeviceTypeKitAspect::deviceTypeId(m_runConfiguration->target()->kit())
+            == Constants::IOS_DEVICE_TYPE)
         m_deviceType = IosDeviceType(IosDeviceType::IosDevice);
     else if (m_deviceType.type == IosDeviceType::IosDevice)
         m_deviceType = IosDeviceType(IosDeviceType::SimulatedDevice);
-    IDevice::ConstPtr dev = DeviceKitInformation::device(target()->kit());
-    const QString devName = dev.isNull() ? IosDevice::name() : dev->displayName();
-    setDefaultDisplayName(tr("Run on %1").arg(devName));
-    setDisplayName(tr("Run %1 on %2").arg(applicationName()).arg(devName));
 }
 
-IosDeployStep *IosRunConfiguration::deployStep() const
+bool IosRunConfiguration::isEnabled() const
 {
-    DeployConfiguration *config = target()->activeDeployConfiguration();
-    return config ? config->stepList()->firstOfType<IosDeployStep>() : nullptr;
-}
+    Core::Id devType = DeviceTypeKitAspect::deviceTypeId(target()->kit());
+    if (devType != Constants::IOS_DEVICE_TYPE && devType != Constants::IOS_SIMULATOR_TYPE)
+        return false;
 
-FileName IosRunConfiguration::profilePath() const
-{
-    return m_profilePath;
-}
+    IDevice::ConstPtr dev = DeviceKitAspect::device(target()->kit());
+    if (dev.isNull() || dev->deviceState() != IDevice::DeviceReadyToUse)
+        return false;
 
-static QmakeProFile *proFile(const IosRunConfiguration *rc)
-{
-    QmakeProject *pro = qobject_cast<QmakeProject *>(rc->target()->project());
-    QmakeProFile *proFile = pro ? pro->rootProFile() : nullptr;
-    if (proFile)
-        proFile = proFile->findProFile(rc->profilePath());
-    return proFile;
+    return true;
 }
 
 QString IosRunConfiguration::applicationName() const
 {
-    QmakeProFile *pro = proFile(this);
-    if (pro) {
-        TargetInformation ti = pro->targetInformation();
-        if (ti.valid)
-            return ti.target;
-    }
+    Project *project = target()->project();
+    if (ProjectNode *node = project->findNodeForBuildKey(buildKey()))
+        return node->data(Constants::IosTarget).toString();
+
     return QString();
 }
 
-FileName IosRunConfiguration::bundleDirectory() const
+FilePath IosRunConfiguration::bundleDirectory() const
 {
-    FileName res;
-    Core::Id devType = DeviceTypeKitInformation::deviceTypeId(target()->kit());
+    Core::Id devType = DeviceTypeKitAspect::deviceTypeId(target()->kit());
     bool isDevice = (devType == Constants::IOS_DEVICE_TYPE);
     if (!isDevice && devType != Constants::IOS_SIMULATOR_TYPE) {
         qCWarning(iosLog) << "unexpected device type in bundleDirForTarget: " << devType.toString();
-        return res;
+        return {};
     }
-    QmakeBuildConfiguration *bc =
-            qobject_cast<QmakeBuildConfiguration *>(target()->activeBuildConfiguration());
-    if (bc) {
-        const QmakeProFile *pro = proFile(this);
-        if (pro) {
-            TargetInformation ti = pro->targetInformation();
-            if (ti.valid)
-                res = ti.buildDir;
-        }
+    FilePath res;
+    if (BuildConfiguration *bc = target()->activeBuildConfiguration()) {
+        Project *project = target()->project();
+        if (ProjectNode *node = project->findNodeForBuildKey(buildKey()))
+            res = FilePath::fromString(node->data(Constants::IosBuildDir).toString());
         if (res.isEmpty())
             res = bc->buildDirectory();
         switch (bc->buildType()) {
         case BuildConfiguration::Debug :
         case BuildConfiguration::Unknown :
             if (isDevice)
-                res.appendPath(QLatin1String("Debug-iphoneos"));
+                res = res / "Debug-iphoneos";
             else
-                res.appendPath(QLatin1String("Debug-iphonesimulator"));
+                res = res.pathAppended("Debug-iphonesimulator");
             break;
         case BuildConfiguration::Profile :
         case BuildConfiguration::Release :
             if (isDevice)
-                res.appendPath(QLatin1String("Release-iphoneos"));
+                res = res.pathAppended("Release-iphoneos");
             else
-                res.appendPath(QLatin1String("Release-iphonesimulator"));
+                res = res.pathAppended("Release-iphonesimulator");
             break;
         default:
             qCWarning(iosLog) << "IosBuildStep had an unknown buildType "
                      << target()->activeBuildConfiguration()->buildType();
         }
     }
-    res.appendPath(applicationName() + QLatin1String(".app"));
-    return res;
+    return res.pathAppended(applicationName() + ".app");
 }
 
-FileName IosRunConfiguration::localExecutable() const
+FilePath IosRunConfiguration::localExecutable() const
 {
-    return bundleDirectory().appendPath(applicationName());
+    return bundleDirectory().pathAppended(applicationName());
 }
 
-bool IosRunConfiguration::fromMap(const QVariantMap &map)
+void IosDeviceTypeAspect::fromMap(const QVariantMap &map)
 {
     bool deviceTypeIsInt;
     map.value(deviceTypeKey).toInt(&deviceTypeIsInt);
-    if (deviceTypeIsInt || !m_deviceType.fromMap(map.value(deviceTypeKey).toMap())) {
-        if (DeviceTypeKitInformation::deviceTypeId(target()->kit()) == Constants::IOS_DEVICE_TYPE)
-            m_deviceType = IosDeviceType(IosDeviceType::IosDevice);
-        else
-            m_deviceType = IosDeviceType(IosDeviceType::SimulatedDevice);
-    }
-    return RunConfiguration::fromMap(map);
+    if (deviceTypeIsInt || !m_deviceType.fromMap(map.value(deviceTypeKey).toMap()))
+        updateDeviceType();
+
+    m_runConfiguration->update();
 }
 
-QVariantMap IosRunConfiguration::toMap() const
+void IosDeviceTypeAspect::toMap(QVariantMap &map) const
 {
-    QVariantMap res = RunConfiguration::toMap();
-    res[deviceTypeKey] = deviceType().toMap();
-    return res;
-}
-
-QString IosRunConfiguration::buildSystemTarget() const
-{
-    return static_cast<QmakeProject *>(target()->project())->mapProFilePathToTarget(m_profilePath);
-}
-
-bool IosRunConfiguration::isEnabled() const
-{
-    if (m_parseInProgress || !m_parseSuccess)
-        return false;
-    Core::Id devType = DeviceTypeKitInformation::deviceTypeId(target()->kit());
-    if (devType != Constants::IOS_DEVICE_TYPE && devType != Constants::IOS_SIMULATOR_TYPE)
-        return false;
-    IDevice::ConstPtr dev = DeviceKitInformation::device(target()->kit());
-    if (dev.isNull() || dev->deviceState() != IDevice::DeviceReadyToUse)
-        return false;
-    return RunConfiguration::isEnabled();
+    map.insert(deviceTypeKey, deviceType().toMap());
 }
 
 QString IosRunConfiguration::disabledReason() const
 {
-    if (m_parseInProgress)
-        return tr("The .pro file \"%1\" is currently being parsed.").arg(m_profilePath.fileName());
-    if (!m_parseSuccess)
-        return static_cast<QmakeProject *>(target()->project())
-                ->disabledReasonForRunConfiguration(m_profilePath);
-    Core::Id devType = DeviceTypeKitInformation::deviceTypeId(target()->kit());
+    Core::Id devType = DeviceTypeKitAspect::deviceTypeId(target()->kit());
     if (devType != Constants::IOS_DEVICE_TYPE && devType != Constants::IOS_SIMULATOR_TYPE)
         return tr("Kit has incorrect device type for running on iOS devices.");
-    IDevice::ConstPtr dev = DeviceKitInformation::device(target()->kit());
+    IDevice::ConstPtr dev = DeviceKitAspect::device(target()->kit());
     QString validDevName;
     bool hasConncetedDev = false;
     if (devType == Constants::IOS_DEVICE_TYPE) {
@@ -358,6 +271,11 @@ QString IosRunConfiguration::disabledReason() const
 
 IosDeviceType IosRunConfiguration::deviceType() const
 {
+    return m_deviceTypeAspect->deviceType();
+}
+
+IosDeviceType IosDeviceTypeAspect::deviceType() const
+{
     if (m_deviceType.type == IosDeviceType::SimulatedDevice) {
         QList<SimulatorInfo> availableSimulators = SimulatorControl::availableSimulators();
         if (availableSimulators.isEmpty())
@@ -380,62 +298,51 @@ IosDeviceType IosRunConfiguration::deviceType() const
     return m_deviceType;
 }
 
-void IosRunConfiguration::setDeviceType(const IosDeviceType &deviceType)
+void IosDeviceTypeAspect::setDeviceType(const IosDeviceType &deviceType)
 {
     m_deviceType = deviceType;
 }
 
-IosRunConfigurationWidget::IosRunConfigurationWidget(IosRunConfiguration *runConfiguration)
+IosDeviceTypeAspect::IosDeviceTypeAspect(IosRunConfiguration *runConfiguration)
     : m_runConfiguration(runConfiguration)
 {
-    QSizePolicy sizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    sizePolicy.setHorizontalStretch(0);
-    sizePolicy.setVerticalStretch(0);
-    setSizePolicy(sizePolicy);
+    connect(DeviceManager::instance(), &DeviceManager::updated,
+            this, &IosDeviceTypeAspect::deviceChanges);
+    connect(KitManager::instance(), &KitManager::kitsChanged,
+            this, &IosDeviceTypeAspect::deviceChanges);
+}
 
-    m_executableLineEdit = new QLineEdit(this);
-    m_executableLineEdit->setReadOnly(true);
-
-    m_deviceTypeComboBox = new QComboBox(this);
+void IosDeviceTypeAspect::addToLayout(LayoutBuilder &builder)
+{
+    m_deviceTypeComboBox = new QComboBox;
     m_deviceTypeComboBox->setModel(&m_deviceTypeModel);
 
-    m_deviceTypeLabel = new QLabel(IosRunConfiguration::tr("Device type:"), this);
+    m_deviceTypeLabel = new QLabel(IosRunConfiguration::tr("Device type:"));
 
-    auto layout = new QFormLayout(this);
-    runConfiguration->extraAspect<ArgumentsAspect>()->addToMainConfigurationWidget(this, layout);
-    layout->addRow(IosRunConfiguration::tr("Executable:"), m_executableLineEdit);
-    layout->addRow(m_deviceTypeLabel, m_deviceTypeComboBox);
+    builder.addItems(m_deviceTypeLabel, m_deviceTypeComboBox);
 
     updateValues();
 
-    connect(m_deviceTypeComboBox, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
-            this, &IosRunConfigurationWidget::setDeviceTypeIndex);
-    connect(runConfiguration, &IosRunConfiguration::localExecutableChanged,
-            this, &IosRunConfigurationWidget::updateValues);
+    connect(m_deviceTypeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &IosDeviceTypeAspect::setDeviceTypeIndex);
 }
 
-QString IosRunConfigurationWidget::displayName() const
-{
-    return IosRunConfiguration::tr("iOS run settings");
-}
-
-void IosRunConfigurationWidget::setDeviceTypeIndex(int devIndex)
+void IosDeviceTypeAspect::setDeviceTypeIndex(int devIndex)
 {
     QVariant selectedDev = m_deviceTypeModel.data(m_deviceTypeModel.index(devIndex, 0), Qt::UserRole + 1);
     if (selectedDev.isValid())
-        m_runConfiguration->setDeviceType(toIosDeviceType(selectedDev.value<SimulatorInfo>()));
+        setDeviceType(toIosDeviceType(selectedDev.value<SimulatorInfo>()));
 }
 
 
-void IosRunConfigurationWidget::updateValues()
+void IosDeviceTypeAspect::updateValues()
 {
-    bool showDeviceSelector = m_runConfiguration->deviceType().type != IosDeviceType::IosDevice;
+    bool showDeviceSelector = deviceType().type != IosDeviceType::IosDevice;
     m_deviceTypeLabel->setVisible(showDeviceSelector);
     m_deviceTypeComboBox->setVisible(showDeviceSelector);
     if (showDeviceSelector && m_deviceTypeModel.rowCount() == 0) {
         foreach (const SimulatorInfo &device, SimulatorControl::availableSimulators()) {
-            QStandardItem *item = new QStandardItem(QString("%1, %2").arg(device.name)
-                                                    .arg(device.runtimeName));
+            QStandardItem *item = new QStandardItem(Internal::displayName(device));
             QVariant v;
             v.setValue(device);
             item->setData(v);
@@ -443,7 +350,7 @@ void IosRunConfigurationWidget::updateValues()
         }
     }
 
-    IosDeviceType currentDType = m_runConfiguration->deviceType();
+    IosDeviceType currentDType = deviceType();
     QVariant currentData = m_deviceTypeComboBox->currentData();
     if (currentDType.type == IosDeviceType::SimulatedDevice && !currentDType.identifier.isEmpty()
             && (!currentData.isValid()
@@ -463,7 +370,16 @@ void IosRunConfigurationWidget::updateValues()
             qCWarning(iosLog) << "could not set " << currentDType << " as it is not in model";
         }
     }
-    m_executableLineEdit->setText(m_runConfiguration->localExecutable().toUserOutput());
+}
+
+
+// IosRunConfigurationFactory
+
+IosRunConfigurationFactory::IosRunConfigurationFactory()
+{
+    registerRunConfiguration<IosRunConfiguration>("Qt4ProjectManager.IosRunConfiguration:");
+    addSupportedTargetDeviceType(Constants::IOS_DEVICE_TYPE);
+    addSupportedTargetDeviceType(Constants::IOS_SIMULATOR_TYPE);
 }
 
 } // namespace Internal

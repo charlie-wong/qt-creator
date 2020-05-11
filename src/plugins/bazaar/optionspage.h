@@ -25,36 +25,17 @@
 
 #pragma once
 
-#include "ui_optionspage.h"
-
-#include <vcsbase/vcsbaseoptionspage.h>
-
-namespace VcsBase { class VcsBaseClientSettings; }
+#include <coreplugin/dialogs/ioptionspage.h>
 
 namespace Bazaar {
 namespace Internal {
 
-class OptionsPageWidget : public VcsBase::VcsClientOptionsPageWidget
+class BazaarSettings;
+
+class OptionsPage final : public Core::IOptionsPage
 {
-    Q_OBJECT
-
 public:
-    explicit OptionsPageWidget(QWidget *parent = 0);
-
-    VcsBase::VcsBaseClientSettings settings() const;
-    void setSettings(const VcsBase::VcsBaseClientSettings &s);
-
-private:
-    Ui::OptionsPage m_ui;
-};
-
-
-class OptionsPage : public VcsBase::VcsClientOptionsPage
-{
-    Q_OBJECT
-
-public:
-    OptionsPage(Core::IVersionControl *control);
+    OptionsPage(const std::function<void()> &onApply, BazaarSettings *settings);
 };
 
 } // namespace Internal

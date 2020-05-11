@@ -22,19 +22,25 @@
 ** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ****************************************************************************/
+
 #include "qmlprofilertextmark.h"
+
 #include "qmlprofilerconstants.h"
+#include "qmlprofilerviewmanager.h"
+#include "qmlprofilerstatisticsview.h"
 
 #include <QLabel>
 #include <QLayout>
 #include <QPainter>
 
+using namespace Utils;
+
 namespace QmlProfiler {
 namespace Internal {
 
-QmlProfilerTextMark::QmlProfilerTextMark(QmlProfilerTool *tool, int typeId, const QString &fileName,
-                                         int lineNumber) :
-    TextMark(fileName, lineNumber, Constants::TEXT_MARK_CATEGORY, 3.5), m_tool(tool),
+QmlProfilerTextMark::QmlProfilerTextMark(QmlProfilerViewManager *viewManager, int typeId,
+                                         const FilePath &fileName, int lineNumber) :
+    TextMark(fileName, lineNumber, Constants::TEXT_MARK_CATEGORY, 3.5), m_viewManager(viewManager),
     m_typeIds(1, typeId)
 {
 }
@@ -44,13 +50,17 @@ void QmlProfilerTextMark::addTypeId(int typeId)
     m_typeIds.append(typeId);
 }
 
-void QmlProfilerTextMark::paint(QPainter *painter, const QRect &paintRect) const
+void QmlProfilerTextMark::paintIcon(QPainter *painter, const QRect &paintRect) const
 {
+    const QmlProfilerStatisticsView *statisticsView = m_viewManager->statisticsView();
+    QTC_ASSERT(statisticsView, return);
+
     painter->save();
     painter->setPen(Qt::black);
     painter->fillRect(paintRect, Qt::white);
     painter->drawRect(paintRect);
-    painter->drawText(paintRect, m_tool->summary(m_typeIds), Qt::AlignRight | Qt::AlignVCenter);
+    painter->drawText(paintRect, statisticsView->summary(m_typeIds),
+                      Qt::AlignRight | Qt::AlignVCenter);
     painter->restore();
 }
 
@@ -58,7 +68,7 @@ void QmlProfilerTextMark::clicked()
 {
     int typeId = m_typeIds.takeFirst();
     m_typeIds.append(typeId);
-    m_tool->selectType(typeId);
+    emit m_viewManager->typeSelected(typeId);
 }
 
 QmlProfilerTextMarkModel::QmlProfilerTextMarkModel(QObject *parent) : QObject(parent)
@@ -82,7 +92,8 @@ void QmlProfilerTextMarkModel::addTextMarkId(int typeId, const QmlEventLocation 
     m_ids.insert(location.filename(), {typeId, location.line(), location.column()});
 }
 
-void QmlProfilerTextMarkModel::createMarks(QmlProfilerTool *tool, const QString &fileName)
+void QmlProfilerTextMarkModel::createMarks(QmlProfilerViewManager *viewManager,
+                                           const QString &fileName)
 {
     auto first = m_ids.find(fileName);
     QVarLengthArray<TextMarkId> ids;
@@ -98,22 +109,40 @@ void QmlProfilerTextMarkModel::createMarks(QmlProfilerTool *tool, const QString 
     });
 
     int lineNumber = -1;
-    for (auto it = ids.begin(), end = ids.end(); it != end; ++it) {
-        if (it->lineNumber == lineNumber) {
-            m_marks.last()->addTypeId(it->typeId);
+    for (const auto &id : ids) {
+        if (id.lineNumber == lineNumber) {
+            m_marks.last()->addTypeId(id.typeId);
         } else {
-            lineNumber = it->lineNumber;
-            m_marks.append(new QmlProfilerTextMark(tool, it->typeId, fileName, it->lineNumber));
+            lineNumber = id.lineNumber;
+            m_marks << new QmlProfilerTextMark(viewManager,
+                                               id.typeId,
+                                               FilePath::fromString(fileName),
+                                               id.lineNumber);
         }
     }
 }
 
-bool QmlProfilerTextMark::addToolTipContent(QLayout *target)
+void QmlProfilerTextMarkModel::showTextMarks()
 {
-    QGridLayout *layout = new QGridLayout;
+    for (QmlProfilerTextMark *mark : qAsConst(m_marks))
+        mark->setVisible(true);
+}
+
+void QmlProfilerTextMarkModel::hideTextMarks()
+{
+    for (QmlProfilerTextMark *mark : qAsConst(m_marks))
+        mark->setVisible(false);
+}
+
+bool QmlProfilerTextMark::addToolTipContent(QLayout *target) const
+{
+    const QmlProfilerStatisticsView *statisticsView = m_viewManager->statisticsView();
+    QTC_ASSERT(statisticsView, return false);
+
+    auto layout = new QGridLayout;
     layout->setHorizontalSpacing(10);
     for (int row = 0, rowEnd = m_typeIds.length(); row != rowEnd; ++row) {
-        const QStringList typeDetails = m_tool->details(m_typeIds[row]);
+        const QStringList typeDetails = statisticsView->details(m_typeIds[row]);
         for (int column = 0, columnEnd = typeDetails.length(); column != columnEnd; ++column) {
             QLabel *label = new QLabel;
             label->setAlignment(column == columnEnd - 1 ? Qt::AlignRight : Qt::AlignLeft);

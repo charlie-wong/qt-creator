@@ -25,8 +25,11 @@
 
 #include "pchmanagerconnectionclient.h"
 
+#include <coreplugin/icore.h>
+
+#include <utils/temporarydirectory.h>
+
 #include <QCoreApplication>
-#include <QTemporaryDir>
 
 namespace ClangPchManager {
 
@@ -41,35 +44,53 @@ QString currentProcessId()
 
 ClangPchManager::PchManagerConnectionClient::PchManagerConnectionClient(
         ClangBackEnd::PchManagerClientInterface *client)
-    : serverProxy_(client, ioDevice())
+    : ConnectionClient(Utils::TemporaryDirectory::masterDirectoryPath()
+                       + QStringLiteral("/ClangPchManagerBackEnd-")
+                       + currentProcessId()),
+      m_serverProxy(client, ioDevice())
 {
+    m_processCreator.setTemporaryDirectoryPattern("clangpchmanagerbackend-XXXXXX");
+
+    QDir pchsDirectory(Core::ICore::cacheResourcePath());
+    pchsDirectory.mkdir("pchs");
+    pchsDirectory.cd("pchs");
+    m_processCreator.setArguments({connectionName(),
+                                   Core::ICore::cacheResourcePath() + "/symbol-experimental-v1.db",
+                                   pchsDirectory.absolutePath(),
+                                   Core::ICore::resourcePath()});
+
     stdErrPrefixer().setPrefix("PchManagerConnectionClient.stderr: ");
     stdOutPrefixer().setPrefix("PchManagerConnectionClient.stdout: ");
 }
 
+PchManagerConnectionClient::~PchManagerConnectionClient()
+{
+    finishProcess();
+}
+
 ClangBackEnd::PchManagerServerProxy &ClangPchManager::PchManagerConnectionClient::serverProxy()
 {
-    return serverProxy_;
+    return m_serverProxy;
 }
 
 void ClangPchManager::PchManagerConnectionClient::sendEndCommand()
 {
-    serverProxy_.end();
+    m_serverProxy.end();
 }
 
-void PchManagerConnectionClient::resetCounter()
+void PchManagerConnectionClient::resetState()
 {
-    serverProxy_.resetCounter();
-}
-
-QString ClangPchManager::PchManagerConnectionClient::connectionName() const
-{
-    return temporaryDirectory().path() + QStringLiteral("/ClangPchManagerBackEnd-") + currentProcessId();
+    m_serverProxy.resetState();
 }
 
 QString PchManagerConnectionClient::outputName() const
 {
     return QStringLiteral("PchManagerConnectionClient");
+}
+
+void PchManagerConnectionClient::newConnectedServer(QLocalSocket *localSocket)
+{
+    m_serverProxy.setLocalSocket(localSocket);
 }
 
 } // namespace ClangPchManager

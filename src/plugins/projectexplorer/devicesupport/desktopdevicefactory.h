@@ -30,21 +30,10 @@
 namespace ProjectExplorer {
 namespace Internal {
 
-class DesktopDeviceFactory : public IDeviceFactory
+class DesktopDeviceFactory final : public IDeviceFactory
 {
-    Q_OBJECT
-
 public:
-    explicit DesktopDeviceFactory(QObject *parent = 0);
-
-    QString displayNameForId(Core::Id type) const override;
-    QList<Core::Id> availableCreationIds() const override;
-    QIcon iconForId(Core::Id type) const override;
-
-    bool canCreate() const override;
-    IDevice::Ptr create(Core::Id id) const override;
-    bool canRestore(const QVariantMap &map) const override;
-    IDevice::Ptr restore(const QVariantMap &map) const override;
+    DesktopDeviceFactory();
 };
 
 } // namespace Internal

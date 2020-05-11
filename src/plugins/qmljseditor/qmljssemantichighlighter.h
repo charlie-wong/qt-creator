@@ -25,14 +25,14 @@
 
 #pragma once
 
+#include <qmljseditor/qmljseditor_global.h>
 #include <texteditor/semantichighlighter.h>
 #include <QFutureWatcher>
 #include <QTextLayout>
 #include <QVector>
 
 namespace QmlJS {
-class ScopeChain;
-namespace AST { class SourceLocation; }
+class SourceLocation;
 }
 
 namespace TextEditor { class FontSettings; }
@@ -43,9 +43,7 @@ namespace QmlJSEditor {
 
 class QmlJSEditorDocument;
 
-namespace Internal {
-
-class SemanticHighlighter : public QObject
+class QMLJSEDITOR_EXPORT SemanticHighlighter : public QObject
 {
     Q_OBJECT
 public:
@@ -67,7 +65,7 @@ public:
         Max // number of the last used value (to generate the warning formats)
     };
 
-    typedef TextEditor::HighlightingResult Use;
+    using Use = TextEditor::HighlightingResult;
 
     SemanticHighlighter(QmlJSEditorDocument *document);
 
@@ -93,5 +91,4 @@ private:
     QVector<QTextLayout::FormatRange> m_diagnosticRanges;
 };
 
-} // namespace Internal
 } // namespace QmlJSEditor

@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include "cpptools_utils.h"
 #include "projectinfo.h"
 
 #include <QFutureInterface>
@@ -36,24 +37,25 @@ class ProjectInfoGenerator
 {
 public:
     ProjectInfoGenerator(const QFutureInterface<void> &futureInterface,
-                         const ProjectUpdateInfo &projectUpdateInfo);
+                         const ProjectExplorer::ProjectUpdateInfo &projectUpdateInfo);
 
     ProjectInfo generate();
 
 private:
-    void createProjectParts(const RawProjectPart &rawProjectPart);
-    void createProjectPart(const RawProjectPart &rawProjectPart,
-                           const ProjectPart::Ptr &templateProjectPart,
-                           const ProjectFiles &projectFiles,
-                           const QString &partName,
-                           ProjectPart::LanguageVersion languageVersion,
-                           ProjectPart::LanguageExtensions languageExtensions);
+    QVector<ProjectPart::Ptr> createProjectParts(
+        const ProjectExplorer::RawProjectPart &rawProjectPart);
+    ProjectPart::Ptr createProjectPart(const ProjectExplorer::RawProjectPart &rawProjectPart,
+                                       const ProjectPart::Ptr &templateProjectPart,
+                                       const ProjectFiles &projectFiles,
+                                       const QString &partName,
+                                       Language language,
+                                       Utils::LanguageExtensions languageExtensions);
 
 private:
-    const QFutureInterface<void> &m_futureInterface;
-    const ProjectUpdateInfo &m_projectUpdateInfo;
-
-    ProjectInfo m_projectInfo;
+    const QFutureInterface<void> m_futureInterface;
+    const ProjectExplorer::ProjectUpdateInfo &m_projectUpdateInfo;
+    bool m_cToolchainMissing = false;
+    bool m_cxxToolchainMissing = false;
 };
 } // namespace Internal
 } // namespace CppTools

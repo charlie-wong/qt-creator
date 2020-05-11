@@ -27,6 +27,8 @@
 
 #include <coreplugin/id.h>
 
+#include <utils/optional.h>
+
 #include <QVariant>
 #include <QFutureInterface>
 #include <QIcon>
@@ -44,20 +46,26 @@ struct LocatorFilterEntry
         };
 
         HighlightInfo(int startIndex, int length, DataType type = DataType::DisplayName)
-            : startIndex(startIndex)
-            , length(length)
+            : starts{startIndex}
+            , lengths{length}
             , dataType(type)
         {}
 
-        int startIndex;
-        int length;
+        HighlightInfo(QVector<int> startIndex, QVector<int> length, DataType type = DataType::DisplayName)
+            : starts(startIndex)
+            , lengths(length)
+            , dataType(type)
+        {}
+
+        QVector<int> starts;
+        QVector<int> lengths;
         DataType dataType;
     };
 
     LocatorFilterEntry() = default;
 
     LocatorFilterEntry(ILocatorFilter *fromFilter, const QString &name, const QVariant &data,
-                const QIcon &icon = QIcon())
+                Utils::optional<QIcon> icon = Utils::nullopt)
         : filter(fromFilter)
         , displayName(name)
         , internalData(data)
@@ -79,11 +87,9 @@ struct LocatorFilterEntry
     /* can be used by the filter to save more information about the entry */
     QVariant internalData;
     /* icon to display along with the entry */
-    QIcon displayIcon;
+    Utils::optional<QIcon> displayIcon;
     /* file name, if the entry is related to a file, is used e.g. for resolving a file icon */
     QString fileName;
-    /* internal */
-    bool fileIconResolved = false;
     /* highlighting support */
     HighlightInfo highlightInfo{0, 0};
 
@@ -99,12 +105,23 @@ class CORE_EXPORT ILocatorFilter : public QObject
     Q_OBJECT
 
 public:
+    enum class MatchLevel {
+        Best = 0,
+        Better,
+        Good,
+        Normal,
+        Count
+    };
+
     enum Priority {Highest = 0, High = 1, Medium = 2, Low = 3};
 
-    ILocatorFilter(QObject *parent = 0);
-    virtual ~ILocatorFilter() {}
+    ILocatorFilter(QObject *parent = nullptr);
+    ~ILocatorFilter() override;
+
+    static const QList<ILocatorFilter *> allLocatorFilters();
 
     Id id() const;
+    Id actionId() const;
 
     QString displayName() const;
 
@@ -136,7 +153,10 @@ public:
     bool isEnabled() const;
 
     static Qt::CaseSensitivity caseSensitivity(const QString &str);
-    static bool containsWildcard(const QString &str);
+    static QRegularExpression createRegExp(const QString &text,
+                                           Qt::CaseSensitivity caseSensitivity = Qt::CaseInsensitive);
+    LocatorFilterEntry::HighlightInfo highlightInfo(const QRegularExpressionMatch &match,
+        LocatorFilterEntry::HighlightInfo::DataType dataType = LocatorFilterEntry::HighlightInfo::DisplayName);
 
     static QString msgConfigureDialogTitle();
     static QString msgPrefixLabel();

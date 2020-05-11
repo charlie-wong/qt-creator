@@ -31,35 +31,39 @@ def main():
     outputQDebug = "Output from qDebug()."
     outputStdOut = "Output from std::cout."
     outputStdErr = "Output from std::cerr."
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
-    checkedTargets = createProject_Qt_Console(tempDir(), project)
+    createProject_Qt_Console(tempDir(), project)
 
     mainEditor = waitForObject(":Qt Creator_CppEditor::Internal::CPPEditorWidget")
     replaceEditorContent(mainEditor, "")
     typeLines(mainEditor, ["#include <QDebug>",
+                           "#include <QThread>",
                            "#include <iostream>",
+                           "struct Waiter:public QThread{Waiter(){QThread::sleep(2);}};",
                            "int main(int, char *argv[])",
                            "{",
                            'std::cout << \"' + outputStdOut + '\" << std::endl;',
                            'std::cerr << \"' + outputStdErr + '\" << std::endl;',
-                           'qDebug() << \"' + outputQDebug + '\";'])
+                           'qDebug() << \"' + outputQDebug + '\";',
+                           'Waiter();'])
     # Rely on code completion for closing bracket
     invokeMenuItem("File", "Save All")
     openDocument(project + "." + project + "\\.pro")
     proEditor = waitForObject(":Qt Creator_TextEditor::TextEditorWidget")
-    test.verify("CONFIG += console" in str(proEditor.plainText), "Verifying that program is configured with console")
+    test.verify("CONFIG += c++11 console" in str(proEditor.plainText),
+                "Verifying that program is configured with console")
 
-    availableConfigs = iterateBuildConfigs(len(checkedTargets))
+    availableConfigs = iterateBuildConfigs()
     if not availableConfigs:
         test.fatal("Haven't found a suitable Qt version - leaving without building.")
     for kit, config in availableConfigs:
-        selectBuildConfig(len(checkedTargets), kit, config)
+        selectBuildConfig(kit, config)
         test.log("Testing build configuration: " + config)
 
         test.log("Running application")
-        setRunInTerminal(len(checkedTargets), kit, False)
+        setRunInTerminal(kit, False)
         clickButton(waitForObject(":*Qt Creator.Run_Core::Internal::FancyToolButton"))
         outputButton = waitForObject(":Qt Creator_AppOutput_Core::Internal::OutputPaneToggleButton")
         waitFor("outputButton.checked", 20000) # Not ensureChecked(), avoid race condition
@@ -70,10 +74,10 @@ def main():
             appOutput = str(waitForObject(":Qt Creator_Core::OutputWindow").plainText)
             verifyOutput(appOutput, outputStdOut, "std::cout", "Application Output")
             verifyOutput(appOutput, outputStdErr, "std::cerr", "Application Output")
-            if (checkedTargets[kit] == Targets.DESKTOP_541_GCC
+            if (kit == Targets.DESKTOP_5_4_1_GCC
                 and platform.system() in ('Windows', 'Microsoft')):
                 test.log("Skipping qDebug() from %s (unstable, QTCREATORBUG-15067)"
-                         % Targets.getStringForTarget(Targets.DESKTOP_541_GCC))
+                         % Targets.getStringForTarget(Targets.DESKTOP_5_4_1_GCC))
             else:
                 verifyOutput(appOutput, outputQDebug,
                              "qDebug()", "Application Output")
@@ -83,8 +87,8 @@ def main():
                        "Did the application run at all?")
 
         test.log("Debugging application")
-        isMsvc = isMsvcConfig(len(checkedTargets), kit)
-        invokeMenuItem("Debug", "Start Debugging", "Start Debugging")
+        isMsvc = isMsvcConfig(kit)
+        invokeMenuItem("Debug", "Start Debugging", "Start debugging of startup project")
         handleDebuggerWarnings(config, isMsvc)
         ensureChecked(":Qt Creator_AppOutput_Core::Internal::OutputPaneToggleButton")
         outputWindow = waitForObject(":Qt Creator_Core::OutputWindow")

@@ -41,7 +41,7 @@ class CustomFileSystemModel : public QAbstractListModel
 {
     Q_OBJECT
 public:
-    CustomFileSystemModel(QObject *parent = 0);
+    CustomFileSystemModel(QObject *parent = nullptr);
 
     void setFilter(QDir::Filters filters);
     QString rootPath() const;
@@ -61,7 +61,9 @@ public:
     void setSearchFilter(const QString &nameFilterList);
 
 private:
+    QModelIndex updatePath(const QString &newPath);
     QModelIndex fileSystemModelIndex(const QModelIndex &index) const;
+    void appendIfNotFiltered(const QString &file);
 
     QFileSystemModel *m_fileSystemModel;
     QStringList m_files;

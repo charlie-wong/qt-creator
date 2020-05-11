@@ -28,11 +28,13 @@
 #include "nodeinstanceserver.h"
 #include "nodeinstancesignalspy.h"
 
+#include "instancecontainer.h"
+
 #include <QPainter>
 #include <QSharedPointer>
 #include <QWeakPointer>
 
-#include "enumeration.h"
+#include <enumeration.h>
 
 QT_BEGIN_NAMESPACE
 class QQmlContext;
@@ -58,8 +60,8 @@ class WidgetNodeInstance;
 class ObjectNodeInstance
 {
 public:
-    typedef QSharedPointer<ObjectNodeInstance> Pointer;
-    typedef QWeakPointer<ObjectNodeInstance> WeakPointer;
+    using Pointer = QSharedPointer<ObjectNodeInstance>;
+    using WeakPointer = QWeakPointer<ObjectNodeInstance>;
 
     virtual ~ObjectNodeInstance();
     void destroy();
@@ -78,7 +80,7 @@ public:
 
     NodeInstanceServer *nodeInstanceServer() const;
     void setNodeInstanceServer(NodeInstanceServer *server);
-    virtual void initialize(const Pointer &objectNodeInstance);
+    virtual void initialize(const Pointer &objectNodeInstance, InstanceContainer::NodeFlags flags);
     virtual QImage renderImage() const;
     virtual QImage renderPreviewImage(const QSize &previewImageSize) const;
 
@@ -146,6 +148,7 @@ public:
 
     virtual void activateState();
     virtual void deactivateState();
+    virtual QStringList allStates() const;
 
     void populateResetHashes();
     bool hasValidResetBinding(const PropertyName &propertyName) const;
@@ -161,7 +164,7 @@ public:
     void setInLayoutable(bool isInLayoutable);
     virtual void refreshLayoutable();
 
-    bool hasBindingForProperty(const PropertyName &propertyName, bool *hasChanged = 0) const;
+    bool hasBindingForProperty(const PropertyName &propertyName, bool *hasChanged = nullptr) const;
 
     QQmlContext *context() const;
     QQmlEngine *engine() const;
@@ -191,6 +194,10 @@ public:
 
     virtual PropertyNameList ignoredProperties() const;
 
+    void virtual setHideInEditor(bool b);
+
+    void setModifiedFlag(bool b);
+
 protected:
     explicit ObjectNodeInstance(QObject *object);
     void doResetProperty(const PropertyName &propertyName);
@@ -203,6 +210,7 @@ protected:
     static QVariant enumationValue(const Enumeration &enumeration);
 
     void initializePropertyWatcher(const ObjectNodeInstance::Pointer &objectNodeInstance);
+    void ensureVector3DDotProperties(PropertyNameList &list) const;
 private:
     QString m_id;
 
@@ -216,6 +224,7 @@ private:
     qint32 m_instanceId;
     bool m_deleteHeldInstance;
     bool m_isInLayoutable;
+    bool m_isModified = false;
     static QHash<EnumerationName, QVariant> m_enumationValueHash;
 };
 

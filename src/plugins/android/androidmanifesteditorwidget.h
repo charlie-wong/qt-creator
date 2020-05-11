@@ -37,6 +37,7 @@ class QDomDocument;
 class QDomElement;
 class QComboBox;
 class QPushButton;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QListView;
@@ -51,23 +52,23 @@ namespace Core { class IEditor; }
 namespace Android {
 namespace Internal {
 class AndroidManifestEditor;
+class AndroidManifestEditorIconContainerWidget;
 class AndroidManifestEditorWidget;
-
 
 class PermissionsModel: public QAbstractListModel
 {
     Q_OBJECT
 public:
-    PermissionsModel(QObject *parent = 0 );
+    PermissionsModel(QObject *parent = nullptr);
     void setPermissions(const QStringList &permissions);
     const QStringList &permissions();
     QModelIndex addPermission(const QString &permission);
     bool updatePermission(const QModelIndex &index, const QString &permission);
     void removePermission(int index);
-    QVariant data(const QModelIndex &index, int role) const;
+    QVariant data(const QModelIndex &index, int role) const override;
 
 protected:
-    int rowCount(const QModelIndex &parent) const;
+    int rowCount(const QModelIndex &parent) const override;
 
 private:
     QStringList m_permissions;
@@ -77,7 +78,7 @@ class AndroidManifestTextEditorWidget : public TextEditor::TextEditorWidget
 {
 public:
     explicit AndroidManifestTextEditorWidget(AndroidManifestEditorWidget *parent);
-    ~AndroidManifestTextEditorWidget();
+    ~AndroidManifestTextEditorWidget() override;
 
 private:
     Core::IContext *m_context;
@@ -111,12 +112,10 @@ signals:
     void guiChanged();
 
 protected:
-    bool eventFilter(QObject *obj, QEvent *event);
+    bool eventFilter(QObject *obj, QEvent *event) override;
+    void focusInEvent(QFocusEvent *event) override;
 
 private:
-    void setLDPIIcon();
-    void setMDPIIcon();
-    void setHDPIIcon();
     void defaultPermissionOrFeatureCheckBoxClicked();
     void addPermission();
     void removePermission();
@@ -134,10 +133,6 @@ private:
 
     bool checkDocument(const QDomDocument &doc, QString *errorMessage,
                        int *errorLine, int *errorColumn);
-    enum IconDPI { LowDPI, MediumDPI, HighDPI };
-    QIcon icon(const QString &baseDir, IconDPI dpi);
-    QString iconPath(const QString &baseDir, IconDPI dpi);
-    void copyIcon(IconDPI dpi, const QString &baseDir, const QString &filePath);
 
     void updateInfoBar(const QString &errorMessage, int line, int column);
     void hideInfoBar();
@@ -162,7 +157,7 @@ private:
     QLineEdit *m_packageNameLineEdit;
     QLabel *m_packageNameWarningIcon;
     QLabel *m_packageNameWarning;
-    QSpinBox *m_versionCode;
+    QLineEdit *m_versionCodeLineEdit;
     QLineEdit *m_versionNameLinedit;
     QComboBox *m_androidMinSdkVersion;
     QComboBox *m_androidTargetSdkVersion;
@@ -171,12 +166,8 @@ private:
     QLineEdit *m_appNameLineEdit;
     QLineEdit *m_activityNameLineEdit;
     QComboBox *m_targetLineEdit;
-    QToolButton *m_lIconButton;
-    QToolButton *m_mIconButton;
-    QToolButton *m_hIconButton;
-    QString m_lIconPath; // only set if the user changed the icon
-    QString m_mIconPath;
-    QString m_hIconPath;
+    QComboBox *m_styleExtractMethod;
+    AndroidManifestEditorIconContainerWidget *m_iconButtons;
 
     // Permissions
     QCheckBox *m_defaultPermissonsCheckBox;
@@ -190,6 +181,7 @@ private:
     QTimer m_timerParseCheck;
     TextEditor::TextEditorWidget *m_textEditorWidget;
     AndroidManifestEditor *m_editor;
+    QString m_androidNdkPlatform;
 };
 } // namespace Internal
 } // namespace Android

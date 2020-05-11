@@ -42,8 +42,8 @@ class CORE_EXPORT OutputPanePlaceHolder : public QWidget
     Q_OBJECT
 
 public:
-    explicit OutputPanePlaceHolder(Id mode, QSplitter *parent = 0);
-    ~OutputPanePlaceHolder();
+    explicit OutputPanePlaceHolder(Id mode, QSplitter *parent = nullptr);
+    ~OutputPanePlaceHolder() override;
 
     static OutputPanePlaceHolder *getCurrent();
     static bool isCurrentVisible();
@@ -53,9 +53,12 @@ public:
     void ensureSizeHintAsMinimum();
     int nonMaximizedSize() const;
 
+signals:
+    void visibilityChangeRequested(bool visible);
+
 protected:
-    void resizeEvent(QResizeEvent *event);
-    void showEvent(QShowEvent *);
+    void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *) override;
 
 private:
     void setHeight(int height);

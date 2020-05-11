@@ -42,8 +42,8 @@ public:
         NumProfileFormats
     };
 
-    explicit ProFileHighlighter(const TextEditor::Keywords &keywords);
-    void highlightBlock(const QString &text);
+    ProFileHighlighter();
+    void highlightBlock(const QString &text) override;
 
 private:
     const TextEditor::Keywords m_keywords;

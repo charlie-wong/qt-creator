@@ -59,17 +59,10 @@
 #include <utils/fileutils.h>
 
 #include <qmljs/qmljsinterpreter.h>
+#include <qmljs/qmljssimplereader.h>
 #include <extensionsystem/pluginmanager.h>
 
 #include <QPlainTextEdit>
-
-#if  QT_VERSION >= 0x050000
-#define MSKIP_SINGLE(x) QSKIP(x)
-#define MSKIP_ALL(x) QSKIP(x);
-#else
-#define MSKIP_SINGLE(x) QSKIP(x, SkipSingle)
-#define MSKIP_ALL(x) QSKIP(x, SkipAll)
-#endif
 
 //TESTED_COMPONENT=src/plugins/qmldesigner/designercore
 
@@ -192,14 +185,14 @@ void tst_TestCore::initTestCase()
     QFutureInterface<void> result;
     QmlJS::PathsAndLanguages lPaths;
 
-    lPaths.maybeInsert(Utils::FileName::fromString(basePaths.first()), QmlJS::Dialect::Qml);
+    lPaths.maybeInsert(Utils::FilePath::fromString(basePaths.first()), QmlJS::Dialect::Qml);
     QmlJS::ModelManagerInterface::importScan(result, QmlJS::ModelManagerInterface::workingCopy(),
         lPaths, QmlJS::ModelManagerInterface::instance(), false);
 
    // Load plugins
 
 #ifdef Q_OS_MAC
-    const QString pluginPath = QTCREATORDIR "/bin/Qt Creator.app/Contents/PlugIns/QtCreator/QmlDesigner";
+    const QString pluginPath = QTCREATORDIR "/bin/Qt Creator.app/Contents/PlugIns/QmlDesigner";
 #else
     const QString pluginPath = QTCREATORDIR "/lib/qtcreator/plugins/qmldesigner";
 #endif
@@ -618,6 +611,8 @@ void tst_TestCore::testRewriterDynamicProperties()
     const QString inThere = testRewriterView1->rootModelNode().variantProperty("vv").value().value<QString>();
     QCOMPARE(inThere, QString("Hello"));
 
+    rootModelNode.variantProperty("vv").setDynamicTypeNameAndValue("variant", "hallo2");
+
     // test model2text
 //    QPlainTextEdit textEdit2;
 //    textEdit2.setPlainText("import QtQuick 1.1; Item{}");
@@ -1024,6 +1019,44 @@ void tst_TestCore::testRewriterUnicodeChars()
      QCOMPARE(textEdit.toPlainText(), unicodeChar);
 }
 
+void tst_TestCore::testRewriterTransactionAddingAfterReparenting()
+{
+    const QLatin1String qmlString("\n"
+                                  "import QtQuick 2.0\n"
+                                  "\n"
+                                  "Item {\n"
+                                  "}\n");
+
+    QPlainTextEdit textEdit;
+    textEdit.setPlainText(qmlString);
+    NotIndentingTextEditModifier modifier(&textEdit);
+
+    QScopedPointer<Model> model(Model::create("QtQuick.Rectangle"));
+
+    QScopedPointer<TestRewriterView> testRewriterView(new TestRewriterView(0, RewriterView::Amend));
+    testRewriterView->setTextModifier(&modifier);
+    model->attachView(testRewriterView.data());
+
+    QVERIFY(testRewriterView->errors().isEmpty());
+
+    ModelNode rootModelNode = testRewriterView->rootModelNode();
+    QVERIFY(rootModelNode.isValid());
+
+    {
+        /* Regression test
+         * If a node is not a direct child node of the root item we did get an exception when adding properties
+         * after the reparent */
+
+        RewriterTransaction transaction = testRewriterView->beginRewriterTransaction("TEST");
+        ModelNode rectangle = testRewriterView->createModelNode("QtQuick.Rectangle", 2, 0);
+        rootModelNode.nodeListProperty("data").reparentHere(rectangle);
+        ModelNode rectangle2 = testRewriterView->createModelNode("QtQuick.Rectangle", 2, 0);
+        rectangle.nodeListProperty("data").reparentHere(rectangle2);
+
+        rectangle2.variantProperty("width").setValue(100);
+    }
+}
+
 void tst_TestCore::testRewriterForGradientMagic()
 {
     const QLatin1String qmlString("\n"
@@ -1266,7 +1299,7 @@ void tst_TestCore::testBasicStates()
     Exception::setShouldAssert(true);
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -1372,7 +1405,7 @@ void tst_TestCore::testBasicStatesQtQuick20()
     Exception::setShouldAssert(true);
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -1391,7 +1424,7 @@ void tst_TestCore::testBasicStatesQtQuick20()
     qDebug() << rootModelNode.nodeListProperty("states").toModelNodeList().first().metaInfo().majorVersion();
     qDebug() << rootModelNode.nodeListProperty("states").toModelNodeList().first().metaInfo().typeName();
 
-    MSKIP_ALL("No qml2puppet");
+    QSKIP("No qml2puppet");
 
     QScopedPointer<TestView> view(new TestView(model.data()));
     QVERIFY(view.data());
@@ -2530,7 +2563,7 @@ void tst_TestCore::testRewriterId()
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -2574,7 +2607,7 @@ void tst_TestCore::testRewriterNodeReparentingTransaction1()
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 0));
@@ -2619,7 +2652,7 @@ void tst_TestCore::testRewriterNodeReparentingTransaction2()
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 0));
@@ -2685,7 +2718,7 @@ void tst_TestCore::testRewriterNodeReparentingTransaction3()
                       "}\n";
 
    QPlainTextEdit textEdit;
-   textEdit.setPlainText(qmlString);
+   textEdit.setPlainText(QLatin1String(qmlString));
    NotIndentingTextEditModifier textModifier(&textEdit);
 
    QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 0));
@@ -2735,7 +2768,7 @@ void tst_TestCore::testRewriterNodeReparentingTransaction4()
                       "}\n";
 
    QPlainTextEdit textEdit;
-   textEdit.setPlainText(qmlString);
+   textEdit.setPlainText(QLatin1String(qmlString));
    NotIndentingTextEditModifier textModifier(&textEdit);
 
    QScopedPointer<Model> model(Model::create("QtQuick.Item",2,0));
@@ -2786,7 +2819,7 @@ void tst_TestCore::testRewriterAddNodeTransaction()
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 0));
@@ -2833,7 +2866,7 @@ void tst_TestCore::testRewriterComponentId()
         "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 0));
@@ -2864,7 +2897,7 @@ void tst_TestCore::testRewriterTransactionRewriter()
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 0));
@@ -2936,7 +2969,7 @@ void tst_TestCore::testRewriterPropertyDeclarations()
         "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -2998,7 +3031,7 @@ void tst_TestCore::testRewriterPropertyAliases()
         "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -3981,7 +4014,7 @@ char qmlString[] = "import QtQuick 2.1\n"
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -4197,7 +4230,7 @@ void tst_TestCore::testMetaInfoEnums()
     QApplication::processEvents();
 }
 
-void tst_TestCore::testMetaInfoQtQuick1Vs2()
+void tst_TestCore::testMetaInfoQtQuickVersion2()
 {
     char qmlString[] = "import QtQuick 2.0\n"
                        "Rectangle {\n"
@@ -4237,7 +4270,7 @@ void tst_TestCore::testMetaInfoQtQuick1Vs2()
                        "}\n";
 
     QPlainTextEdit textEdit;
-    textEdit.setPlainText(qmlString);
+    textEdit.setPlainText(QLatin1String(qmlString));
     NotIndentingTextEditModifier textModifier(&textEdit);
 
     QScopedPointer<Model> model(Model::create("QtQuick.Item"));
@@ -4539,6 +4572,64 @@ void tst_TestCore::testImplicitComponents()
 
     QVERIFY(delegate.isComponent()); //The delegate is an implicit component
     QCOMPARE(delegate.nodeSourceType(), ModelNode::NodeWithComponentSource);
+}
+
+void tst_TestCore::testRevisionedProperties()
+{
+#if QT_VERSION > QT_VERSION_CHECK(5, 11, 0)
+    const char* qmlString
+            =   "import QtQuick 2.12\n"
+                "import QtQuick.Controls 2.0\n"
+                "import QtQuick.Layouts 1.0\n"
+                "\n"
+                "Item {\n"
+                     "width: 640\n"
+                     "height: 480\n"
+                     "Rectangle {\n"
+                       "gradient: Gradient {\n"
+                       "orientation: Qt.Vertical\n"
+                       "}\n"
+                     "}\n"
+                     "TextEdit {\n"
+                       "leftPadding: 10\n"
+                       "rightPadding: 10\n"
+                       "topPadding: 10\n"
+                       "bottomPadding: 10\n"
+                     "}\n"
+                "}\n";
+
+    QPlainTextEdit textEdit;
+    textEdit.setPlainText(QLatin1String(qmlString));
+    NotIndentingTextEditModifier modifier(&textEdit);
+
+    QScopedPointer<Model> model(Model::create("QtQuick.Item"));
+    QVERIFY(model.data());
+    QScopedPointer<TestView> view(new TestView(model.data()));
+    QVERIFY(view.data());
+    model->attachView(view.data());
+
+    TestRewriterView *testRewriterView = new TestRewriterView(model.data());
+    testRewriterView->setCheckSemanticErrors(true);
+    testRewriterView->setTextModifier(&modifier);
+    model->attachView(testRewriterView);
+
+    QVERIFY(testRewriterView->errors().isEmpty());
+
+    ModelNode rootModelNode(view->rootModelNode());
+
+    QVERIFY(rootModelNode.isValid());
+
+    NodeMetaInfo metaInfo12 = model->metaInfo("QtQuick.Gradient", 2, 12);
+    NodeMetaInfo metaInfo11 = model->metaInfo("QtQuick.Gradient", -1, -1);
+    NodeMetaInfo metaInfoU = model->metaInfo("QtQuick.Gradient", -1, -1);
+
+    QVERIFY(metaInfo12.isValid());
+    QVERIFY(metaInfoU.isValid());
+
+    QVERIFY(metaInfo12.hasProperty("orientation"));
+    QVERIFY(metaInfoU.hasProperty("orientation"));
+
+#endif
 }
 
 void tst_TestCore::testStatesRewriter()
@@ -8012,7 +8103,7 @@ void tst_TestCore::loadTestFiles()
         QCOMPARE(rootModelNode.nodeListProperty("states").toModelNodeList().count(), 2);
     }
 
-    MSKIP_ALL("Fails because the text editor model doesn't know about components");
+    QSKIP("Fails because the text editor model doesn't know about components");
     { //usingbutton.qml
         QFile file(":/fx/usingbutton.qml");
         QVERIFY(file.open(QIODevice::ReadOnly | QIODevice::Text));
@@ -8206,6 +8297,126 @@ void tst_TestCore::changeGradientId()
         qDebug() << e;
         QFAIL(e.description().toLatin1().data());
     }
+}
+
+static void checkNode(QmlJS::SimpleReaderNode::Ptr node, TestRewriterView *view);
+
+static void checkChildNodes(QmlJS::SimpleReaderNode::Ptr node, TestRewriterView *view)
+{
+    for (auto child : node->children())
+        checkNode(child, view);
+}
+
+static void checkNode(QmlJS::SimpleReaderNode::Ptr node, TestRewriterView *view)
+{
+    QVERIFY(node);
+    QVERIFY(node->propertyNames().contains("i"));
+    const int internalId = node->property("i").toInt();
+    const ModelNode modelNode = view->modelNodeForInternalId(internalId);
+    QVERIFY(modelNode.isValid());
+    auto properties = node->properties();
+
+    for (auto i = properties.begin(); i != properties.end(); ++i) {
+        if (i.key() != "i")
+            QCOMPARE(i.value(), modelNode.auxiliaryData(i.key().toUtf8()));
+    }
+
+    checkChildNodes(node, view);
+}
+
+void tst_TestCore::writeAnnotations()
+{
+    QSKIP("We have to improve handling of emtpy lines.", SkipAll);
+
+    const QLatin1String qmlCode("\n"
+                                  "import QtQuick 2.1\n"
+                                  "\n"
+                                  "Rectangle {\n"
+                                  "  Item {\n"
+                                  "  }\n"
+                                  "\n"
+                                  "  MouseArea {\n"
+                                  "  x: 3\n"
+                                  "  y: 3\n"
+                                  "  }\n"
+                                  "}");
+
+    const QLatin1String metaCode("\n/*##^## Designer {\n    D{i:0;x:10}D{i:1;test:true;x:10;test2:\"string\"}"
+                                 "D{i:2;test:true;x:10;test2:\"string\"}\n}\n ##^##*/\n");
+
+    QPlainTextEdit textEdit;
+    textEdit.setPlainText(qmlCode);
+    NotIndentingTextEditModifier textModifier(&textEdit);
+
+    QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 1));
+    QVERIFY(model.data());
+
+    QScopedPointer<TestRewriterView> testRewriterView(new TestRewriterView());
+    testRewriterView->setTextModifier(&textModifier);
+    model->attachView(testRewriterView.data());
+
+    QVERIFY(model.data());
+    ModelNode rootModelNode(testRewriterView->rootModelNode());
+    QVERIFY(rootModelNode.isValid());
+
+    rootModelNode.setAuxiliaryData("x", 10);
+    for (const auto child : rootModelNode.allSubModelNodes()) {
+        child.setAuxiliaryData("x", 10);
+        child.setAuxiliaryData("test", true);
+        child.setAuxiliaryData("test2", "string");
+    }
+
+    const QString metaSource = testRewriterView->auxiliaryDataAsQML();
+
+    QmlJS::SimpleReader reader;
+    checkChildNodes(reader.readFromSource(metaSource), testRewriterView.data());
+
+    testRewriterView->writeAuxiliaryData();
+    const QString textWithMeta = testRewriterView->textModifier()->text();
+    testRewriterView->writeAuxiliaryData();
+    QCOMPARE(textWithMeta.length(), testRewriterView->textModifier()->text().length());
+}
+
+void tst_TestCore::readAnnotations()
+{
+    const QLatin1String qmlCode("\n"
+                                  "import QtQuick 2.1\n"
+                                  "\n"
+                                  "Rectangle {\n"
+                                  "  Item {\n"
+                                  "  }\n"
+                                  "\n"
+                                  "  MouseArea {\n"
+                                  "  x: 3\n"
+                                  "  y: 3\n"
+                                  "  }\n"
+                                  "}");
+
+    const QLatin1String metaCode("\n/*##^## Designer {\n    D{i:0;x:10}D{i:1;test:true;x:10;test2:\"string\"}"
+                                 "D{i:2;test:true;x:10;test2:\"string\"}\n}\n ##^##*/\n");
+
+    const QLatin1String metaCodeQmlCode("Designer {\n    D{i:0;x:10}D{i:1;test2:\"string\";x:10;test:true}"
+                                 "D{i:2;test2:\"string\";x:10;test:true}\n}\n");
+
+    QPlainTextEdit textEdit;
+    textEdit.setPlainText(qmlCode + metaCode);
+    NotIndentingTextEditModifier textModifier(&textEdit);
+
+    QScopedPointer<Model> model(Model::create("QtQuick.Item", 2, 1));
+    QVERIFY(model.data());
+
+    QScopedPointer<TestRewriterView> testRewriterView(new TestRewriterView());
+    testRewriterView->setTextModifier(&textModifier);
+    model->attachView(testRewriterView.data());
+
+    QVERIFY(model.data());
+    ModelNode rootModelNode(testRewriterView->rootModelNode());
+    QVERIFY(rootModelNode.isValid());
+
+    testRewriterView->restoreAuxiliaryData();
+
+    const QString metaSource = testRewriterView->auxiliaryDataAsQML();
+    QCOMPARE(metaSource.length(), QString(metaCodeQmlCode).length());
 }
 
 

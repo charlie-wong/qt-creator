@@ -32,16 +32,16 @@ import QtQuickDesignerTheme 1.0
 FocusScope {
     id: root
 
-    height: expanded ? 136 : 40
+    height: expanded ? 192 : 40
     signal createNewState
     signal deleteState(int internalNodeId)
     signal duplicateCurrentState
 
-    property int stateImageSize: 100
+    property int stateImageSize: 180
     property int delegateWidth: stateImageSize + 44
     property int padding: 2
     property int delegateHeight: root.height - padding * 2 + 1
-    property int innerSpacing: -1
+    property int innerSpacing: 0
     property int currentStateInternalId : 0
 
     property bool expanded: true
@@ -88,7 +88,7 @@ FocusScope {
     Item {
         id: addStateItem
 
-        property int buttonLeftSpacing: 0
+        property int buttonLeftSpacing: 8 * (expanded ?  1 : 2)
 
         anchors.right: parent.right
         width: delegateHeight / 2 + buttonLeftSpacing

@@ -46,9 +46,9 @@ public:
         , m_snapshot(snapshot)
     {}
 
-    virtual void indentSelection(const QTextCursor &selection,
-                                 const QString &fileName,
-                                 const TextEditor::TextDocument *textDocument) const
+    void indentSelection(const QTextCursor &selection,
+                         const QString &fileName,
+                         const TextEditor::TextDocument *textDocument) const override
     {
         // ### shares code with QmlJSTextEditor::indent
         QTextDocument *doc = selection.document();
@@ -70,18 +70,18 @@ public:
         } while (block.isValid() && block != end);
     }
 
-    virtual void reindentSelection(const QTextCursor &selection,
-                                   const QString &fileName,
-                                   const TextEditor::TextDocument *textDocument) const
+    void reindentSelection(const QTextCursor &selection,
+                           const QString &fileName,
+                           const TextEditor::TextDocument *textDocument) const override
     {
         const TextEditor::TabSettings &tabSettings =
             ProjectExplorer::actualTabSettings(fileName, textDocument);
 
-        QmlJSEditor::Internal::Indenter indenter;
-        indenter.reindent(selection.document(), selection, tabSettings);
+        QmlJSEditor::Internal::Indenter indenter(selection.document());
+        indenter.reindent(selection, tabSettings);
     }
 
-    virtual void fileChanged(const QString &fileName)
+    void fileChanged(const QString &fileName) override
     {
         m_modelManager->updateSourceFiles(QStringList(fileName), true);
     }
@@ -149,7 +149,7 @@ Document::Ptr QmlJSRefactoringFile::qmljsDocument() const
     return m_qmljsDocument;
 }
 
-unsigned QmlJSRefactoringFile::startOf(const AST::SourceLocation &loc) const
+unsigned QmlJSRefactoringFile::startOf(const SourceLocation &loc) const
 {
     return position(loc.startLine, loc.startColumn);
 }
@@ -176,7 +176,7 @@ bool QmlJSRefactoringFile::isCursorOn(AST::UiQualifiedId *ast) const
     return pos <= ast->identifierToken.end();
 }
 
-bool QmlJSRefactoringFile::isCursorOn(AST::SourceLocation loc) const
+bool QmlJSRefactoringFile::isCursorOn(SourceLocation loc) const
 {
     const unsigned pos = cursor().position();
     return pos >= loc.begin() && pos <= loc.end();

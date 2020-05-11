@@ -28,12 +28,15 @@
 #include "projectexplorer_export.h"
 
 #include <coreplugin/id.h>
-#include <texteditor/textmark.h>
 #include <utils/fileutils.h>
 
 #include <QIcon>
 #include <QMetaType>
 #include <QTextLayout>
+
+namespace TextEditor {
+class TextMark;
+}
 
 namespace ProjectExplorer {
 
@@ -42,34 +45,46 @@ class TaskHub;
 // Documentation inside.
 class PROJECTEXPLORER_EXPORT Task
 {
+    Q_DECLARE_TR_FUNCTIONS(ProjectExplorer::Task)
+
 public:
-    enum TaskType {
+    enum TaskType : char {
         Unknown,
         Error,
         Warning
     };
 
+    enum Option : char {
+        NoOptions   = 0,
+        AddTextMark = 1 << 0,
+        FlashWorthy = 1 << 1,
+    };
+    using Options = char;
+
     Task() = default;
     Task(TaskType type, const QString &description,
-         const Utils::FileName &file, int line, Core::Id category,
-         const Utils::FileName &iconName = Utils::FileName());
+         const Utils::FilePath &file, int line, Core::Id category,
+         const QIcon &icon = QIcon(),
+         Options options = AddTextMark | FlashWorthy);
 
     static Task compilerMissingTask();
-    static Task buildConfigurationMissingTask();
 
     bool isNull() const;
     void clear();
+    void setFile(const Utils::FilePath &file);
 
     unsigned int taskId = 0;
     TaskType type = Unknown;
+    Options options = AddTextMark | FlashWorthy;
     QString description;
-    Utils::FileName file;
+    Utils::FilePath file;
+    Utils::FilePaths fileCandidates;
     int line = -1;
     int movedLine = -1; // contains a line number if the line was moved in the editor
     Core::Id category;
     QIcon icon;
 
-    // Having a QList<QTextLayout::FormatRange> in Task isn't that great
+    // Having a container of QTextLayout::FormatRange in Task isn't that great
     // It would be cleaner to split up the text into
     // the logical hunks and then assemble them again
     // (That is different consumers of tasks could show them in
@@ -88,10 +103,39 @@ private:
     friend class TaskHub;
 };
 
+class PROJECTEXPLORER_EXPORT CompileTask : public Task
+{
+public:
+    CompileTask(TaskType type,
+                 const QString &description,
+                 const Utils::FilePath &file = {},
+                 int line = -1);
+};
+
+class PROJECTEXPLORER_EXPORT BuildSystemTask : public Task
+{
+public:
+    BuildSystemTask(TaskType type,
+                    const QString &description,
+                    const Utils::FilePath &file = {},
+                    int line = -1);
+};
+
+class PROJECTEXPLORER_EXPORT DeploymentTask : public Task
+{
+public:
+    DeploymentTask(TaskType type, const QString &description);
+};
+
+using Tasks = QVector<Task>;
+
 bool PROJECTEXPLORER_EXPORT operator==(const Task &t1, const Task &t2);
 uint PROJECTEXPLORER_EXPORT qHash(const Task &task);
 
 bool PROJECTEXPLORER_EXPORT operator<(const Task &a, const Task &b);
+
+QString PROJECTEXPLORER_EXPORT toHtml(const Tasks &issues);
+bool PROJECTEXPLORER_EXPORT containsType(const Tasks &issues, Task::TaskType);
 
 } //namespace ProjectExplorer
 

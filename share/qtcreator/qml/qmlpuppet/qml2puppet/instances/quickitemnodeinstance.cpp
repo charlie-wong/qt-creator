@@ -95,7 +95,7 @@ QTransform QuickItemNodeInstance::transform() const
 QObject *QuickItemNodeInstance::parent() const
 {
     if (!quickItem() || !quickItem()->parentItem())
-        return 0;
+        return nullptr;
 
     return quickItem()->parentItem();
 }
@@ -156,7 +156,8 @@ void QuickItemNodeInstance::createEffectItem(bool createEffectItem)
     s_createEffectItem = createEffectItem;
 }
 
-void QuickItemNodeInstance::initialize(const ObjectNodeInstance::Pointer &objectNodeInstance)
+void QuickItemNodeInstance::initialize(const ObjectNodeInstance::Pointer &objectNodeInstance,
+                                       InstanceContainer::NodeFlags flags)
 {
 
     if (instanceId() == 0) {
@@ -167,10 +168,11 @@ void QuickItemNodeInstance::initialize(const ObjectNodeInstance::Pointer &object
 
     if (quickItem()->window()) {
         if (s_createEffectItem || instanceId() == 0)
-            designerSupport()->refFromEffectItem(quickItem());
+            designerSupport()->refFromEffectItem(quickItem(),
+                                                 !flags.testFlag(InstanceContainer::ParentTakesOverRendering));
     }
 
-    ObjectNodeInstance::initialize(objectNodeInstance);
+    ObjectNodeInstance::initialize(objectNodeInstance, flags);
     quickItem()->update();
 }
 
@@ -191,13 +193,13 @@ void QuickItemNodeInstance::doComponentComplete()
 {
     ObjectNodeInstance::doComponentComplete();
 
+    QmlPrivateGate::disableTextCursor(quickItem());
+
+    QmlPrivateGate::emitComponentComplete(quickItem());
+
     QQmlProperty contentItemProperty(quickItem(), "contentItem", engine());
     if (contentItemProperty.isValid())
         m_contentItem = contentItemProperty.read().value<QQuickItem*>();
-
-    QmlPrivateGate::disableTextCursor(quickItem());
-
-    DesignerSupport::emitComponentCompleteSignalForAttachedProperty(quickItem());
 
     quickItem()->update();
 }
@@ -228,6 +230,20 @@ QList<QQuickItem *> QuickItemNodeInstance::allItemsRecursive() const
     }
 
     return itemList;
+}
+
+QStringList QuickItemNodeInstance::allStates() const
+{
+    QStringList list;
+
+    QList<QObject*> stateList = DesignerSupport::statesForItem(quickItem());
+    for (QObject *state : stateList) {
+        QQmlProperty property(state, "name");
+        if (property.isValid())
+            list.append(property.read().toString());
+    }
+
+    return list;
 }
 
 QRectF QuickItemNodeInstance::contentItemBoundingBox() const
@@ -382,10 +398,12 @@ QImage QuickItemNodeInstance::renderPreviewImage(const QSize &previewImageSize) 
     QRectF previewItemBoundingRect = boundingRect();
 
     if (previewItemBoundingRect.isValid() && quickItem()) {
+        static double devicePixelRatio = qgetenv("FORMEDITOR_DEVICE_PIXEL_RATIO").toDouble();
+        const QSize size = previewImageSize * devicePixelRatio;
         if (quickItem()->isVisible()) {
-            return designerSupport()->renderImageForItem(quickItem(), previewItemBoundingRect, previewImageSize);
+            return designerSupport()->renderImageForItem(quickItem(), previewItemBoundingRect, size);
         } else {
-            QImage transparentImage(previewImageSize, QImage::Format_ARGB32_Premultiplied);
+            QImage transparentImage(size, QImage::Format_ARGB32_Premultiplied);
             transparentImage.fill(Qt::transparent);
             return transparentImage;
         }
@@ -607,8 +625,8 @@ void QuickItemNodeInstance::setPropertyVariant(const PropertyName &name, const Q
     if (ignoredProperties().contains(name))
         return;
 
-    if (name == "state")
-        return; // states are only set by us
+    if (name == "state" && isRootNodeInstance())
+        return; // states on the root item are only set by us
 
     if (name == "height") {
         m_height = value.toDouble();
@@ -645,8 +663,8 @@ void QuickItemNodeInstance::setPropertyBinding(const PropertyName &name, const Q
     if (ignoredProperties().contains(name))
         return;
 
-    if (name == "state")
-        return; // states are only set by us
+    if (name == "state" && isRootNodeInstance())
+        return; // states on the root item are only set by us
 
     if (name.startsWith("anchors.") && isRootNodeInstance())
         return;
@@ -795,8 +813,8 @@ bool QuickItemNodeInstance::isAnchoredBySibling() const
 
 QQuickItem *QuickItemNodeInstance::quickItem() const
 {
-    if (object() == 0)
-        return 0;
+    if (object() == nullptr)
+        return nullptr;
 
     return static_cast<QQuickItem*>(object());
 }

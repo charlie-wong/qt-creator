@@ -39,59 +39,80 @@
 
 #include <projectexplorer/projectexplorerconstants.h>
 #include <projectexplorer/projectmanager.h>
+#include <projectexplorer/projectnodes.h>
 #include <projectexplorer/projecttree.h>
 #include <projectexplorer/selectablefilesmodel.h>
+#include <projectexplorer/taskhub.h>
 
 #include <utils/algorithm.h>
 #include <utils/fileutils.h>
+#include <utils/qtcassert.h>
 
 #include <QAction>
-#include <QtPlugin>
-#include <QDebug>
 
 using namespace Core;
 using namespace ProjectExplorer;
+using namespace Utils;
+namespace PEC = ProjectExplorer::Constants;
 
 namespace GenericProjectManager {
 namespace Internal {
 
-bool GenericProjectPlugin::initialize(const QStringList &, QString *errorMessage)
+class GenericProjectPluginPrivate : public QObject
 {
-    Q_UNUSED(errorMessage)
+public:
+    GenericProjectPluginPrivate();
 
-    ProjectManager::registerProjectType<GenericProject>(Constants::GENERICMIMETYPE);
+    ProjectFilesFactory projectFilesFactory;
+    GenericMakeStepFactory makeStepFactory;
+    GenericBuildConfigurationFactory buildConfigFactory;
 
-    addAutoReleasedObject(new ProjectFilesFactory);
-    addAutoReleasedObject(new GenericMakeStepFactory);
-    addAutoReleasedObject(new GenericBuildConfigurationFactory);
+    QAction editFilesAction{GenericProjectPlugin::tr("Edit Files..."), nullptr};
+};
 
-    IWizardFactory::registerFactoryCreator([]() { return QList<IWizardFactory *>() << new GenericProjectWizard; });
+GenericProjectPlugin::~GenericProjectPlugin()
+{
+    delete d;
+}
 
-    ActionContainer *mproject =
-            ActionManager::actionContainer(ProjectExplorer::Constants::M_PROJECTCONTEXT);
-
-    auto editFilesAction = new QAction(tr("Edit Files..."), this);
-    Command *command = ActionManager::registerAction(editFilesAction,
-        "GenericProjectManager.EditFiles", Context(Constants::PROJECTCONTEXT));
-    command->setAttribute(Command::CA_Hide);
-    mproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_FILES);
-
-    connect(editFilesAction, &QAction::triggered, this, &GenericProjectPlugin::editFiles);
-
+bool GenericProjectPlugin::initialize(const QStringList &, QString *)
+{
+    d = new GenericProjectPluginPrivate;
     return true;
 }
 
-void GenericProjectPlugin::editFiles()
+GenericProjectPluginPrivate::GenericProjectPluginPrivate()
 {
-    auto genericProject = qobject_cast<GenericProject *>(ProjectTree::currentProject());
-    if (!genericProject)
-        return;
-    SelectableFilesDialogEditFiles sfd(genericProject->projectDirectory(),
-                                       Utils::transform(genericProject->files(Project::AllFiles),
-                                                        [](const QString &f) { return Utils::FileName::fromString(f); }),
-                                       ICore::mainWindow());
-    if (sfd.exec() == QDialog::Accepted)
-        genericProject->setFiles(Utils::transform(sfd.selectedFiles(), &Utils::FileName::toString));
+    ProjectManager::registerProjectType<GenericProject>(Constants::GENERICMIMETYPE);
+
+    IWizardFactory::registerFactoryCreator([] { return QList<IWizardFactory *>{new GenericProjectWizard}; });
+
+    ActionContainer *mproject = ActionManager::actionContainer(PEC::M_PROJECTCONTEXT);
+
+    Command *command = ActionManager::registerAction(&editFilesAction,
+        "GenericProjectManager.EditFiles", Context(Constants::GENERICPROJECT_ID));
+    command->setAttribute(Command::CA_Hide);
+    mproject->addAction(command, PEC::G_PROJECT_FILES);
+
+    connect(&editFilesAction, &QAction::triggered, this, [] {
+        if (auto genericProject = qobject_cast<GenericProject *>(ProjectTree::currentProject()))
+            genericProject->editFilesTriggered();
+    });
+
+    const auto removeDirAction = new QAction(GenericProjectPlugin::tr("Remove Directory"), this);
+    Command * const cmd = ActionManager::registerAction(removeDirAction, "GenericProject.RemoveDir",
+                                                        Context(PEC::C_PROJECT_TREE));
+    ActionManager::actionContainer(PEC::M_FOLDERCONTEXT)->addAction(cmd, PEC::G_FOLDER_OTHER);
+    connect(removeDirAction, &QAction::triggered, this, [] {
+        const auto folderNode = ProjectTree::currentNode()->asFolderNode();
+        QTC_ASSERT(folderNode, return);
+        const auto project = qobject_cast<GenericProject *>(folderNode->getProject());
+        QTC_ASSERT(project, return);
+        const QStringList filesToRemove = transform<QStringList>(
+                    folderNode->findNodes([](const Node *node) { return node->asFileNode(); }),
+                    [](const Node *node) { return node->filePath().toString();});
+        project->removeFilesTriggered(filesToRemove);
+    });
 }
 
 } // namespace Internal

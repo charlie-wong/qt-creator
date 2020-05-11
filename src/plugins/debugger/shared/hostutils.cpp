@@ -28,10 +28,6 @@
 #ifdef Q_OS_WIN
 
 #include <QTextStream>
-
-// Enable Win API of XP SP1 and later
-#undef _WIN32_WINNT
-#define _WIN32_WINNT 0x0502
 #include <windows.h>
 #include <utils/winutils.h>
 #include <tlhelp32.h>
@@ -193,7 +189,7 @@ bool isDebuggerWinException(unsigned long code)
     return code == EXCEPTION_BREAKPOINT || code == EXCEPTION_SINGLE_STEP;
 }
 
-bool isFatalWinException(long code)
+bool isFatalWinException(unsigned long code)
 {
     switch (code) {
     case EXCEPTION_BREAKPOINT:
@@ -217,7 +213,7 @@ bool winResumeThread(unsigned long, QString *) { return false; }
 bool isWinProcessBeingDebugged(unsigned long) { return false; }
 void formatWindowsException(unsigned long , quint64, unsigned long,
                             quint64, quint64, QTextStream &) { }
-bool isFatalWinException(long) { return false; }
+bool isFatalWinException(unsigned long) { return false; }
 bool isDebuggerWinException(unsigned long) { return false; }
 
 #endif // !Q_OS_WIN

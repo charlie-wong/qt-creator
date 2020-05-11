@@ -1,9 +1,9 @@
 include(qtcreator.pri)
 
 #version check qt
-!minQtVersion(5, 6, 0) {
-    message("Cannot build Qt Creator with Qt version $${QT_VERSION}.")
-    error("Use at least Qt 5.6.0.")
+!minQtVersion(5, 12, 0) {
+    message("Cannot build $$IDE_DISPLAY_NAME with Qt version $${QT_VERSION}.")
+    error("Use at least Qt 5.12.0.")
 }
 
 include(doc/doc.pri)
@@ -19,12 +19,7 @@ DISTFILES += dist/copyright_template.txt \
     README.md \
     $$files(dist/changes-*) \
     qtcreator.qbs \
-    qbs/pluginjson/pluginjson.qbs \
-    $$files(dist/installer/ifw/config/config-*) \
-    dist/installer/ifw/packages/org.qtproject.qtcreator/meta/package.xml.in \
-    dist/installer/ifw/packages/org.qtproject.qtcreator.application/meta/installscript.qs \
-    dist/installer/ifw/packages/org.qtproject.qtcreator.application/meta/package.xml.in \
-    dist/installer/ifw/packages/org.qtproject.qtcreator.application/meta/license.txt \
+    $$files(qbs/*, true) \
     $$files(scripts/*.py) \
     $$files(scripts/*.sh) \
     $$files(scripts/*.pl)
@@ -102,34 +97,34 @@ else: PLATFORM = "unknown"
 BASENAME = $$(INSTALL_BASENAME)
 isEmpty(BASENAME): BASENAME = qt-creator-$${PLATFORM}$(INSTALL_EDITION)-$${QTCREATOR_VERSION}$(INSTALL_POSTFIX)
 
-macx:INSTALLER_NAME = "qt-creator-$${QTCREATOR_VERSION}"
-else:INSTALLER_NAME = "$${BASENAME}"
-
 linux {
-    appstream.files = dist/org.qt-project.qtcreator.appdata.xml
+    appstream.files = share/metainfo/org.qt-project.qtcreator.appdata.xml
     appstream.path = $$QTC_PREFIX/share/metainfo/
 
-    desktop.files = dist/org.qt-project.qtcreator.desktop
+    desktop.files = share/applications/org.qt-project.qtcreator.desktop
     desktop.path = $$QTC_PREFIX/share/applications/
 
     INSTALLS += appstream desktop
 }
 
 macx {
-    APPBUNDLE = "$$OUT_PWD/bin/Qt Creator.app"
-    BINDIST_SOURCE = "$$OUT_PWD/bin/Qt Creator.app"
-    BINDIST_INSTALLER_SOURCE = $$BINDIST_SOURCE
+    APPBUNDLE = "$$OUT_PWD/bin/$${IDE_APP_TARGET}.app"
+    BINDIST_SOURCE.release = "$$OUT_PWD/bin/$${IDE_APP_TARGET}.app"
+    BINDIST_SOURCE.debug = "$$OUT_PWD/bin"
+    BINDIST_EXCLUDE_ARG.debug = "--exclude-toplevel"
     deployqt.commands = $$PWD/scripts/deployqtHelper_mac.sh \"$${APPBUNDLE}\" \"$$[QT_INSTALL_BINS]\" \"$$[QT_INSTALL_TRANSLATIONS]\" \"$$[QT_INSTALL_PLUGINS]\" \"$$[QT_INSTALL_IMPORTS]\" \"$$[QT_INSTALL_QML]\"
-    codesign.commands = codesign --deep -s \"$(SIGNING_IDENTITY)\" $(SIGNING_FLAGS) \"$${APPBUNDLE}\"
-    dmg.commands = $$PWD/scripts/makedmg.sh $$OUT_PWD/bin $${BASENAME}.dmg
+    codesign.commands = codesign --deep -o runtime -s \"$(SIGNING_IDENTITY)\" $(SIGNING_FLAGS) \"$${APPBUNDLE}\"
+    dmg.commands = python -u \"$$PWD/scripts/makedmg.py\" \"$${BASENAME}.dmg\" \"Qt Creator\" \"$$IDE_SOURCE_TREE\" \"$$OUT_PWD/bin\"
     #dmg.depends = deployqt
     QMAKE_EXTRA_TARGETS += codesign dmg
 } else {
-    BINDIST_SOURCE = "$(INSTALL_ROOT)$$QTC_PREFIX"
-    BINDIST_INSTALLER_SOURCE = "$$BINDIST_SOURCE/*"
-    deployqt.commands = python -u $$PWD/scripts/deployqt.py -i \"$(INSTALL_ROOT)$$QTC_PREFIX\" \"$(QMAKE)\"
+    BINDIST_SOURCE.release = "$(INSTALL_ROOT)$$QTC_PREFIX"
+    BINDIST_EXCLUDE_ARG.release = "--exclude-toplevel"
+    BINDIST_SOURCE.debug = $${BINDIST_SOURCE.release}
+    BINDIST_EXCLUDE_ARG.debug = $${BINDIST_EXCLUDE_ARG.release}
+    deployqt.commands = python -u $$PWD/scripts/deployqt.py -i \"$(INSTALL_ROOT)$$QTC_PREFIX/bin/$${IDE_APP_TARGET}\" \"$(QMAKE)\"
     deployqt.depends = install
-    win32 {
+    win32:!isEmpty(BINARY_ARTIFACTS_BRANCH) {
         deployartifacts.depends = install
         deployartifacts.commands = git clone --depth 1 -b $$BINARY_ARTIFACTS_BRANCH \
                 "http://code.qt.io/qt-creator/binary-artifacts.git" \
@@ -146,24 +141,20 @@ isEmpty(INSTALLER_ARCHIVE_FROM_ENV) {
     INSTALLER_ARCHIVE = $$OUT_PWD/$$(INSTALLER_ARCHIVE)
 }
 
-#bindist.depends = deployqt
-bindist.commands = 7z a -mx9 $$OUT_PWD/$${BASENAME}.7z \"$$BINDIST_SOURCE\"
-#bindist_installer.depends = deployqt
-bindist_installer.commands = 7z a -mx9 $${INSTALLER_ARCHIVE} \"$$BINDIST_INSTALLER_SOURCE\"
-installer.depends = bindist_installer
-installer.commands = python -u $$PWD/scripts/packageIfw.py -i \"$(IFW_PATH)\" -v $${QTCREATOR_VERSION} -a \"$${INSTALLER_ARCHIVE}\" "$$INSTALLER_NAME"
+INSTALLER_ARCHIVE_DEBUG = $$INSTALLER_ARCHIVE
+INSTALLER_ARCHIVE_DEBUG ~= s/(.*)[.]7z/\1-debug.7z
 
-macx {
-    codesign_installer.commands = codesign -s \"$(SIGNING_IDENTITY)\" $(SIGNING_FLAGS) \"$${INSTALLER_NAME}.app\"
-    dmg_installer.commands = hdiutil create -srcfolder "$${INSTALLER_NAME}.app" -volname \"Qt Creator\" -format UDBZ "$${BASENAME}-installer.dmg" -ov -scrub -size 1g -verbose
-    QMAKE_EXTRA_TARGETS += codesign_installer dmg_installer
-}
+bindist.commands = python -u $$PWD/scripts/createDistPackage.py $$OUT_PWD/$${BASENAME}.7z \"$${BINDIST_SOURCE.release}\"
+bindist_installer.commands = python -u $$PWD/scripts/createDistPackage.py $${BINDIST_EXCLUDE_ARG.release} $${INSTALLER_ARCHIVE} \"$${BINDIST_SOURCE.release}\"
+bindist_debug.commands = python -u $$PWD/scripts/createDistPackage.py --debug $${BINDIST_EXCLUDE_ARG.debug} $${INSTALLER_ARCHIVE_DEBUG} \"$${BINDIST_SOURCE.debug}\"
 
 win32 {
     deployqt.commands ~= s,/,\\\\,g
     bindist.commands ~= s,/,\\\\,g
     bindist_installer.commands ~= s,/,\\\\,g
-    installer.commands ~= s,/,\\\\,g
 }
 
-QMAKE_EXTRA_TARGETS += deployqt bindist bindist_installer installer
+deployqt.CONFIG += recursive
+deployqt.recurse = src
+
+QMAKE_EXTRA_TARGETS += deployqt bindist bindist_installer bindist_debug

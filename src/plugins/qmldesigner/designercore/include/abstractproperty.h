@@ -38,9 +38,8 @@ namespace QmlDesigner {
         class InternalNode;
         class InternalProperty;
 
-        typedef QSharedPointer<InternalNode> InternalNodePointer;
-        typedef QSharedPointer<InternalProperty> InternalPropertyPointer;
-        typedef QWeakPointer<InternalNode> InternalNodeWeakPointer;
+        using InternalNodePointer = QSharedPointer<InternalNode>;
+        using InternalPropertyPointer = QSharedPointer<InternalProperty>;
     }
 
 class Model;
@@ -108,6 +107,7 @@ protected:
     AbstractProperty(const PropertyName &propertyName, const Internal::InternalNodePointer &internalNode, Model* model, AbstractView *view);
     AbstractProperty(const Internal::InternalPropertyPointer &property, Model* model, AbstractView *view);
     Internal::InternalNodePointer internalNode() const;
+    Internal::ModelPrivate *privateModel() const;
 
 private:
     PropertyName m_propertyName;

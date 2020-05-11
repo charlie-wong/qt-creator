@@ -49,6 +49,7 @@
 #include <QApplication>
 #include <QDialogButtonBox>
 #include <QSortFilterProxyModel>
+#include <QRegularExpression>
 
 #include <QHelpEngine>
 
@@ -76,8 +77,7 @@ BookmarkDialog::BookmarkDialog(BookmarkManager *manager, const QString &title,
     proxyModel->setDynamicSortFilter(true);
     proxyModel->setFilterRole(Qt::UserRole + 10);
     proxyModel->setSourceModel(bookmarkManager->treeBookmarkModel());
-    proxyModel->setFilterRegExp(QRegExp(QLatin1String("Folder"),
-        Qt::CaseSensitive, QRegExp::FixedString));
+    proxyModel->setFilterRegularExpression(QRegularExpression(QLatin1String("Folder")));
     ui.treeView->setModel(proxyModel);
 
     ui.treeView->expandAll();
@@ -96,7 +96,7 @@ BookmarkDialog::BookmarkDialog(BookmarkManager *manager, const QString &title,
             this, &BookmarkDialog::itemChanged);
 
     connect(ui.bookmarkFolders,
-            static_cast<void (QComboBox::*)(const QString &)>(&QComboBox::currentIndexChanged),
+            QOverload<const QString &>::of(&QComboBox::currentIndexChanged),
             this, &BookmarkDialog::selectBookmarkFolder);
 
     connect(ui.treeView, &TreeView::customContextMenuRequested,
@@ -217,7 +217,7 @@ void BookmarkDialog::customContextMenuRequested(const QPoint &point)
     if (!index.isValid())
         return;
 
-    QMenu menu(QLatin1String(""), this);
+    QMenu menu(this);
 
     QAction *removeItem = menu.addAction(tr("Delete Folder"));
     QAction *renameItem = menu.addAction(tr("Rename Folder"));
@@ -273,6 +273,7 @@ bool BookmarkDialog::eventFilter(QObject *object, QEvent *e)
                 }
             }   break;
 
+            case Qt::Key_Backspace:
             case Qt::Key_Delete: {
                 bookmarkManager->removeBookmarkItem(ui.treeView,
                     proxyModel->mapToSource(index));
@@ -319,14 +320,14 @@ void BookmarkWidget::filterChanged()
 {
     bool searchBookmarks = searchField->text().isEmpty();
     if (!searchBookmarks) {
-        regExp.setPattern(searchField->text());
+        regExp.setPattern(QRegularExpression::escape(searchField->text()));
         filterBookmarkModel->setSourceModel(bookmarkManager->listBookmarkModel());
     } else {
-        regExp.setPattern(QLatin1String(""));
+        regExp.setPattern(QString());
         filterBookmarkModel->setSourceModel(bookmarkManager->treeBookmarkModel());
     }
 
-    filterBookmarkModel->setFilterRegExp(regExp);
+    filterBookmarkModel->setFilterRegularExpression(regExp);
 
     const QModelIndex &index = treeView->indexAt(QPoint(1, 1));
     if (index.isValid())
@@ -366,7 +367,7 @@ void BookmarkWidget::customContextMenuRequested(const QPoint &point)
     QAction *renameItem = 0;
     QAction *showItemNewTab = 0;
 
-    QMenu menu(QLatin1String(""), this);
+    QMenu menu(this);
     QString data = index.data(Qt::UserRole + 10).toString();
     if (data == QLatin1String("Folder")) {
         removeItem = menu.addAction(tr("Delete Folder"));
@@ -407,11 +408,10 @@ void BookmarkWidget::customContextMenuRequested(const QPoint &point)
 
 void BookmarkWidget::setup()
 {
-    regExp.setPatternSyntax(QRegExp::FixedString);
-    regExp.setCaseSensitivity(Qt::CaseInsensitive);
+    regExp.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
 
     QLayout *vlayout = new QVBoxLayout(this);
-    vlayout->setMargin(0);
+    vlayout->setContentsMargins(0, 0, 0, 0);
     vlayout->setSpacing(0);
 
     searchField = new Utils::FancyLineEdit(this);
@@ -421,7 +421,7 @@ void BookmarkWidget::setup()
     Utils::StyledBar *toolbar = new Utils::StyledBar(this);
     toolbar->setSingleRow(false);
     QLayout *tbLayout = new QHBoxLayout();
-    tbLayout->setMargin(4);
+    tbLayout->setContentsMargins(4, 4, 4, 4);
     tbLayout->addWidget(searchField);
     toolbar->setLayout(tbLayout);
 
@@ -489,7 +489,7 @@ bool BookmarkWidget::eventFilter(QObject *object, QEvent *e)
                         treeView->edit(index);
                         item->setEditable(false);
                     }
-                } else if (ke->key() == Qt::Key_Delete) {
+                } else if (ke->key() == Qt::Key_Delete || ke->key() == Qt::Key_Backspace) {
                     bookmarkManager->removeBookmarkItem(treeView, src);
                 }
             }
@@ -702,7 +702,7 @@ void BookmarkManager::itemChanged(QStandardItem *item)
     if (item->text() != oldText) {
         if (item->data(Qt::UserRole + 10).toString() != QLatin1String("Folder")) {
             QList<QStandardItem*>itemList = listModel->findItems(oldText);
-            if (itemList.count() > 0)
+            if (!itemList.isEmpty())
                 itemList.at(0)->setText(item->text());
         }
     }

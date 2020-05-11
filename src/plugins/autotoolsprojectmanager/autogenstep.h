@@ -27,113 +27,15 @@
 
 #pragma once
 
-#include <projectexplorer/abstractprocessstep.h>
-
-QT_BEGIN_NAMESPACE
-class QLineEdit;
-QT_END_NAMESPACE
+#include <projectexplorer/buildstep.h>
 
 namespace AutotoolsProjectManager {
 namespace Internal {
 
-class AutotoolsProject;
-class AutogenStep;
-class AutogenStepConfigWidget;
-
-/////////////////////////////
-// AutogenStepFactory class
-/////////////////////////////
-/**
- * @brief Implementation of the ProjectExplorer::IBuildStepFactory interface.
- *
- * This factory is used to create instances of AutogenStep.
- */
-class AutogenStepFactory : public ProjectExplorer::IBuildStepFactory
+class AutogenStepFactory final : public ProjectExplorer::BuildStepFactory
 {
-    Q_OBJECT
-
 public:
-    AutogenStepFactory(QObject *parent = 0);
-
-    QList<ProjectExplorer::BuildStepInfo>
-        availableSteps(ProjectExplorer::BuildStepList *parent) const override;
-
-    ProjectExplorer::BuildStep *create(ProjectExplorer::BuildStepList *parent, Core::Id id) override;
-    ProjectExplorer::BuildStep *clone(ProjectExplorer::BuildStepList *parent, ProjectExplorer::BuildStep *source) override;
-};
-
-///////////////////////
-// AutogenStep class
-///////////////////////
-/**
- * @brief Implementation of the ProjectExplorer::AbstractProcessStep interface.
- *
- * A autogen step can be configured by selecting the "Projects" button of Qt Creator
- * (in the left hand side menu) and under "Build Settings".
- *
- * It is possible for the user to specify custom arguments. The corresponding
- * configuration widget is created by AutogenStep::createConfigWidget and is
- * represented by an instance of the class AutogenStepConfigWidget.
- */
-
-class AutogenStep : public ProjectExplorer::AbstractProcessStep
-{
-    Q_OBJECT
-    friend class AutogenStepFactory;
-    friend class AutogenStepConfigWidget;
-
-public:
-    explicit AutogenStep(ProjectExplorer::BuildStepList *bsl);
-
-    bool init(QList<const BuildStep *> &earlierSteps) override;
-    void run(QFutureInterface<bool> &fi) override;
-    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
-    bool immutable() const override;
-    QString additionalArguments() const;
-    QVariantMap toMap() const override;
-
-    void setAdditionalArguments(const QString &list);
-
-signals:
-    void additionalArgumentsChanged(const QString &);
-
-protected:
-    AutogenStep(ProjectExplorer::BuildStepList *bsl, AutogenStep *bs);
-    AutogenStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
-
-    bool fromMap(const QVariantMap &map) override;
-
-private:
-    void ctor();
-
-    QString m_additionalArguments;
-    bool m_runAutogen = false;
-};
-
-//////////////////////////////////
-// AutogenStepConfigWidget class
-//////////////////////////////////
-/**
- * @brief Implementation of the ProjectExplorer::BuildStepConfigWidget interface.
- *
- * Allows to configure a autogen step in the GUI.
- */
-class AutogenStepConfigWidget : public ProjectExplorer::BuildStepConfigWidget
-{
-    Q_OBJECT
-
-public:
-    AutogenStepConfigWidget(AutogenStep *autogenStep);
-
-    QString displayName() const override;
-    QString summaryText() const override;
-
-private:
-    void updateDetails();
-
-    AutogenStep *m_autogenStep;
-    QString m_summaryText;
-    QLineEdit *m_additionalArguments;
+    AutogenStepFactory();
 };
 
 } // namespace Internal

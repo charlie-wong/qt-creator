@@ -30,9 +30,10 @@
 
 #include <coreplugin/coreconstants.h>
 #include <utils/completingtextedit.h>
+#include <utils/theme/theme.h>
 #include <utils/utilsicons.h>
 
-#include <QRegExpValidator>
+#include <QRegularExpressionValidator>
 #include <QTextEdit>
 
 #include <QDir>
@@ -51,7 +52,7 @@ GitSubmitEditorWidget::GitSubmitEditorWidget() :
     m_gitSubmitPanelUi.setupUi(m_gitSubmitPanel);
     new GitSubmitHighlighter(descriptionEdit());
 
-    m_emailValidator = new QRegExpValidator(QRegExp("[^@ ]+@[^@ ]+\\.[a-zA-Z]+"), this);
+    m_emailValidator = new QRegularExpressionValidator(QRegularExpression("[^@ ]+@[^@ ]+\\.[a-zA-Z]+"), this);
     const QPixmap error = Utils::Icons::CRITICAL.pixmap();
     m_gitSubmitPanelUi.invalidAuthorLabel->setPixmap(error);
     m_gitSubmitPanelUi.invalidEmailLabel->setToolTip(tr("Provide a valid email to commit."));
@@ -66,11 +67,14 @@ GitSubmitEditorWidget::GitSubmitEditorWidget() :
 void GitSubmitEditorWidget::setPanelInfo(const GitSubmitEditorPanelInfo &info)
 {
     m_gitSubmitPanelUi.repositoryLabel->setText(QDir::toNativeSeparators(info.repository));
-    if (info.branch.contains("(no branch)"))
-        m_gitSubmitPanelUi.branchLabel->setText(QString::fromLatin1("<span style=\"color:red\">%1</span>")
-                                                .arg(tr("Detached HEAD")));
-    else
+    if (info.branch.contains("(no branch)")) {
+        const QString errorColor =
+                Utils::creatorTheme()->color(Utils::Theme::TextColorError).name();
+        m_gitSubmitPanelUi.branchLabel->setText(QString::fromLatin1("<span style=\"color:%1\">%2</span>")
+                                                .arg(errorColor, tr("Detached HEAD")));
+    } else {
         m_gitSubmitPanelUi.branchLabel->setText(info.branch);
+    }
 }
 
 QString GitSubmitEditorWidget::amendSHA1() const
@@ -152,13 +156,24 @@ void GitSubmitEditorWidget::setPanelData(const GitSubmitEditorPanelData &data)
     authorInformationChanged();
 }
 
-bool GitSubmitEditorWidget::canSubmit() const
+bool GitSubmitEditorWidget::canSubmit(QString *whyNot) const
 {
-    if (m_gitSubmitPanelUi.invalidAuthorLabel->isVisible()
-        || m_gitSubmitPanelUi.invalidEmailLabel->isVisible()
-        || m_hasUnmerged)
+    if (m_gitSubmitPanelUi.invalidAuthorLabel->isVisible()) {
+        if (whyNot)
+            *whyNot = tr("Invalid author");
         return false;
-    return SubmitEditorWidget::canSubmit();
+    }
+    if (m_gitSubmitPanelUi.invalidEmailLabel->isVisible()) {
+        if (whyNot)
+            *whyNot = tr("Invalid email");
+        return false;
+    }
+    if (m_hasUnmerged) {
+        if (whyNot)
+            *whyNot = tr("Unresolved merge conflicts");
+        return false;
+    }
+    return SubmitEditorWidget::canSubmit(whyNot);
 }
 
 QString GitSubmitEditorWidget::cleanupDescription(const QString &input) const

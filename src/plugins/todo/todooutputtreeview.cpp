@@ -37,9 +37,7 @@ namespace Todo {
 namespace Internal {
 
 TodoOutputTreeView::TodoOutputTreeView(QWidget *parent) :
-    Utils::TreeView(parent),
-    m_textColumnDefaultWidth(0),
-    m_fileColumnDefaultWidth(0)
+    Utils::TreeView(parent)
 {
     setRootIsDecorated(false);
     setFrameStyle(QFrame::NoFrame);
@@ -63,10 +61,10 @@ TodoOutputTreeView::~TodoOutputTreeView()
 void TodoOutputTreeView::saveDisplaySettings()
 {
     QSettings *settings = Core::ICore::settings();
-    settings->beginGroup(QLatin1String(Constants::SETTINGS_GROUP));
-    settings->setValue(QLatin1String(Constants::OUTPUT_PANE_TEXT_WIDTH),
+    settings->beginGroup(Constants::SETTINGS_GROUP);
+    settings->setValue(Constants::OUTPUT_PANE_TEXT_WIDTH,
                        columnWidth(Constants::OUTPUT_COLUMN_TEXT));
-    settings->setValue(QLatin1String(Constants::OUTPUT_PANE_FILE_WIDTH),
+    settings->setValue(Constants::OUTPUT_PANE_FILE_WIDTH,
                        columnWidth(Constants::OUTPUT_COLUMN_FILE));
     settings->endGroup();
 }
@@ -74,11 +72,9 @@ void TodoOutputTreeView::saveDisplaySettings()
 void TodoOutputTreeView::loadDisplaySettings()
 {
     QSettings *settings = Core::ICore::settings();
-    settings->beginGroup(QLatin1String(Constants::SETTINGS_GROUP));
-    m_textColumnDefaultWidth = settings->value(
-                QLatin1String(Constants::OUTPUT_PANE_TEXT_WIDTH), 0).toInt();
-    m_fileColumnDefaultWidth = settings->value(
-                QLatin1String(Constants::OUTPUT_PANE_FILE_WIDTH), 0).toInt();
+    settings->beginGroup(Constants::SETTINGS_GROUP);
+    m_textColumnDefaultWidth = settings->value(Constants::OUTPUT_PANE_TEXT_WIDTH, 0).toInt();
+    m_fileColumnDefaultWidth = settings->value(Constants::OUTPUT_PANE_FILE_WIDTH, 0).toInt();
     settings->endGroup();
 }
 
@@ -105,7 +101,7 @@ void TodoOutputTreeView::resizeEvent(QResizeEvent *event)
 
 void TodoOutputTreeView::todoColumnResized(int column, int oldSize, int newSize)
 {
-    Q_UNUSED(oldSize);
+    Q_UNUSED(oldSize)
     if (column == Constants::OUTPUT_COLUMN_TEXT)
         m_textColumnDefaultWidth = newSize;
     else if (column == Constants::OUTPUT_COLUMN_FILE)

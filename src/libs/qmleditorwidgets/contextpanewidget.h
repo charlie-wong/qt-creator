@@ -51,18 +51,18 @@ class QMLEDITORWIDGETS_EXPORT DragWidget : public QFrame
     Q_OBJECT
 
 public:
-    explicit DragWidget(QWidget *parent = 0);
+    explicit DragWidget(QWidget *parent = nullptr);
     void setSecondaryTarget(QWidget* w)
     { m_secondaryTarget = w; }
 
 protected:
     QPoint m_pos;
-    void mousePressEvent(QMouseEvent * event);
-    void mouseReleaseEvent(QMouseEvent * event);
-    void mouseMoveEvent(QMouseEvent * event);
+    void mousePressEvent(QMouseEvent * event) override;
+    void mouseReleaseEvent(QMouseEvent * event) override;
+    void mouseMoveEvent(QMouseEvent * event) override;
     void virtual protectedMoved();
-    void leaveEvent(QEvent *);
-    void enterEvent(QEvent *);
+    void leaveEvent(QEvent *) override;
+    void enterEvent(QEvent *) override;
 
 private:
     QGraphicsDropShadowEffect *m_dropShadowEffect;
@@ -76,8 +76,8 @@ class QMLEDITORWIDGETS_EXPORT ContextPaneWidget : public DragWidget
     Q_OBJECT
 
 public:
-    explicit ContextPaneWidget(QWidget *parent = 0);
-    ~ContextPaneWidget();
+    explicit ContextPaneWidget(QWidget *parent = nullptr);
+    ~ContextPaneWidget() override;
     void activate(const QPoint &pos, const QPoint &alternative, const QPoint &alternative2, bool pinned);
     void rePosition(const QPoint &pos, const QPoint &alternative , const QPoint &alternative3, bool pinned);
     void deactivate();
@@ -109,7 +109,7 @@ private:
     void onResetPosition(bool toggle);
 
 protected:
-    void protectedMoved();
+    void protectedMoved() override;
 
     QToolButton *m_toolButton;
     QWidget *createFontWidget();

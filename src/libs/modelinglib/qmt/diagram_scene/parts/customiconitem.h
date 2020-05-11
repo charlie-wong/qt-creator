@@ -40,7 +40,7 @@ class DiagramSceneModel;
 class CustomIconItem : public QGraphicsItem
 {
 public:
-    explicit CustomIconItem(DiagramSceneModel *diagramSceneModel, QGraphicsItem *parent = 0);
+    explicit CustomIconItem(DiagramSceneModel *diagramSceneModel, QGraphicsItem *parent = nullptr);
     ~CustomIconItem() override;
 
     void setStereotypeIconId(const QString &stereotypeIconId);
@@ -55,8 +55,10 @@ public:
     QRectF boundingRect() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 
+    QList<QPolygonF> outline() const;
+
 private:
-    DiagramSceneModel *m_diagramSceneModel = 0;
+    DiagramSceneModel *m_diagramSceneModel = nullptr;
     QString m_stereotypeIconId;
     StereotypeIcon m_stereotypeIcon;
     QSizeF m_baseSize;

@@ -25,6 +25,9 @@
 #pragma once
 
 #include <QWidgetAction>
+#include <QPointer>
+
+QT_FORWARD_DECLARE_CLASS(QComboBox)
 
 namespace QmlDesigner {
 
@@ -39,18 +42,20 @@ class BackgroundAction : public QWidgetAction
     Q_OBJECT
 public:
     explicit BackgroundAction(QObject *parent);
+    void setColor(const QColor &color);
 
 signals:
     void backgroundChanged(const QColor &color);
 
 protected:
-    QWidget *createWidget(QWidget *parent);
+    QWidget *createWidget(QWidget *parent) override;
 
 private:
     void emitBackgroundChanged(int index);
 
 private:
     static QList<QColor> colors();
+    QPointer<QComboBox> m_comboBox;
 };
 
 } // namespace QmlDesigner

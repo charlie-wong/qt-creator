@@ -25,6 +25,8 @@
 
 #include "submitfieldwidget.h"
 
+#include <utils/utilsicons.h>
+
 #include <QComboBox>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -42,9 +44,8 @@ enum { spacing = 2 };
 
 static void inline setComboBlocked(QComboBox *cb, int index)
 {
-    const bool blocked = cb->blockSignals(true);
+    QSignalBlocker blocker(cb);
     cb->setCurrentIndex(index);
-    cb->blockSignals(blocked);
 }
 
 /*!
@@ -64,34 +65,22 @@ namespace VcsBase {
 
 // Field/Row entry
 struct FieldEntry {
-    FieldEntry();
     void createGui(const QIcon &removeIcon);
     void deleteGuiLater();
 
-    QComboBox *combo;
-    QHBoxLayout *layout;
-    QLineEdit *lineEdit;
-    QToolBar *toolBar;
-    QToolButton *clearButton;
-    QToolButton *browseButton;
-    int comboIndex;
+    QComboBox *combo = nullptr;
+    QHBoxLayout *layout = nullptr;
+    QLineEdit *lineEdit = nullptr;
+    QToolBar *toolBar = nullptr;
+    QToolButton *clearButton = nullptr;
+    QToolButton *browseButton = nullptr;
+    int comboIndex = 0;
 };
-
-FieldEntry::FieldEntry() :
-    combo(0),
-    layout(0),
-    lineEdit(0),
-    toolBar(0),
-    clearButton(0),
-    browseButton(0),
-    comboIndex(0)
-{
-}
 
 void FieldEntry::createGui(const QIcon &removeIcon)
 {
     layout = new QHBoxLayout;
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout ->setSpacing(spacing);
     combo = new QComboBox;
     layout->addWidget(combo);
@@ -130,20 +119,17 @@ struct SubmitFieldWidgetPrivate {
 
     const QIcon removeFieldIcon;
     QStringList fields;
-    QCompleter *completer;
-    bool hasBrowseButton;
-    bool allowDuplicateFields;
+    QCompleter *completer = nullptr;
 
     QList <FieldEntry> fieldEntries;
-    QVBoxLayout *layout;
+    QVBoxLayout *layout = nullptr;
+
+    bool hasBrowseButton = false;
+    bool allowDuplicateFields = false;
 };
 
 SubmitFieldWidgetPrivate::SubmitFieldWidgetPrivate() :
-        removeFieldIcon(QLatin1String(":/vcsbase/images/removesubmitfield.png")),
-        completer(0),
-        hasBrowseButton(false),
-        allowDuplicateFields(false),
-        layout(0)
+        removeFieldIcon(Utils::Icons::BROKEN.icon())
 {
 }
 
@@ -188,7 +174,7 @@ SubmitFieldWidget::SubmitFieldWidget(QWidget *parent) :
         d(new SubmitFieldWidgetPrivate)
 {
     d->layout = new QVBoxLayout;
-    d->layout->setMargin(0);
+    d->layout->setContentsMargins(0, 0, 0, 0);
     d->layout->setSpacing(spacing);
     setLayout(d->layout);
 }
@@ -300,7 +286,7 @@ void SubmitFieldWidget::createField(const QString &f)
     if (d->completer)
         fe.lineEdit->setCompleter(d->completer);
 
-    connect(fe.combo, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+    connect(fe.combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SubmitFieldWidget::slotComboIndexChanged);
     connect(fe.clearButton, &QAbstractButton::clicked,
             this, &SubmitFieldWidget::slotRemove);

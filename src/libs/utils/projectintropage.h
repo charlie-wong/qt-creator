@@ -27,6 +27,7 @@
 
 #include "utils_global.h"
 #include "wizardpage.h"
+#include "infolabel.h"
 
 namespace Utils {
 
@@ -42,8 +43,8 @@ class QTCREATOR_UTILS_EXPORT ProjectIntroPage : public WizardPage
     Q_PROPERTY(bool forceSubProject READ forceSubProject WRITE setForceSubProject DESIGNABLE true)
 
 public:
-    explicit ProjectIntroPage(QWidget *parent = 0);
-    virtual ~ProjectIntroPage();
+    explicit ProjectIntroPage(QWidget *parent = nullptr);
+    ~ProjectIntroPage() override;
 
     QString projectName() const;
     QString path() const;
@@ -53,7 +54,7 @@ public:
     // Insert an additional control into the form layout for the target.
     void insertControl(int row, QWidget *label, QWidget *control);
 
-    virtual bool isComplete() const;
+    bool isComplete() const override;
 
     bool forceSubProject() const;
     void setForceSubProject(bool force);
@@ -77,10 +78,8 @@ private:
     void slotChanged();
     void slotActivated();
 
-    enum StatusLabelMode { Error, Warning, Hint };
-
     bool validate();
-    void displayStatusMessage(StatusLabelMode m, const QString &);
+    void displayStatusMessage(InfoLabel::InfoType t, const QString &);
     void hideStatusLabel();
 
     ProjectIntroPagePrivate *d;

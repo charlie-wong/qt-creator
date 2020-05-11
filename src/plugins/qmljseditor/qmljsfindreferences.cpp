@@ -51,6 +51,7 @@
 #include <QTimer>
 #include <QtConcurrentRun>
 #include <QtConcurrentMap>
+#include <QDebug>
 #include <QDir>
 #include <QApplication>
 #include <QLabel>
@@ -70,7 +71,7 @@ namespace {
 class FindUsages: protected Visitor
 {
 public:
-    typedef QList<AST::SourceLocation> Result;
+    using Result = QList<SourceLocation>;
 
     FindUsages(Document::Ptr doc, const ContextPtr &context)
         : _doc(doc)
@@ -95,7 +96,7 @@ protected:
 
     using Visitor::visit;
 
-    virtual bool visit(AST::UiPublicMember *node)
+    bool visit(AST::UiPublicMember *node) override
     {
         if (node->name == _name
                 && _scopeChain.qmlScopeObjects().contains(_scope)) {
@@ -110,7 +111,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::UiObjectDefinition *node)
+    bool visit(AST::UiObjectDefinition *node) override
     {
         _builder.push(node);
         Node::accept(node->initializer, this);
@@ -118,7 +119,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::UiObjectBinding *node)
+    bool visit(AST::UiObjectBinding *node) override
     {
         if (node->qualifiedId
                 && !node->qualifiedId->next
@@ -133,7 +134,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::UiScriptBinding *node)
+    bool visit(AST::UiScriptBinding *node) override
     {
         if (node->qualifiedId
                 && !node->qualifiedId->next
@@ -151,7 +152,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::UiArrayBinding *node)
+    bool visit(AST::UiArrayBinding *node) override
     {
         if (node->qualifiedId
                 && !node->qualifiedId->next
@@ -162,7 +163,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::IdentifierExpression *node)
+    bool visit(AST::IdentifierExpression *node) override
     {
         if (node->name.isEmpty() || node->name != _name)
             return false;
@@ -193,7 +194,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::FieldMemberExpression *node)
+    bool visit(AST::FieldMemberExpression *node) override
     {
         if (node->name != _name)
             return true;
@@ -209,12 +210,12 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::FunctionDeclaration *node)
+    bool visit(AST::FunctionDeclaration *node) override
     {
         return visit(static_cast<FunctionExpression *>(node));
     }
 
-    virtual bool visit(AST::FunctionExpression *node)
+    bool visit(AST::FunctionExpression *node) override
     {
         if (node->name == _name) {
             if (checkLookup())
@@ -227,13 +228,18 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::VariableDeclaration *node)
+    bool visit(AST::PatternElement *node) override
     {
-        if (node->name == _name) {
+        if (node->isVariableDeclaration() && node->bindingIdentifier == _name) {
             if (checkLookup())
                 _usages.append(node->identifierToken);
         }
         return true;
+    }
+
+    void throwRecursionDepthError() override
+    {
+        qWarning("Warning: Hit maximum recursion depth while visitin AST in FindUsages");
     }
 
 private:
@@ -276,7 +282,7 @@ private:
 
     bool checkLookup()
     {
-        const ObjectValue *scope = 0;
+        const ObjectValue *scope = nullptr;
         _scopeChain.lookup(_name, &scope);
         return check(scope);
     }
@@ -288,13 +294,13 @@ private:
     ScopeBuilder _builder;
 
     QString _name;
-    const ObjectValue *_scope;
+    const ObjectValue *_scope = nullptr;
 };
 
 class FindTypeUsages: protected Visitor
 {
 public:
-    typedef QList<AST::SourceLocation> Result;
+    using Result = QList<SourceLocation>;
 
     FindTypeUsages(Document::Ptr doc, const ContextPtr &context)
         : _doc(doc)
@@ -320,12 +326,14 @@ protected:
 
     using Visitor::visit;
 
-    virtual bool visit(AST::UiPublicMember *node)
+    bool visit(AST::UiPublicMember *node) override
     {
-        if (node->memberTypeName() == _name){
-            const ObjectValue * tVal = _context->lookupType(_doc.data(), QStringList(_name));
-            if (tVal == _typeValue)
-                _usages.append(node->typeToken);
+        if (UiQualifiedId *memberType = node->memberType) {
+            if (memberType->name == _name) {
+                const ObjectValue * tVal = _context->lookupType(_doc.data(), QStringList(_name));
+                if (tVal == _typeValue)
+                    _usages.append(node->typeToken);
+            }
         }
         if (AST::cast<Block *>(node->statement)) {
             _builder.push(node);
@@ -336,7 +344,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::UiObjectDefinition *node)
+    bool visit(AST::UiObjectDefinition *node) override
     {
         checkTypeName(node->qualifiedTypeNameId);
         _builder.push(node);
@@ -345,7 +353,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::UiObjectBinding *node)
+    bool visit(AST::UiObjectBinding *node) override
     {
         checkTypeName(node->qualifiedTypeNameId);
         _builder.push(node);
@@ -354,7 +362,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::UiScriptBinding *node)
+    bool visit(AST::UiScriptBinding *node) override
     {
         if (AST::cast<Block *>(node->statement)) {
             Node::accept(node->qualifiedId, this);
@@ -366,7 +374,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::IdentifierExpression *node)
+    bool visit(AST::IdentifierExpression *node) override
     {
         if (node->name != _name)
             return false;
@@ -378,7 +386,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::FieldMemberExpression *node)
+    bool visit(AST::FieldMemberExpression *node) override
     {
         if (node->name != _name)
             return true;
@@ -392,12 +400,12 @@ protected:
         return true;
     }
 
-    virtual bool visit(AST::FunctionDeclaration *node)
+    bool visit(AST::FunctionDeclaration *node) override
     {
         return visit(static_cast<FunctionExpression *>(node));
     }
 
-    virtual bool visit(AST::FunctionExpression *node)
+    bool visit(AST::FunctionExpression *node) override
     {
         Node::accept(node->formals, this);
         _builder.push(node);
@@ -406,13 +414,14 @@ protected:
         return false;
     }
 
-    virtual bool visit(AST::VariableDeclaration *node)
+    bool visit(AST::PatternElement *node) override
     {
-        Node::accept(node->expression, this);
+        if (node->isVariableDeclaration())
+            Node::accept(node->initializer, this);
         return false;
     }
 
-    virtual bool visit(UiImport *ast)
+    bool visit(UiImport *ast) override
     {
         if (ast && ast->importId == _name) {
             const Imports *imp = _context->imports(_doc.data());
@@ -424,6 +433,10 @@ protected:
         return false;
     }
 
+    void throwRecursionDepthError() override
+    {
+        qWarning("Warning: Hit maximum recursion depth while visitin AST in FindTypeUsages");
+    }
 
 private:
     bool checkTypeName(UiQualifiedId *id)
@@ -448,7 +461,7 @@ private:
     ScopeBuilder _builder;
 
     QString _name;
-    const ObjectValue *_typeValue;
+    const ObjectValue *_typeValue = nullptr;
 };
 
 class FindTargetExpression: protected Visitor
@@ -467,8 +480,8 @@ public:
     void operator()(quint32 offset)
     {
         _name.clear();
-        _scope = 0;
-        _objectNode = 0;
+        _scope = nullptr;
+        _objectNode = nullptr;
         _offset = offset;
         _typeKind = ExpKind;
         if (_doc)
@@ -499,7 +512,7 @@ protected:
 
     using Visitor::visit;
 
-    virtual bool preVisit(Node *node)
+    bool preVisit(Node *node) override
     {
         if (Statement *stmt = node->statementCast())
             return containsOffset(stmt->firstSourceLocation(), stmt->lastSourceLocation());
@@ -510,7 +523,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(IdentifierExpression *node)
+    bool visit(IdentifierExpression *node) override
     {
         if (containsOffset(node->identifierToken)) {
             _name = node->name.toString();
@@ -524,7 +537,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(FieldMemberExpression *node)
+    bool visit(FieldMemberExpression *node) override
     {
         if (containsOffset(node->identifierToken)) {
             setScope(node->base);
@@ -547,17 +560,17 @@ protected:
         return true;
     }
 
-    virtual bool visit(UiScriptBinding *node)
+    bool visit(UiScriptBinding *node) override
     {
         return !checkBindingName(node->qualifiedId);
     }
 
-    virtual bool visit(UiArrayBinding *node)
+    bool visit(UiArrayBinding *node) override
     {
         return !checkBindingName(node->qualifiedId);
     }
 
-    virtual bool visit(UiObjectBinding *node)
+    bool visit(UiObjectBinding *node) override
     {
         if ((!checkTypeName(node->qualifiedTypeNameId)) &&
                 (!checkBindingName(node->qualifiedId))) {
@@ -569,7 +582,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(UiObjectDefinition *node)
+    bool visit(UiObjectDefinition *node) override
     {
         if (!checkTypeName(node->qualifiedTypeNameId)) {
             Node *oldObjectNode = _objectNode;
@@ -580,13 +593,13 @@ protected:
         return false;
     }
 
-    virtual bool visit(UiPublicMember *node)
+    bool visit(UiPublicMember *node) override
     {
         if (containsOffset(node->typeToken)){
-            if (node->isValid()) {
-                _name = node->memberTypeName().toString();
+            if (node->defaultToken.isValid()) {
+                _name = node->memberType->name.toString();
                 _targetValue = _scopeChain->context()->lookupType(_doc.data(), QStringList(_name));
-                _scope = 0;
+                _scope = nullptr;
                 _typeKind = TypeKind;
             }
             return false;
@@ -598,12 +611,12 @@ protected:
         return true;
     }
 
-    virtual bool visit(FunctionDeclaration *node)
+    bool visit(FunctionDeclaration *node) override
     {
         return visit(static_cast<FunctionExpression *>(node));
     }
 
-    virtual bool visit(FunctionExpression *node)
+    bool visit(FunctionExpression *node) override
     {
         if (containsOffset(node->identifierToken)) {
             _name = node->name.toString();
@@ -612,13 +625,18 @@ protected:
         return true;
     }
 
-    virtual bool visit(VariableDeclaration *node)
+    bool visit(PatternElement *node) override
     {
-        if (containsOffset(node->identifierToken)) {
-            _name = node->name.toString();
+        if (node->isVariableDeclaration() && containsOffset(node->identifierToken)) {
+            _name = node->bindingIdentifier.toString();
             return false;
         }
         return true;
+    }
+
+    void throwRecursionDepthError() override
+    {
+        qWarning("Warning: Hit maximum recursion depth visiting AST in FindUsages");
     }
 
 private:
@@ -647,7 +665,7 @@ private:
         for (UiQualifiedId *att = id; att; att = att->next) {
             if (!att->name.isEmpty() && containsOffset(att->identifierToken)) {
                 _targetValue = _scopeChain->context()->lookupType(_doc.data(), id, att->next);
-                _scope = 0;
+                _scope = nullptr;
                 _name = att->name.toString();
                 _typeKind = TypeKind;
                 return true;
@@ -665,13 +683,13 @@ private:
     }
 
     QString _name;
-    const ObjectValue *_scope;
-    const Value *_targetValue;
-    Node *_objectNode;
+    const ObjectValue *_scope = nullptr;
+    const Value *_targetValue = nullptr;
+    Node *_objectNode = nullptr;
     Document::Ptr _doc;
-    const ScopeChain *_scopeChain;
-    quint32 _offset;
-    Kind _typeKind;
+    const ScopeChain *_scopeChain = nullptr;
+    quint32 _offset = 0;
+    Kind _typeKind = ExpKind;
 };
 
 static QString matchingLine(unsigned position, const QString &source)
@@ -683,17 +701,21 @@ static QString matchingLine(unsigned position, const QString &source)
     return source.mid(start, end - start);
 }
 
-class ProcessFile: public std::unary_function<QString, QList<FindReferences::Usage> >
+class ProcessFile
 {
     ContextPtr context;
-    typedef FindReferences::Usage Usage;
-    QString name;
+    using Usage = FindReferences::Usage;
+    const QString name;
     const ObjectValue *scope;
     QFutureInterface<Usage> *future;
 
 public:
+    // needed by QtConcurrent
+    using argument_type = const QString &;
+    using result_type = QList<Usage>;
+
     ProcessFile(const ContextPtr &context,
-                QString name,
+                const QString &name,
                 const ObjectValue *scope,
                 QFutureInterface<Usage> *future)
         : context(context), name(name), scope(scope), future(future)
@@ -713,7 +735,7 @@ public:
         // find all idenfifier expressions, try to resolve them and check if the result is in scope
         FindUsages findUsages(doc, context);
         FindUsages::Result results = findUsages(name, scope);
-        foreach (const AST::SourceLocation &loc, results)
+        foreach (const SourceLocation &loc, results)
             usages.append(Usage(fileName, matchingLine(loc.offset, doc->source()), loc.startLine, loc.startColumn - 1, loc.length));
         if (future->isPaused())
             future->waitForResume();
@@ -721,17 +743,21 @@ public:
     }
 };
 
-class SearchFileForType: public std::unary_function<QString, QList<FindReferences::Usage> >
+class SearchFileForType
 {
     ContextPtr context;
-    typedef FindReferences::Usage Usage;
-    QString name;
+    using Usage = FindReferences::Usage;
+    const QString name;
     const ObjectValue *scope;
     QFutureInterface<Usage> *future;
 
 public:
+    // needed by QtConcurrent
+    using argument_type = const QString &;
+    using result_type = QList<Usage>;
+
     SearchFileForType(const ContextPtr &context,
-                      QString name,
+                      const QString &name,
                       const ObjectValue *scope,
                       QFutureInterface<Usage> *future)
         : context(context), name(name), scope(scope), future(future)
@@ -751,7 +777,7 @@ public:
         // find all idenfifier expressions, try to resolve them and check if the result is in scope
         FindTypeUsages findUsages(doc, context);
         FindTypeUsages::Result results = findUsages(name, scope);
-        foreach (const AST::SourceLocation &loc, results)
+        foreach (const SourceLocation &loc, results)
             usages.append(Usage(fileName, matchingLine(loc.offset, doc->source()), loc.startLine, loc.startColumn - 1, loc.length));
         if (future->isPaused())
             future->waitForResume();
@@ -759,12 +785,17 @@ public:
     }
 };
 
-class UpdateUI: public std::binary_function<QList<FindReferences::Usage> &, QList<FindReferences::Usage>, void>
+class UpdateUI
 {
-    typedef FindReferences::Usage Usage;
+    using Usage = FindReferences::Usage;
     QFutureInterface<Usage> *future;
 
 public:
+    // needed by QtConcurrent
+    using first_argument_type = QList<Usage> &;
+    using second_argument_type = const QList<Usage> &;
+    using result_type = void;
+
     UpdateUI(QFutureInterface<Usage> *future): future(future) {}
 
     void operator()(QList<Usage> &, const QList<Usage> &usages)
@@ -786,23 +817,20 @@ FindReferences::FindReferences(QObject *parent)
     connect(&m_watcher, &QFutureWatcherBase::finished, this, &FindReferences::searchFinished);
 }
 
-FindReferences::~FindReferences()
-{
-}
+FindReferences::~FindReferences() = default;
 
 static void find_helper(QFutureInterface<FindReferences::Usage> &future,
-                        const ModelManagerInterface::WorkingCopy workingCopy,
+                        const ModelManagerInterface::WorkingCopy &workingCopy,
                         Snapshot snapshot,
-                        const QString fileName,
+                        const QString &fileName,
                         quint32 offset,
                         QString replacement)
 {
     // update snapshot from workingCopy to make sure it's up to date
     // ### remove?
     // ### this is a great candidate for map-reduce
-    QHashIterator< QString, QPair<QString, int> > it(workingCopy.all());
-    while (it.hasNext()) {
-        it.next();
+    const ModelManagerInterface::WorkingCopy::Table &all = workingCopy.all();
+    for (auto it = all.cbegin(), end = all.cend(); it != end; ++it) {
         const QString fileName = it.key();
         Document::Ptr oldDoc = snapshot.document(fileName);
         if (oldDoc && oldDoc->editorRevision() == it.value().second)
@@ -911,7 +939,7 @@ void FindReferences::renameUsages(const QString &fileName, quint32 offset,
     m_watcher.setFuture(result);
 }
 
-QList<FindReferences::Usage> FindReferences::findUsageOfType(const QString &fileName, const QString typeName)
+QList<FindReferences::Usage> FindReferences::findUsageOfType(const QString &fileName, const QString &typeName)
 {
     QList<Usage> usages;
     ModelManagerInterface *modelManager = ModelManagerInterface::instance();
@@ -931,7 +959,7 @@ QList<FindReferences::Usage> FindReferences::findUsageOfType(const QString &file
     foreach (const QmlJS::Document::Ptr &doc, snapshot) {
         FindTypeUsages findUsages(doc, context);
         FindTypeUsages::Result results = findUsages(typeName, targetValue);
-        foreach (const AST::SourceLocation &loc, results) {
+        foreach (const SourceLocation &loc, results) {
             usages.append(Usage(doc->fileName(), matchingLine(loc.offset, doc->source()), loc.startLine, loc.startColumn - 1, loc.length));
         }
     }
@@ -959,14 +987,16 @@ void FindReferences::displayResults(int first, int last)
                     this, &FindReferences::onReplaceButtonClicked);
         }
         connect(m_currentSearch.data(), &SearchResult::activated,
-                this, &FindReferences::openEditor);
+                [](const Core::SearchResultItem& item) {
+                    Core::EditorManager::openEditorAtSearchResult(item);
+                });
         connect(m_currentSearch.data(), &SearchResult::cancelled, this, &FindReferences::cancel);
         connect(m_currentSearch.data(), &SearchResult::paused, this, &FindReferences::setPaused);
         SearchResultWindow::instance()->popup(IOutputPane::Flags(IOutputPane::ModeSwitch | IOutputPane::WithFocus));
 
-        FutureProgress *progress = ProgressManager::addTask(
-                    m_watcher.future(), tr("Searching for Usages"),
-                    QmlJSEditor::Constants::TASK_SEARCH);
+        FutureProgress *progress = ProgressManager::addTask(m_watcher.future(),
+                                                            tr("Searching for Usages"),
+                                                            "QmlJSEditor.TaskSearch");
         connect(progress, &FutureProgress::clicked, m_currentSearch.data(), &SearchResult::popup);
 
         ++first;
@@ -990,7 +1020,7 @@ void FindReferences::searchFinished()
 {
     if (m_currentSearch)
         m_currentSearch->finishSearch(m_watcher.isCanceled());
-    m_currentSearch = 0;
+    m_currentSearch = nullptr;
     emit changed();
 }
 
@@ -1003,17 +1033,6 @@ void FindReferences::setPaused(bool paused)
 {
     if (!paused || m_watcher.isRunning()) // guard against pausing when the search is finished
         m_watcher.setPaused(paused);
-}
-
-void FindReferences::openEditor(const SearchResultItem &item)
-{
-    if (item.path.size() > 0) {
-        EditorManager::openEditorAt(QDir::fromNativeSeparators(item.path.first()),
-                                    item.mainRange.begin.line,
-                                    item.mainRange.begin.column);
-    } else {
-        EditorManager::openEditor(QDir::fromNativeSeparators(item.text));
-    }
 }
 
 void FindReferences::onReplaceButtonClicked(const QString &text, const QList<SearchResultItem> &items, bool preserveCase)

@@ -60,6 +60,22 @@ enum Kind {
     T_LAST_STRING_LITERAL = T_ANGLE_STRING_LITERAL,
     T_LAST_LITERAL = T_ANGLE_STRING_LITERAL,
 
+    T_FIRST_PUNCTUATION_OR_OPERATOR,
+    T_FIRST_PUNCTUATION = T_FIRST_PUNCTUATION_OR_OPERATOR,
+    T_COLON = T_FIRST_PUNCTUATION_OR_OPERATOR,
+    T_COLON_COLON,
+    T_COMMA,
+    T_GREATER,
+    T_LESS,
+    T_LBRACE,
+    T_LBRACKET,
+    T_LPAREN,
+    T_RBRACE,
+    T_RBRACKET,
+    T_RPAREN,
+    T_SEMICOLON,
+    T_LAST_PUNCTUATION = T_SEMICOLON,
+
     T_FIRST_OPERATOR,
     T_AMPER = T_FIRST_OPERATOR,
     T_AMPER_AMPER,
@@ -68,9 +84,6 @@ enum Kind {
     T_ARROW_STAR,
     T_CARET,
     T_CARET_EQUAL,
-    T_COLON,
-    T_COLON_COLON,
-    T_COMMA,
     T_SLASH,
     T_SLASH_EQUAL,
     T_DOT,
@@ -80,17 +93,12 @@ enum Kind {
     T_EQUAL_EQUAL,
     T_EXCLAIM,
     T_EXCLAIM_EQUAL,
-    T_GREATER,
     T_GREATER_EQUAL,
     T_GREATER_GREATER,
     T_GREATER_GREATER_EQUAL,
-    T_LBRACE,
-    T_LBRACKET,
-    T_LESS,
     T_LESS_EQUAL,
     T_LESS_LESS,
     T_LESS_LESS_EQUAL,
-    T_LPAREN,
     T_MINUS,
     T_MINUS_EQUAL,
     T_MINUS_MINUS,
@@ -105,15 +113,12 @@ enum Kind {
     T_POUND,
     T_POUND_POUND,
     T_QUESTION,
-    T_RBRACE,
-    T_RBRACKET,
-    T_RPAREN,
-    T_SEMICOLON,
     T_STAR,
     T_STAR_EQUAL,
     T_TILDE,
     T_TILDE_EQUAL,
     T_LAST_OPERATOR = T_TILDE_EQUAL,
+    T_LAST_PUNCTUATION_OR_OPERATOR = T_LAST_OPERATOR,
 
     T_FIRST_KEYWORD,
     T_ALIGNAS = T_FIRST_KEYWORD,
@@ -254,6 +259,8 @@ enum Kind {
     T_LAST_QT_KEYWORD = T_Q_GADGET,
     T_LAST_KEYWORD = T_LAST_QT_KEYWORD,
 
+    T_LAST_TOKEN = T_LAST_KEYWORD,  // keep this before the aliases below
+
     // aliases
     T_OR = T_PIPE_PIPE,
     T_AND = T_AMPER_AMPER,
@@ -286,13 +293,12 @@ enum Kind {
 
     T___ATTRIBUTE = T___ATTRIBUTE__,
     T___ALIGNOF__ = T_ALIGNOF,
-    T_LAST_TOKEN
 };
 
 class CPLUSPLUS_EXPORT Token
 {
 public:
-    Token() : flags(0), byteOffset(0), utf16charOffset(0), ptr(0) {}
+    Token() : flags(0), byteOffset(0), utf16charOffset(0), ptr(nullptr) {}
 
     inline bool is(unsigned k) const    { return f.kind == k; }
     inline bool isNot(unsigned k) const { return f.kind != k; }
@@ -307,13 +313,13 @@ public:
     inline bool generated() const { return f.generated; }
     inline bool userDefinedLiteral() const { return f.userDefinedLiteral; }
 
-    inline unsigned bytes() const { return f.bytes; }
-    inline unsigned bytesBegin() const { return byteOffset; }
-    inline unsigned bytesEnd() const { return byteOffset + f.bytes; }
+    inline int bytes() const { return f.bytes; }
+    inline int bytesBegin() const { return byteOffset; }
+    inline int bytesEnd() const { return byteOffset + f.bytes; }
 
-    inline unsigned utf16chars() const { return f.utf16chars; }
-    inline unsigned utf16charsBegin() const { return utf16charOffset; }
-    inline unsigned utf16charsEnd() const { return utf16charOffset + f.utf16chars; }
+    inline int utf16chars() const { return f.utf16chars; }
+    inline int utf16charsBegin() const { return utf16charOffset; }
+    inline int utf16charsEnd() const { return utf16charOffset + f.utf16chars; }
 
     inline bool isLiteral() const
     { return f.kind >= T_FIRST_LITERAL && f.kind <= T_LAST_LITERAL; }
@@ -326,6 +332,12 @@ public:
 
     inline bool isOperator() const
     { return f.kind >= T_FIRST_OPERATOR && f.kind <= T_LAST_OPERATOR; }
+
+    inline bool isPunctuation() const
+    { return f.kind >= T_FIRST_PUNCTUATION && f.kind <= T_LAST_PUNCTUATION; }
+
+    inline bool isPunctuationOrOperator() const
+    { return f.kind >= T_FIRST_PUNCTUATION_OR_OPERATOR && f.kind <= T_LAST_PUNCTUATION_OR_OPERATOR; }
 
     inline bool isKeyword() const
     { return f.kind >= T_FIRST_KEYWORD && f.kind < T_FIRST_PRIMITIVE; }
@@ -393,7 +405,7 @@ public:
         const StringLiteral *string;
         const Identifier *identifier;
         unsigned close_brace;
-        unsigned lineno;
+        int lineno;
     };
 };
 
@@ -425,6 +437,7 @@ struct LanguageFeatures
             unsigned int qtKeywordsEnabled : 1; // If Qt is used but QT_NO_KEYWORDS defined
             unsigned int cxxEnabled : 1;
             unsigned int cxx11Enabled : 1;
+            unsigned int cxx14Enabled : 1;
             unsigned int objCEnabled : 1;
             unsigned int c99Enabled : 1;
         };

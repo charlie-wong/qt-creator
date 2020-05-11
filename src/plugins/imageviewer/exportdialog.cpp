@@ -24,6 +24,7 @@
 ****************************************************************************/
 
 #include "exportdialog.h"
+#include "imageview.h" // ExportData
 
 #include <coreplugin/coreicons.h>
 
@@ -56,7 +57,7 @@ namespace Internal {
 
 enum { exportMinimumSize = 1, exportMaximumSize = 2000 };
 
-static QString imageNameFilterString()
+QString ExportDialog::imageNameFilterString()
 {
     static QString result;
     if (result.isEmpty()) {
@@ -87,38 +88,34 @@ ExportDialog::ExportDialog(QWidget *parent)
     , m_heightSpinBox(new QSpinBox(this))
     , m_aspectRatio(1)
 {
-    typedef void (QSpinBox::*QSpinBoxIntSignal)(int);
-
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
-
-    QFormLayout *formLayout = new QFormLayout(this);
+    auto formLayout = new QFormLayout(this);
 
     m_pathChooser->setMinimumWidth(QApplication::desktop()->availableGeometry(this).width() / 5);
     m_pathChooser->setExpectedKind(Utils::PathChooser::SaveFile);
     m_pathChooser->setPromptDialogFilter(imageNameFilterString());
     formLayout->addRow(tr("File:"), m_pathChooser);
 
-    QHBoxLayout *sizeLayout = new QHBoxLayout;
+    auto sizeLayout = new QHBoxLayout;
     m_widthSpinBox->setMinimum(exportMinimumSize);
     m_widthSpinBox->setMaximum(exportMaximumSize);
-    connect(m_widthSpinBox, static_cast<QSpinBoxIntSignal>(&QSpinBox::valueChanged),
+    connect(m_widthSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &ExportDialog::exportWidthChanged);
     sizeLayout->addWidget(m_widthSpinBox);
     //: Multiplication, as in 32x32
     sizeLayout->addWidget(new QLabel(tr("x")));
     m_heightSpinBox->setMinimum(exportMinimumSize);
     m_heightSpinBox->setMaximum(exportMaximumSize);
-    connect(m_heightSpinBox, static_cast<QSpinBoxIntSignal>(&QSpinBox::valueChanged),
+    connect(m_heightSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &ExportDialog::exportHeightChanged);
     sizeLayout->addWidget(m_heightSpinBox);
-    QToolButton *resetButton = new QToolButton(this);
+    auto resetButton = new QToolButton(this);
     resetButton->setIcon(QIcon(QStringLiteral(":/qt-project.org/styles/commonstyle/images/refresh-32.png")));
     sizeLayout->addWidget(resetButton);
     sizeLayout->addStretch();
     connect(resetButton, &QAbstractButton::clicked, this, &ExportDialog::resetExportSize);
     formLayout->addRow(tr("Size:"), sizeLayout);
 
-    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    auto buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
     formLayout->addRow(buttonBox);
@@ -142,7 +139,7 @@ void ExportDialog::accept()
 
 QSize ExportDialog::exportSize() const
 {
-    return QSize(m_widthSpinBox->value(), m_heightSpinBox->value());
+    return {m_widthSpinBox->value(), m_heightSpinBox->value()};
 }
 
 void ExportDialog::setExportSize(const QSize &size)
@@ -163,18 +160,16 @@ void ExportDialog::resetExportSize()
 void ExportDialog::setExportWidthBlocked(int width)
 {
     if (m_widthSpinBox->value() != width) {
-        const bool blockSignals = m_widthSpinBox->blockSignals(true);
+        QSignalBlocker blocker(m_widthSpinBox);
         m_widthSpinBox->setValue(width);
-        m_widthSpinBox->blockSignals(blockSignals);
     }
 }
 
 void ExportDialog::setExportHeightBlocked(int height)
 {
     if (m_heightSpinBox->value() != height) {
-        const bool blockSignals = m_heightSpinBox->blockSignals(true);
+        QSignalBlocker blocker(m_heightSpinBox);
         m_heightSpinBox->setValue(height);
-        m_heightSpinBox->blockSignals(blockSignals);
     }
 }
 
@@ -192,12 +187,17 @@ void ExportDialog::exportHeightChanged(int height)
 
 QString ExportDialog::exportFileName() const
 {
-    return m_pathChooser->fileName().toString();
+    return m_pathChooser->filePath().toString();
 }
 
 void ExportDialog::setExportFileName(const QString &f)
 {
-    m_pathChooser->setFileName(Utils::FileName::fromString(f));
+    m_pathChooser->setFilePath(Utils::FilePath::fromString(f));
+}
+
+ExportData ExportDialog::exportData() const
+{
+    return {exportFileName(), exportSize()};
 }
 
 } // namespace Internal

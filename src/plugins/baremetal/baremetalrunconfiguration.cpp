@@ -23,17 +23,14 @@
 **
 ****************************************************************************/
 
+#include "baremetalconstants.h"
 #include "baremetalrunconfiguration.h"
 
-#include "baremetalrunconfigurationwidget.h"
-
-#include <debugger/debuggerrunconfigurationaspect.h>
+#include <projectexplorer/buildsystem.h>
 #include <projectexplorer/buildtargetinfo.h>
-#include <projectexplorer/deploymentdata.h>
 #include <projectexplorer/project.h>
 #include <projectexplorer/runconfigurationaspects.h>
 #include <projectexplorer/target.h>
-#include <qtsupport/qtoutputformatter.h>
 
 using namespace ProjectExplorer;
 using namespace Utils;
@@ -41,141 +38,84 @@ using namespace Utils;
 namespace BareMetal {
 namespace Internal {
 
-const char ProFileKey[] = "Qt4ProjectManager.MaemoRunConfiguration.ProFile";
-const char WorkingDirectoryKey[] = "BareMetal.RunConfig.WorkingDirectory";
+// RunConfigurations
 
-
-BareMetalRunConfiguration::BareMetalRunConfiguration(Target *parent, BareMetalRunConfiguration *other)
-    : RunConfiguration(parent, other),
-      m_projectFilePath(other->m_projectFilePath),
-      m_workingDirectory(other->m_workingDirectory)
+class BareMetalRunConfiguration final : public RunConfiguration
 {
-    init();
+    Q_DECLARE_TR_FUNCTIONS(BareMetal::Internal::BareMetalRunConfiguration)
+
+public:
+    explicit BareMetalRunConfiguration(Target *target, Core::Id id)
+        : RunConfiguration(target, id)
+    {
+        const auto exeAspect = addAspect<ExecutableAspect>();
+        exeAspect->setDisplayStyle(BaseStringAspect::LabelDisplay);
+        exeAspect->setPlaceHolderText(tr("Unknown"));
+
+        addAspect<ArgumentsAspect>();
+        addAspect<WorkingDirectoryAspect>();
+
+        setUpdater([this, exeAspect] {
+            const BuildTargetInfo bti = buildTargetInfo();
+            exeAspect->setExecutable(bti.targetFilePath);
+        });
+
+        connect(target, &Target::buildSystemUpdated, this, &RunConfiguration::update);
+    }
+};
+
+class BareMetalCustomRunConfiguration final : public RunConfiguration
+{
+    Q_DECLARE_TR_FUNCTIONS(BareMetal::Internal::BareMetalCustomRunConfiguration)
+
+public:
+    explicit BareMetalCustomRunConfiguration(Target *target, Core::Id id)
+        : RunConfiguration(target, id)
+    {
+        const auto exeAspect = addAspect<ExecutableAspect>();
+        exeAspect->setSettingsKey("BareMetal.CustomRunConfig.Executable");
+        exeAspect->setPlaceHolderText(tr("Unknown"));
+        exeAspect->setDisplayStyle(BaseStringAspect::PathChooserDisplay);
+        exeAspect->setHistoryCompleter("BareMetal.CustomRunConfig.History");
+        exeAspect->setExpectedKind(PathChooser::Any);
+
+        addAspect<ArgumentsAspect>();
+        addAspect<WorkingDirectoryAspect>();
+
+        setDefaultDisplayName(RunConfigurationFactory::decoratedTargetName(tr("Custom Executable"), target));
+    }
+
+public:
+    Tasks checkForIssues() const final;
+};
+
+Tasks BareMetalCustomRunConfiguration::checkForIssues() const
+{
+    Tasks tasks;
+    if (aspect<ExecutableAspect>()->executable().isEmpty()) {
+        tasks << createConfigurationIssue(tr("The remote executable must be set in order to run "
+                                             "a custom remote run configuration."));
+    }
+    return tasks;
 }
 
-BareMetalRunConfiguration::BareMetalRunConfiguration(Target *parent,
-                                                     const Core::Id id,
-                                                     const QString &projectFilePath)
-    : RunConfiguration(parent, id),
-      m_projectFilePath(projectFilePath)
+// BareMetalRunConfigurationFactory
+
+BareMetalRunConfigurationFactory::BareMetalRunConfigurationFactory()
 {
-    addExtraAspect(new ArgumentsAspect(this, QLatin1String("Qt4ProjectManager.MaemoRunConfiguration.Arguments")));
-    init();
+    registerRunConfiguration<BareMetalRunConfiguration>("BareMetalCustom");
+    setDecorateDisplayNames(true);
+    addSupportedTargetDeviceType(BareMetal::Constants::BareMetalOsType);
 }
 
-void BareMetalRunConfiguration::init()
+// BaseMetalCustomRunConfigurationFactory
+
+BareMetalCustomRunConfigurationFactory::BareMetalCustomRunConfigurationFactory()
+    : FixedRunConfigurationFactory(BareMetalCustomRunConfiguration::tr("Custom Executable"), true)
 {
-    setDefaultDisplayName(defaultDisplayName());
-
-    connect(target(), &Target::deploymentDataChanged,
-            this, &BareMetalRunConfiguration::handleBuildSystemDataUpdated);
-    connect(target(), &Target::applicationTargetsChanged,
-            this, &BareMetalRunConfiguration::handleBuildSystemDataUpdated);
-    connect(target(), &Target::kitChanged,
-            this, &BareMetalRunConfiguration::handleBuildSystemDataUpdated); // Handles device changes, etc.
+    registerRunConfiguration<BareMetalCustomRunConfiguration>("BareMetal");
+    addSupportedTargetDeviceType(BareMetal::Constants::BareMetalOsType);
 }
-
-bool BareMetalRunConfiguration::isEnabled() const
-{
-    m_disabledReason.clear(); // FIXME: Check this makes sense.
-    return true;
-}
-
-QString BareMetalRunConfiguration::disabledReason() const
-{
-    return m_disabledReason;
-}
-
-QWidget *BareMetalRunConfiguration::createConfigurationWidget()
-{
-    return new BareMetalRunConfigurationWidget(this);
-}
-
-OutputFormatter *BareMetalRunConfiguration::createOutputFormatter() const
-{
-    return new QtSupport::QtOutputFormatter(target()->project());
-}
-
-QVariantMap BareMetalRunConfiguration::toMap() const
-{
-    QVariantMap map(RunConfiguration::toMap());
-    const QDir dir = QDir(target()->project()->projectDirectory().toString());
-    map.insert(QLatin1String(ProFileKey), dir.relativeFilePath(m_projectFilePath));
-    map.insert(QLatin1String(WorkingDirectoryKey), m_workingDirectory);
-    return map;
-}
-
-bool BareMetalRunConfiguration::fromMap(const QVariantMap &map)
-{
-    if (!RunConfiguration::fromMap(map))
-        return false;
-
-    const QDir dir = QDir(target()->project()->projectDirectory().toString());
-    m_projectFilePath
-            = QDir::cleanPath(dir.filePath(map.value(QLatin1String(ProFileKey)).toString()));
-    m_workingDirectory = map.value(QLatin1String(WorkingDirectoryKey)).toString();
-
-    setDefaultDisplayName(defaultDisplayName());
-
-    return true;
-}
-
-QString BareMetalRunConfiguration::defaultDisplayName()
-{
-    if (!m_projectFilePath.isEmpty())
-        //: %1 is the name of the project run via hardware debugger
-        return tr("%1 (via GDB server or hardware debugger)").arg(QFileInfo(m_projectFilePath).completeBaseName());
-    //: Bare Metal run configuration default run name
-    return tr("Run on GDB server or hardware debugger");
-}
-
-QString BareMetalRunConfiguration::localExecutableFilePath() const
-{
-    return target()->applicationTargets()
-            .targetForProject(FileName::fromString(m_projectFilePath)).toString();
-}
-
-QString BareMetalRunConfiguration::arguments() const
-{
-    return extraAspect<ArgumentsAspect>()->arguments();
-}
-
-QString BareMetalRunConfiguration::workingDirectory() const
-{
-    return m_workingDirectory;
-}
-
-void BareMetalRunConfiguration::setWorkingDirectory(const QString &wd)
-{
-    m_workingDirectory = wd;
-}
-
-QString BareMetalRunConfiguration::projectFilePath() const
-{
-    return m_projectFilePath;
-}
-
-QString BareMetalRunConfiguration::buildSystemTarget() const
-{
-    const BuildTargetInfoList targets = target()->applicationTargets();
-    const Utils::FileName projectFilePath = Utils::FileName::fromString(m_projectFilePath);
-    auto bst = std::find_if(targets.list.constBegin(), targets.list.constEnd(),
-                            [&projectFilePath](const BuildTargetInfo &bti) { return bti.projectFilePath == projectFilePath; });
-    return (bst == targets.list.constEnd()) ? QString() : bst->targetName;
-}
-
-void BareMetalRunConfiguration::setDisabledReason(const QString &reason) const
-{
-    m_disabledReason = reason;
-}
-
-void BareMetalRunConfiguration::handleBuildSystemDataUpdated()
-{
-    emit targetInformationChanged();
-    emit enabledChanged();
-}
-
-const char *BareMetalRunConfiguration::IdPrefix = "BareMetal";
 
 } // namespace Internal
 } // namespace BareMetal

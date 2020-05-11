@@ -47,9 +47,11 @@ class ProgressIndicator;
 }
 
 namespace Autotest {
-namespace Internal {
 
 class TestTreeModel;
+
+namespace Internal {
+
 class TestTreeSortFilterModel;
 class TestTreeView;
 
@@ -58,8 +60,7 @@ class TestNavigationWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit TestNavigationWidget(QWidget *parent = 0);
-    ~TestNavigationWidget();
+    explicit TestNavigationWidget(QWidget *parent = nullptr);
     void contextMenuEvent(QContextMenuEvent *event) override;
     QList<QToolButton *> createToolButtons();
 
@@ -72,7 +73,7 @@ private:
     void onParsingStarted();
     void onParsingFinished();
     void initializeFilterMenu();
-    void onRunThisTestTriggered(TestRunner::Mode runMode);
+    void onRunThisTestTriggered(TestRunMode runMode);
 
     TestTreeModel *m_model;
     TestTreeSortFilterModel *m_sortFilterModel;

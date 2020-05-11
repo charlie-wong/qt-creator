@@ -27,13 +27,11 @@ source("../../shared/qtcreator.py")
 
 def main():
     for lang in testData.dataset("languages.tsv"):
-        overrideStartApplication()
-        startApplication("qtcreator" + SettingsPath)
+        startQC()
         if not startedWithoutPluginError():
             return
         invokeMenuItem("Tools", "Options...")
-        waitForObjectItem(":Options_QListView", "Environment")
-        clickItem(":Options_QListView", "Environment", 14, 15, 0, Qt.LeftButton)
+        mouseClick(waitForObjectItem(":Options_QListView", "Environment"))
         clickOnTab(":Options.qt_tabwidget_tabbar_QTabBar", "Interface")
         languageName = testData.field(lang, "language")
         if "%1" in languageName:
@@ -41,30 +39,18 @@ def main():
             languageName = languageName.replace("%1", country)
         selectFromCombo(":User Interface.languageBox_QComboBox", languageName)
         clickButton(waitForObject(":Options.OK_QPushButton"))
-        clickButton(waitForObject(":Restart required.OK_QPushButton"))
+        clickButton(waitForObject(":Restart required.Later_QPushButton"))
         test.verify(waitFor("not object.exists(':Options_Core::Internal::SettingsDialog')", 5000),
                     "Options dialog disappeared")
         invokeMenuItem("File", "Exit")
         waitForCleanShutdown()
         snooze(4) # wait for complete unloading of Creator
-        overrideStartApplication()
-        startApplication("qtcreator" + SettingsPath)
+        startQC(closeLinkToQt=False, cancelTour=False)
         try:
-            if platform.system() == 'Darwin':
-                try:
-                    fileMenu = waitForObjectItem(":Qt Creator.QtCreator.MenuBar_QMenuBar",
-                                                 testData.field(lang, "File"))
-                    activateItem(fileMenu)
-                    obj = waitForObject("{type='QMenu' visible='1'}")
-                    test.compare(str(obj.objectName), 'QtCreator.Menu.File',
-                                 "Creator was running in %s translation" % languageName)
-                    activateItem(fileMenu)
-                except:
-                    test.fail("Creator seems to be missing %s translation" % languageName)
-                nativeType("<Command+q>")
-            else:
-                invokeMenuItem(testData.field(lang, "File"), testData.field(lang, "Exit"))
-                test.passes("Creator was running in %s translation." % languageName)
+            # Use Locator for menu items which wouldn't work on macOS
+            exitCommand = testData.field(lang, "Exit")
+            selectFromLocator("t %s" % exitCommand.rstrip("(X)"), exitCommand)
+            test.passes("Creator was running in %s translation." % languageName)
         except:
             test.fail("Creator seems to be missing %s translation" % languageName)
             sendEvent("QCloseEvent", ":Qt Creator_Core::Internal::MainWindow")

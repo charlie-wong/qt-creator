@@ -70,10 +70,10 @@ public:
     bool isPropertyBlackListed(const QmlDesigner::PropertyName &propertyName);
     PropertyNameList propertyNameListForWritableProperties(QObject *object,
                                                            const PropertyName &baseName = PropertyName(),
-                                                           QObjectList *inspectedObjects = 0);
+                                                           QObjectList *inspectedObjects = nullptr);
     PropertyNameList allPropertyNames(QObject *object,
                                       const PropertyName &baseName = PropertyName(),
-                                      QObjectList *inspectedObjects = 0);
+                                      QObjectList *inspectedObjects = nullptr);
     bool hasFullImplementedListInterface(const QQmlListReference &list);
 
     void registerCustomData(QObject *object);
@@ -85,6 +85,7 @@ public:
     void setPropertyBinding(QObject *object, QQmlContext *context, const PropertyName &propertyName, const QString &expression);
     void keepBindingFromGettingDeleted(QObject *object, QQmlContext *context, const PropertyName &propertyName);
 
+    void emitComponentComplete(QObject *item);
     void doComponentCompleteRecursive(QObject *object, NodeInstanceServer *nodeInstanceServer);
 
     bool objectWasDeleted(QObject *object);

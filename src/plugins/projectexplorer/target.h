@@ -28,79 +28,78 @@
 #include "projectconfiguration.h"
 #include "projectexplorer_export.h"
 
+#include <memory>
+
 QT_FORWARD_DECLARE_CLASS(QIcon)
 
-namespace Utils { class Environment; }
+namespace Utils { class MacroExpander; }
 
 namespace ProjectExplorer {
 class BuildConfiguration;
-class BuildTargetInfoList;
+class BuildTargetInfo;
+class BuildSystem;
 class DeployConfiguration;
-class DeployConfigurationFactory;
 class DeploymentData;
-class IBuildConfigurationFactory;
-class IRunConfigurationFactory;
 class Kit;
-class NamedWidget;
+class MakeInstallCommand;
 class Project;
+class ProjectConfigurationModel;
 class RunConfiguration;
 
 class TargetPrivate;
 
-class PROJECTEXPLORER_EXPORT Target : public ProjectConfiguration
+class PROJECTEXPLORER_EXPORT Target : public QObject
 {
     friend class SessionManager; // for setActiveBuild and setActiveDeployConfiguration
     Q_OBJECT
 
+    struct _constructor_tag { explicit _constructor_tag() = default; };
+
 public:
+    Target(Project *parent, Kit *k, _constructor_tag);
     ~Target() override;
 
-    Project *project() const;
+    bool isActive() const;
 
-    // Kit:
+    Project *project() const;
     Kit *kit() const;
+    BuildSystem *buildSystem() const;
+
+    Core::Id id() const;
+    QString displayName() const;
+    QString toolTip() const;
+
+    static QString displayNameKey();
+    static QString deviceTypeKey();
 
     // Build configuration
-    void addBuildConfiguration(BuildConfiguration *configuration);
-    bool removeBuildConfiguration(BuildConfiguration *configuration);
+    void addBuildConfiguration(BuildConfiguration *bc);
+    bool removeBuildConfiguration(BuildConfiguration *bc);
 
-    QList<BuildConfiguration *> buildConfigurations() const;
+    const QList<BuildConfiguration *> buildConfigurations() const;
     BuildConfiguration *activeBuildConfiguration() const;
 
     // DeployConfiguration
     void addDeployConfiguration(DeployConfiguration *dc);
     bool removeDeployConfiguration(DeployConfiguration *dc);
 
-    QList<DeployConfiguration *> deployConfigurations() const;
+    const QList<DeployConfiguration *> deployConfigurations() const;
     DeployConfiguration *activeDeployConfiguration() const;
 
-    void setDeploymentData(const DeploymentData &deploymentData);
-    DeploymentData deploymentData() const;
-
-    void setApplicationTargets(const BuildTargetInfoList &appTargets);
-    BuildTargetInfoList applicationTargets() const;
-
     // Running
-    QList<RunConfiguration *> runConfigurations() const;
-    void addRunConfiguration(RunConfiguration *runConfiguration);
-    void removeRunConfiguration(RunConfiguration *runConfiguration);
+    const QList<RunConfiguration *> runConfigurations() const;
+    void addRunConfiguration(RunConfiguration *rc);
+    void removeRunConfiguration(RunConfiguration *rc);
 
     RunConfiguration *activeRunConfiguration() const;
-    void setActiveRunConfiguration(RunConfiguration *runConfiguration);
-
-    // Returns whether this target is actually available at he time
-    // of the call. A target may become unavailable e.g. when a Qt version
-    // is removed.
-    //
-    // Note: Enabled state is not saved!
-    bool isEnabled() const;
+    void setActiveRunConfiguration(RunConfiguration *rc);
 
     QIcon icon() const;
     QIcon overlayIcon() const;
     void setOverlayIcon(const QIcon &icon);
     QString overlayIconToolTip();
 
-    QVariantMap toMap() const override;
+    QVariantMap toMap() const;
 
     void updateDefaultBuildConfigurations();
     void updateDefaultDeployConfigurations();
@@ -108,12 +107,34 @@ public:
 
     QVariant namedSettings(const QString &name) const;
     void setNamedSettings(const QString &name, const QVariant &value);
+
+    QVariant additionalData(Core::Id id) const;
+    MakeInstallCommand makeInstallCommand(const QString &installRoot) const;
+
+    Utils::MacroExpander *macroExpander() const;
+
+    ProjectConfigurationModel *buildConfigurationModel() const;
+    ProjectConfigurationModel *deployConfigurationModel() const;
+    ProjectConfigurationModel *runConfigurationModel() const;
+
+    BuildSystem *fallbackBuildSystem() const;
+
+    DeploymentData deploymentData() const;
+    DeploymentData buildSystemDeploymentData() const;
+    BuildTargetInfo buildTarget(const QString &buildKey) const;
+
+    QString activeBuildKey() const; // Build key of active run configuaration
+
 signals:
     void targetEnabled(bool);
     void iconChanged();
     void overlayIconChanged();
 
     void kitChanged();
+
+    void parsingStarted();
+    void parsingFinished(bool);
+    void buildSystemUpdated(ProjectExplorer::BuildSystem *bs);
 
     // TODO clean up signal names
     // might be better to also have aboutToRemove signals
@@ -124,40 +145,19 @@ signals:
     void removedBuildConfiguration(ProjectExplorer::BuildConfiguration *bc);
     void addedBuildConfiguration(ProjectExplorer::BuildConfiguration *bc);
     void activeBuildConfigurationChanged(ProjectExplorer::BuildConfiguration *);
+    void buildEnvironmentChanged(ProjectExplorer::BuildConfiguration *bc);
 
     void removedDeployConfiguration(ProjectExplorer::DeployConfiguration *dc);
     void addedDeployConfiguration(ProjectExplorer::DeployConfiguration *dc);
     void activeDeployConfigurationChanged(ProjectExplorer::DeployConfiguration *dc);
 
-    /// convenience signal, emitted if either the active buildconfiguration emits
-    /// environmentChanged() or if the active build configuration changes
-    void environmentChanged();
-
-    /// convenience signal, emitted if either the active configuration emits
-    /// enabledChanged() or if the active build configuration changes
-    void buildConfigurationEnabledChanged();
-    void deployConfigurationEnabledChanged();
-    void runConfigurationEnabledChanged();
-
     void deploymentDataChanged();
-    void applicationTargetsChanged();
-
-    // Remove all the signals below, they are stupid
-    /// Emitted whenever the current build configuartion changed or the build directory of the current
-    /// build configuration was changed.
-    void buildDirectoryChanged();
 
 private:
-    Target(Project *parent, Kit *k);
-    void setEnabled(bool);
-
-    bool fromMap(const QVariantMap &map) override;
+    bool fromMap(const QVariantMap &map);
 
     void updateDeviceState();
-    void onBuildDirectoryChanged();
 
-    void changeEnvironment();
-    void changeBuildConfigurationEnabled();
     void changeDeployConfigurationEnabled();
     void changeRunConfigurationEnabled();
     void handleKitUpdates(ProjectExplorer::Kit *k);
@@ -165,7 +165,7 @@ private:
 
     void setActiveBuildConfiguration(BuildConfiguration *configuration);
     void setActiveDeployConfiguration(DeployConfiguration *configuration);
-    TargetPrivate *d;
+    const std::unique_ptr<TargetPrivate> d;
 
     friend class Project;
 };

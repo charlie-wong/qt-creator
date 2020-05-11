@@ -27,16 +27,23 @@
 
 #include "projectexplorer_export.h"
 
+#include <utils/osspecificaspects.h>
+
 #include <QList>
 #include <QHash>
 
-namespace Utils { class FileName; }
+#include <vector>
+
+namespace Utils { class FilePath; }
 
 namespace ProjectExplorer {
 
 // --------------------------------------------------------------------------
 // ABI (documentation inside)
 // --------------------------------------------------------------------------
+
+class Abi;
+using Abis = QVector<Abi>;
 
 class PROJECTEXPLORER_EXPORT Abi
 {
@@ -48,6 +55,19 @@ public:
         MipsArchitecture,
         PowerPCArchitecture,
         ShArchitecture,
+        AvrArchitecture,
+        XtensaArchitecture,
+        Mcs51Architecture,
+        Mcs251Architecture,
+        AsmJsArchitecture,
+        Stm8Architecture,
+        Msp430Architecture,
+        Rl78Architecture,
+        C166Architecture,
+        V850Architecture,
+        Rh850Architecture,
+        RxArchitecture,
+        K78Architecture,
         UnknownArchitecture
     };
 
@@ -59,6 +79,7 @@ public:
         WindowsOS,
         VxWorks,
         QnxOS,
+        BareMetalOS,
         UnknownOS
     };
 
@@ -69,14 +90,9 @@ public:
         OpenBsdFlavor,
 
         // Linux
-        GenericLinuxFlavor,
         AndroidLinuxFlavor,
 
-        // Darwin
-        GenericDarwinFlavor,
-
         // Unix
-        GenericUnixFlavor,
         SolarisUnixFlavor,
 
         // Windows
@@ -87,15 +103,19 @@ public:
         WindowsMsvc2013Flavor,
         WindowsMsvc2015Flavor,
         WindowsMsvc2017Flavor,
+        WindowsMsvc2019Flavor,
+        WindowsLastMsvcFlavor = WindowsMsvc2019Flavor,
         WindowsMSysFlavor,
         WindowsCEFlavor,
 
+        // Embedded
         VxWorksFlavor,
 
-        // QNX
-        GenericQnxFlavor,
+        // Generic:
+        RtosFlavor,
+        GenericFlavor,
 
-        UnknownFlavor
+        UnknownFlavor // keep last in this enum!
     };
 
     enum BinaryFormat {
@@ -103,23 +123,24 @@ public:
         MachOFormat,
         PEFormat,
         RuntimeQmlFormat,
+        UbrofFormat,
+        OmfFormat,
+        EmscriptenFormat,
         UnknownFormat
     };
 
-    Abi() :
-        m_architecture(UnknownArchitecture), m_os(UnknownOS),
-        m_osFlavor(UnknownFlavor), m_binaryFormat(UnknownFormat), m_wordWidth(0)
-    { }
-
-    Abi(const Architecture &a, const OS &o,
-        const OSFlavor &so, const BinaryFormat &f, unsigned char w);
-    Abi(const QString &abiString);
+    Abi(const Architecture &a = UnknownArchitecture, const OS &o = UnknownOS,
+        const OSFlavor &so = UnknownFlavor, const BinaryFormat &f = UnknownFormat,
+        unsigned char w = 0, const QString &p = {});
 
     static Abi abiFromTargetTriplet(const QString &machineTriple);
+
+    static Utils::OsType abiOsToOsType(const OS os);
 
     bool operator != (const Abi &other) const;
     bool operator == (const Abi &other) const;
     bool isCompatibleWith(const Abi &other) const;
+    bool isFullyCompatibleWith(const Abi &other) const;
 
     bool isValid() const;
     bool isNull() const;
@@ -131,6 +152,7 @@ public:
     unsigned char wordWidth() const { return m_wordWidth; }
 
     QString toString() const;
+    QString param() const;
 
     static QString toString(const Architecture &a);
     static QString toString(const OS &o);
@@ -138,11 +160,22 @@ public:
     static QString toString(const BinaryFormat &bf);
     static QString toString(int w);
 
+    static Architecture architectureFromString(const QStringRef &a);
+    static OS osFromString(const QStringRef &o);
+    static OSFlavor osFlavorFromString(const QStringRef &of, const OS os);
+    static BinaryFormat binaryFormatFromString(const QStringRef &bf);
+    static unsigned char wordWidthFromString(const QStringRef &w);
+
+    static OSFlavor registerOsFlavor(const std::vector<OS> &oses, const QString &flavorName);
     static QList<OSFlavor> flavorsForOs(const OS &o);
+    static QList<OSFlavor> allOsFlavors();
+    static bool osSupportsFlavor(const OS &os, const OSFlavor &flavor);
     static OSFlavor flavorForMsvcVersion(int version);
 
+    static Abi fromString(const QString &abiString);
     static Abi hostAbi();
-    static QList<Abi> abisOfBinary(const Utils::FileName &path);
+    static Abis abisOfBinary(const Utils::FilePath &path);
+
 
 private:
     Architecture m_architecture;
@@ -150,6 +183,7 @@ private:
     OSFlavor m_osFlavor;
     BinaryFormat m_binaryFormat;
     unsigned char m_wordWidth;
+    QString m_param;
 };
 
 inline int qHash(const ProjectExplorer::Abi &abi)

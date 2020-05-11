@@ -29,7 +29,6 @@
 
 #include "uncrustifyconstants.h"
 #include "uncrustifyoptionspage.h"
-#include "uncrustifysettings.h"
 
 #include "../beautifierconstants.h"
 #include "../beautifierplugin.h"
@@ -42,34 +41,26 @@
 #include <coreplugin/editormanager/ieditor.h>
 #include <coreplugin/idocument.h>
 #include <cppeditor/cppeditorconstants.h>
-#include <projectexplorer/projecttree.h>
 #include <projectexplorer/project.h>
+#include <projectexplorer/projectnodes.h>
+#include <projectexplorer/projecttree.h>
+#include <texteditor/formattexteditor.h>
 #include <texteditor/texteditor.h>
 #include <utils/fileutils.h>
 
 #include <QAction>
 #include <QMenu>
 
+using namespace TextEditor;
+
 namespace Beautifier {
 namespace Internal {
 namespace Uncrustify {
 
-Uncrustify::Uncrustify(BeautifierPlugin *parent) :
-    BeautifierAbstractTool(parent),
-    m_beautifierPlugin(parent),
-    m_settings(new UncrustifySettings)
-{
-}
-
-Uncrustify::~Uncrustify()
-{
-    delete m_settings;
-}
-
-bool Uncrustify::initialize()
+Uncrustify::Uncrustify()
 {
     Core::ActionContainer *menu = Core::ActionManager::createMenu(Constants::Uncrustify::MENU_ID);
-    menu->menu()->setTitle(tr(Constants::Uncrustify::DISPLAY_NAME));
+    menu->menu()->setTitle(tr("&Uncrustify"));
 
     m_formatFile = new QAction(BeautifierPlugin::msgFormatCurrentFile(), this);
     Core::Command *cmd
@@ -86,10 +77,8 @@ bool Uncrustify::initialize()
 
     Core::ActionManager::actionContainer(Constants::MENU_ID)->addMenu(menu);
 
-    connect(m_settings, &UncrustifySettings::supportedMimeTypesChanged,
+    connect(&m_settings, &UncrustifySettings::supportedMimeTypesChanged,
             [this] { updateActions(Core::EditorManager::currentEditor()); });
-
-    return true;
 }
 
 QString Uncrustify::id() const
@@ -99,14 +88,9 @@ QString Uncrustify::id() const
 
 void Uncrustify::updateActions(Core::IEditor *editor)
 {
-    const bool enabled = editor && m_settings->isApplicable(editor->document());
+    const bool enabled = editor && m_settings.isApplicable(editor->document());
     m_formatFile->setEnabled(enabled);
     m_formatRange->setEnabled(enabled);
-}
-
-QList<QObject *> Uncrustify::autoReleaseObjects()
-{
-    return {new UncrustifyOptionsPage(m_settings, this)};
 }
 
 void Uncrustify::formatFile()
@@ -116,7 +100,7 @@ void Uncrustify::formatFile()
         BeautifierPlugin::showError(BeautifierPlugin::msgCannotGetConfigurationFile(
                                         tr(Constants::Uncrustify::DISPLAY_NAME)));
     } else {
-        m_beautifierPlugin->formatCurrentFile(command(cfgFileName));
+        formatCurrentFile(command(cfgFileName));
     }
 }
 
@@ -129,8 +113,7 @@ void Uncrustify::formatSelectedText()
         return;
     }
 
-    const TextEditor::TextEditorWidget *widget
-            = TextEditor::TextEditorWidget::currentTextEditorWidget();
+    const TextEditorWidget *widget = TextEditorWidget::currentTextEditorWidget();
     if (!widget)
         return;
 
@@ -138,43 +121,45 @@ void Uncrustify::formatSelectedText()
     if (tc.hasSelection()) {
         // Extend selection to full lines
         const int posSelectionEnd = tc.selectionEnd();
+        tc.setPosition(tc.selectionStart());
         tc.movePosition(QTextCursor::StartOfLine);
         const int startPos = tc.position();
         tc.setPosition(posSelectionEnd);
-        tc.movePosition(QTextCursor::EndOfLine);
+        // Don't extend the selection if the cursor is at the start of the line
+        if (tc.positionInBlock() > 0)
+            tc.movePosition(QTextCursor::EndOfLine);
         const int endPos = tc.position();
-        m_beautifierPlugin->formatCurrentFile(command(cfgFileName, true), startPos, endPos);
-    } else if (m_settings->formatEntireFileFallback()) {
+        formatCurrentFile(command(cfgFileName, true), startPos, endPos);
+    } else if (m_settings.formatEntireFileFallback()) {
         formatFile();
     }
 }
 
 QString Uncrustify::configurationFile() const
 {
-    if (m_settings->useCustomStyle())
-        return m_settings->styleFileName(m_settings->customStyle());
+    if (m_settings.useCustomStyle())
+        return m_settings.styleFileName(m_settings.customStyle());
 
-    if (m_settings->useOtherFiles()) {
+    if (m_settings.useOtherFiles()) {
         if (const ProjectExplorer::Project *project
                 = ProjectExplorer::ProjectTree::currentProject()) {
-            const QStringList files = project->files(ProjectExplorer::Project::AllFiles);
-            for (const QString &file : files) {
-                if (!file.endsWith("cfg"))
-                    continue;
-                const QFileInfo fi(file);
+            const Utils::FilePaths files = project->files(
+                [](const ProjectExplorer::Node *n) { return n->filePath().endsWith("cfg"); });
+            for (const Utils::FilePath &file : files) {
+                const QFileInfo fi = file.toFileInfo();
                 if (fi.isReadable() && fi.fileName() == "uncrustify.cfg")
-                    return file;
+                    return file.toString();
             }
         }
     }
 
-    if (m_settings->useSpecificConfigFile()) {
-        const Utils::FileName file = m_settings->specificConfigFile();
+    if (m_settings.useSpecificConfigFile()) {
+        const Utils::FilePath file = m_settings.specificConfigFile();
         if (file.exists())
             return file.toString();
     }
 
-    if (m_settings->useHomeFile()) {
+    if (m_settings.useHomeFile()) {
         const QString file = QDir::home().filePath("uncrustify.cfg");
         if (QFile::exists(file))
             return file;
@@ -191,15 +176,15 @@ Command Uncrustify::command() const
 
 bool Uncrustify::isApplicable(const Core::IDocument *document) const
 {
-    return m_settings->isApplicable(document);
+    return m_settings.isApplicable(document);
 }
 
 Command Uncrustify::command(const QString &cfgFile, bool fragment) const
 {
     Command command;
-    command.setExecutable(m_settings->command());
+    command.setExecutable(m_settings.command().toString());
     command.setProcessing(Command::PipeProcessing);
-    if (m_settings->version() >= 62) {
+    if (m_settings.version() >= 62) {
         command.addOption("--assume");
         command.addOption("%file");
     } else {

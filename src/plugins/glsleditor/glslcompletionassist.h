@@ -51,9 +51,8 @@ namespace Internal {
 class Document
 {
 public:
-    typedef QSharedPointer<Document> Ptr;
+    using Ptr = QSharedPointer<Document>;
 
-    Document();
     ~Document();
 
     GLSL::Engine *engine() const { return _engine; }
@@ -69,9 +68,9 @@ private:
         GLSL::Scope *scope;
     };
 
-    GLSL::Engine *_engine;
-    GLSL::TranslationUnitAST *_ast;
-    GLSL::Scope *_globalScope;
+    GLSL::Engine *_engine = nullptr;
+    GLSL::TranslationUnitAST *_ast = nullptr;
+    GLSL::Scope *_globalScope = nullptr;
     QList<Range> _cursors;
 
     friend class GlslEditorWidget;
@@ -84,7 +83,6 @@ class GlslCompletionAssistProvider : public TextEditor::CompletionAssistProvider
     Q_OBJECT
 
 public:
-    bool supportsEditor(Core::Id editorId) const override;
     TextEditor::IAssistProcessor *createProcessor() const override;
 
     int activationCharSequenceLength() const override;
@@ -94,8 +92,7 @@ public:
 class GlslCompletionAssistProcessor : public TextEditor::IAssistProcessor
 {
 public:
-    GlslCompletionAssistProcessor();
-    ~GlslCompletionAssistProcessor();
+    ~GlslCompletionAssistProcessor() override;
 
     TextEditor::IAssistProposal *perform(const TextEditor::AssistInterface *interface) override;
 
@@ -103,7 +100,7 @@ private:
     TextEditor::IAssistProposal *createHintProposal(const QVector<GLSL::Function *> &symbols);
     bool acceptsIdleEditor() const;
 
-    int m_startPosition;
+    int m_startPosition = 0;
     QScopedPointer<const GlslCompletionAssistInterface> m_interface;
 };
 

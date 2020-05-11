@@ -43,7 +43,7 @@ WizardPage::WizardPage(QWidget *parent) : QWizardPage(parent)
 
 void WizardPage::pageWasAdded()
 {
-    Wizard *wiz = qobject_cast<Wizard *>(wizard());
+    auto wiz = qobject_cast<Wizard *>(wizard());
     if (!wiz)
         return;
 
@@ -56,13 +56,17 @@ void WizardPage::pageWasAdded()
 void WizardPage::registerFieldWithName(const QString &name, QWidget *widget,
                                        const char *property, const char *changedSignal)
 {
-    Wizard *wiz = qobject_cast<Wizard *>(wizard());
+    registerFieldName(name);
+    registerField(name, widget, property, changedSignal);
+}
+
+void WizardPage::registerFieldName(const QString &name)
+{
+    auto wiz = qobject_cast<Wizard *>(wizard());
     if (wiz)
         wiz->registerFieldName(name);
     else
         m_toRegister.insert(name);
-
-    registerField(name, widget, property, changedSignal);
 }
 
 bool WizardPage::handleReject()

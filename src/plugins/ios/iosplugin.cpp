@@ -29,73 +29,94 @@
 #include "iosbuildstep.h"
 #include "iosconfigurations.h"
 #include "iosconstants.h"
-#include "iosdeployconfiguration.h"
-#include "iosdeploystepfactory.h"
-#include "iosdevicefactory.h"
-#include "iosmanager.h"
+#include "iosdeploystep.h"
+#include "iosdevice.h"
 #include "iosdsymbuildstep.h"
-#include "iosqtversionfactory.h"
-#include "iosrunfactories.h"
+#include "iosqtversion.h"
+#include "iosrunner.h"
 #include "iossettingspage.h"
 #include "iossimulator.h"
-#include "iossimulatorfactory.h"
 #include "iostoolhandler.h"
+#include "iosrunconfiguration.h"
 
-#include <projectexplorer/kitmanager.h>
-#include <qtsupport/qtversionmanager.h>
-
-#include <QtPlugin>
-
+#include <projectexplorer/deployconfiguration.h>
 #include <projectexplorer/devicesupport/devicemanager.h>
+#include <projectexplorer/runconfiguration.h>
+
+#include <qmakeprojectmanager/qmakeprojectmanagerconstants.h>
+
+using namespace ProjectExplorer;
+using namespace QtSupport;
 
 namespace Ios {
 namespace Internal {
-Q_LOGGING_CATEGORY(iosLog, "qtc.ios.common")
-}
 
-IosPlugin::IosPlugin()
+Q_LOGGING_CATEGORY(iosLog, "qtc.ios.common", QtWarningMsg)
+
+class IosDeployConfigurationFactory : public DeployConfigurationFactory
 {
-    qRegisterMetaType<Ios::IosToolHandler::Dict>("Ios::IosToolHandler::Dict");
+public:
+    IosDeployConfigurationFactory()
+    {
+        setConfigBaseId("Qt4ProjectManager.IosDeployConfiguration");
+        setSupportedProjectType(QmakeProjectManager::Constants::QMAKEPROJECT_ID);
+        addSupportedTargetDeviceType(Constants::IOS_DEVICE_TYPE);
+        addSupportedTargetDeviceType(Constants::IOS_SIMULATOR_TYPE);
+        setDefaultDisplayName(QCoreApplication::translate("Ios::Internal", "Deploy on iOS"));
+        addInitialStep(IosDeployStepFactory::stepId());
+    }
+};
+
+class IosPluginPrivate
+{
+public:
+    IosBuildConfigurationFactory buildConfigurationFactory;
+    IosToolChainFactory toolChainFactory;
+    IosRunConfigurationFactory runConfigurationFactory;
+    IosSettingsPage settingsPage;
+    IosQtVersionFactory qtVersionFactory;
+    IosDeviceFactory deviceFactory;
+    IosSimulatorFactory simulatorFactory;
+    IosBuildStepFactory buildStepFactory;
+    IosDeployStepFactory deployStepFactory;
+    IosDsymBuildStepFactory dsymBuildStepFactory;
+    IosDeployConfigurationFactory deployConfigurationFactory;
+
+    RunWorkerFactory runWorkerFactory{
+        RunWorkerFactory::make<IosRunSupport>(),
+        {ProjectExplorer::Constants::NORMAL_RUN_MODE},
+        {runConfigurationFactory.id()}
+    };
+    RunWorkerFactory debugWorkerFactory{
+        RunWorkerFactory::make<IosDebugSupport>(),
+        {ProjectExplorer::Constants::DEBUG_RUN_MODE},
+        {runConfigurationFactory.id()}
+    };
+    RunWorkerFactory qmlProfilerWorkerFactory{
+        RunWorkerFactory::make<IosQmlProfilerSupport>(),
+        {ProjectExplorer::Constants::QML_PROFILER_RUN_MODE},
+        {runConfigurationFactory.id()}
+    };
+};
+
+IosPlugin::~IosPlugin()
+{
+    delete d;
 }
 
 bool IosPlugin::initialize(const QStringList &arguments, QString *errorMessage)
 {
-    Q_UNUSED(arguments);
-    Q_UNUSED(errorMessage);
+    Q_UNUSED(arguments)
+    Q_UNUSED(errorMessage)
 
-    Internal::IosConfigurations::initialize();
+    qRegisterMetaType<Ios::IosToolHandler::Dict>("Ios::IosToolHandler::Dict");
 
-    addAutoReleasedObject(new Internal::IosBuildConfigurationFactory);
-    addAutoReleasedObject(new Internal::IosToolChainFactory);
-    addAutoReleasedObject(new Internal::IosRunControlFactory);
-    addAutoReleasedObject(new Internal::IosRunConfigurationFactory);
-    addAutoReleasedObject(new Internal::IosSettingsPage);
-    addAutoReleasedObject(new Internal::IosQtVersionFactory);
-    addAutoReleasedObject(new Internal::IosDeviceFactory);
-    addAutoReleasedObject(new Internal::IosSimulatorFactory);
-    addAutoReleasedObject(new Internal::IosBuildStepFactory);
-    addAutoReleasedObject(new Internal::IosDeployStepFactory);
-    addAutoReleasedObject(new Internal::IosDsymBuildStepFactory);
-    addAutoReleasedObject(new Internal::IosDeployConfigurationFactory);
+    IosConfigurations::initialize();
+
+    d = new IosPluginPrivate;
 
     return true;
 }
 
-void IosPlugin::extensionsInitialized()
-{
-    connect(ProjectExplorer::KitManager::instance(), &ProjectExplorer::KitManager::kitsLoaded,
-            this, &IosPlugin::kitsRestored);
-}
-
-void IosPlugin::kitsRestored()
-{
-    disconnect(ProjectExplorer::KitManager::instance(), &ProjectExplorer::KitManager::kitsLoaded,
-               this, &IosPlugin::kitsRestored);
-    Internal::IosConfigurations::updateAutomaticKitList();
-    connect(QtSupport::QtVersionManager::instance(),
-            &QtSupport::QtVersionManager::qtVersionsChanged,
-            Internal::IosConfigurations::instance(),
-            &Internal::IosConfigurations::updateAutomaticKitList);
-}
-
+} // namespace Internal
 } // namespace Ios

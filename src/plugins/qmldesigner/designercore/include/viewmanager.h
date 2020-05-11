@@ -32,8 +32,7 @@
 #include <utils/fileutils.h>
 
 namespace ProjectExplorer {
-class Kit;
-class Project;
+class Target;
 }
 
 namespace QmlDesigner {
@@ -42,6 +41,8 @@ class DesignDocument;
 class AbstractCustomTool;
 class DesignerActionManager;
 class NodeInstanceView;
+class RewriterView;
+class Edit3DView;
 
 namespace Internal { class DesignModeWidget; }
 
@@ -65,8 +66,7 @@ public:
     void setItemLibraryViewResourcePath(const QString &resourcePath);
     void setComponentNode(const ModelNode &componentNode);
     void setComponentViewToMaster();
-    void setNodeInstanceViewKit(ProjectExplorer::Kit *kit);
-    void setNodeInstanceViewProject(ProjectExplorer::Project *project);
+    void setNodeInstanceViewTarget(ProjectExplorer::Target *target);
 
     void resetPropertyEditorView();
 
@@ -79,7 +79,7 @@ public:
     void disableWidgets();
     void enableWidgets();
 
-    void pushFileOnCrumbleBar(const Utils::FileName &fileName);
+    void pushFileOnCrumbleBar(const Utils::FilePath &fileName);
     void pushInFileComponentOnCrumbleBar(const ModelNode &modelNode);
     void nextFileIsCalledInternally();
 
@@ -95,7 +95,10 @@ public:
 
     void toggleStatesViewExpanded();
 
-    QString qmlJSEditorHelpId() const;
+    void qmlJSEditorContextHelp(const Core::IContext::HelpCallback &callback) const;
+    DesignDocument *currentDesignDocument() const;
+
+    bool usesRewriterView(RewriterView *rewriterView);
 
 private: // functions
     Q_DISABLE_COPY(ViewManager)
@@ -107,11 +110,11 @@ private: // functions
 
     Model *currentModel() const;
     Model *documentModel() const;
-    DesignDocument *currentDesignDocument() const;
     QString pathToQt() const;
 
     void switchStateEditorViewToBaseState();
     void switchStateEditorViewToSavedState();
+    QList<QPointer<AbstractView>> views() const;
 
 private: // variables
     ViewManagerData *d;

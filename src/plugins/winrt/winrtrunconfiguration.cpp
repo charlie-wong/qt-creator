@@ -24,71 +24,70 @@
 ****************************************************************************/
 
 #include "winrtrunconfiguration.h"
-#include "winrtrunconfigurationwidget.h"
 #include "winrtconstants.h"
 
-#include <coreplugin/icore.h>
-
 #include <projectexplorer/target.h>
-#include <projectexplorer/kitinformation.h>
-#include <projectexplorer/runconfigurationaspects.h>
-#include <qmakeprojectmanager/qmakeproject.h>
+#include <qtsupport/baseqtversion.h>
+#include <qtsupport/qtkitinformation.h>
+
+using namespace ProjectExplorer;
 
 namespace WinRt {
 namespace Internal {
 
-static const char uninstallAfterStopIdC[] = "WinRtRunConfigurationUninstallAfterStopId";
+// UninstallAfterStopAspect
 
-static QString pathFromId(Core::Id id)
+UninstallAfterStopAspect::UninstallAfterStopAspect()
+    : BaseBoolAspect("WinRtRunConfigurationUninstallAfterStopId")
 {
-    return id.suffixAfter(Constants::WINRT_RC_PREFIX);
+    setLabel(WinRtRunConfiguration::tr("Uninstall package after application stops"),
+             LabelPlacement::AtCheckBox);
 }
 
-WinRtRunConfiguration::WinRtRunConfiguration(ProjectExplorer::Target *parent, Core::Id id)
-    : RunConfiguration(parent, id)
-    , m_proFilePath(pathFromId(id))
-    , m_uninstallAfterStop(false)
+// LoopbackExemptClientAspect
+
+LoopbackExemptClientAspect::LoopbackExemptClientAspect()
+    : BaseBoolAspect("WinRtRunConfigurationLoopbackExemptClient")
+{
+    setLabel(WinRtRunConfiguration::tr("Enable localhost communication for clients"),
+             LabelPlacement::AtCheckBox);
+}
+
+// LoopbackExemptServerAspect
+
+LoopbackExemptServerAspect::LoopbackExemptServerAspect()
+    : BaseBoolAspect("WinRtRunConfigurationLoopbackExemptServer")
+{
+    setLabel(WinRtRunConfiguration::tr("Enable localhost communication for "
+                                       "servers (requires elevated rights)"),
+             LabelPlacement::AtCheckBox);
+}
+
+// WinRtRunConfiguration
+
+WinRtRunConfiguration::WinRtRunConfiguration(Target *target, Core::Id id)
+    : RunConfiguration(target, id)
 {
     setDisplayName(tr("Run App Package"));
-    addExtraAspect(new ProjectExplorer::ArgumentsAspect(this,
-                   QLatin1String("WinRtRunConfigurationArgumentsId")));
+    addAspect<ArgumentsAspect>();
+    addAspect<UninstallAfterStopAspect>();
+
+    const QtSupport::BaseQtVersion *qt
+            = QtSupport::QtKitAspect::qtVersion(target->kit());
+    if (qt && qt->qtVersion() >= QtSupport::QtVersionNumber(5, 12, 0)) {
+        addAspect<LoopbackExemptClientAspect>();
+        addAspect<LoopbackExemptServerAspect>();
+    }
 }
 
-QWidget *WinRtRunConfiguration::createConfigurationWidget()
-{
-    return new WinRtRunConfigurationWidget(this);
-}
+// WinRtRunConfigurationFactory
 
-QVariantMap WinRtRunConfiguration::toMap() const
+WinRtRunConfigurationFactory::WinRtRunConfigurationFactory()
 {
-    QVariantMap map = RunConfiguration::toMap();
-    map.insert(QLatin1String(uninstallAfterStopIdC), m_uninstallAfterStop);
-    return map;
-}
-
-bool WinRtRunConfiguration::fromMap(const QVariantMap &map)
-{
-    if (!RunConfiguration::fromMap(map))
-        return false;
-    setUninstallAfterStop(map.value(QLatin1String(uninstallAfterStopIdC)).toBool());
-    return true;
-}
-
-QString WinRtRunConfiguration::arguments() const
-{
-    return extraAspect<ProjectExplorer::ArgumentsAspect>()->arguments();
-}
-
-void WinRtRunConfiguration::setUninstallAfterStop(bool b)
-{
-    m_uninstallAfterStop = b;
-    emit uninstallAfterStopChanged(m_uninstallAfterStop);
-}
-
-QString WinRtRunConfiguration::buildSystemTarget() const
-{
-    return static_cast<QmakeProjectManager::QmakeProject *>(target()->project())
-            ->mapProFilePathToTarget(Utils::FileName::fromString(m_proFilePath));
+    registerRunConfiguration<WinRtRunConfiguration>("WinRt.WinRtRunConfiguration:");
+    addSupportedTargetDeviceType(Constants::WINRT_DEVICE_TYPE_LOCAL);
+    addSupportedTargetDeviceType(Constants::WINRT_DEVICE_TYPE_PHONE);
+    addSupportedTargetDeviceType(Constants::WINRT_DEVICE_TYPE_EMULATOR);
 }
 
 } // namespace Internal

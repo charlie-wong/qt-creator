@@ -33,6 +33,7 @@
 #include "bindingindicator.h"
 #include "contentnoteditableindicator.h"
 
+#include <QElapsedTimer>
 #include <QTime>
 
 namespace QmlDesigner {
@@ -41,7 +42,7 @@ class SelectionTool : public AbstractFormEditorTool
 {
 public:
     SelectionTool(FormEditorView* editorView);
-    ~SelectionTool();
+    ~SelectionTool() override;
 
     void mousePressEvent(const QList<QGraphicsItem*> &itemList, QGraphicsSceneMouseEvent *event) override;
     void mouseMoveEvent(const QList<QGraphicsItem*> &itemList, QGraphicsSceneMouseEvent *event) override;
@@ -87,8 +88,9 @@ private:
     AnchorIndicator m_anchorIndicator;
     BindingIndicator m_bindingIndicator;
     ContentNotEditableIndicator m_contentNotEditableIndicator;
-    QTime m_mousePressTimer;
+    QElapsedTimer m_mousePressTimer;
     QCursor m_cursor;
+    bool m_itemSelectedAndMovable = false;
 };
 
 } // namespace QmlDesigner

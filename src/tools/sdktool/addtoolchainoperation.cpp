@@ -61,7 +61,7 @@ QString AddToolChainOperation::name() const
 
 QString AddToolChainOperation::helpText() const
 {
-    return QString("add a tool chain to Qt Creator");
+    return QString("add a tool chain");
 }
 
 QString AddToolChainOperation::argumentsHelpText() const
@@ -183,7 +183,7 @@ bool AddToolChainOperation::test() const
     QVariantMap tcData = map.value(QString::fromLatin1(PREFIX) + '0').toMap();
     if (tcData.count() != 8
             || tcData.value(ID).toString() != "testId"
-            || tcData.value(LANGUAGE_KEY).toString() != "langId"
+            || tcData.value(LANGUAGE_KEY_V2).toString() != "langId"
             || tcData.value(DISPLAYNAME).toString() != "name"
             || tcData.value(AUTODETECTED).toBool() != true
             || tcData.value(PATH).toString() != "/tmp/test"
@@ -199,7 +199,7 @@ bool AddToolChainOperation::test() const
     if (!unchanged.isEmpty())
         return false;
 
-    // Make sure name stays unique:
+    // add 2nd tool chain:
     map = addToolChain(map, "{some-tc-id}", "langId2", "name", "/tmp/test", "test-abi", "test-abi,test-abi2",
                        KeyValuePairList() << KeyValuePair("ExtraKey", QVariant("ExtraValue")));
     if (map.value(COUNT).toInt() != 2
@@ -209,7 +209,7 @@ bool AddToolChainOperation::test() const
     tcData = map.value(QString::fromLatin1(PREFIX) + '0').toMap();
     if (tcData.count() != 8
             || tcData.value(ID).toString() != "testId"
-            || tcData.value(LANGUAGE_KEY).toString() != "langId"
+            || tcData.value(LANGUAGE_KEY_V2).toString() != "langId"
             || tcData.value(DISPLAYNAME).toString() != "name"
             || tcData.value(AUTODETECTED).toBool() != true
             || tcData.value(PATH).toString() != "/tmp/test"
@@ -220,8 +220,8 @@ bool AddToolChainOperation::test() const
     tcData = map.value(QString::fromLatin1(PREFIX) + '1').toMap();
         if (tcData.count() != 8
                 || tcData.value(ID).toString() != "{some-tc-id}"
-                || tcData.value(LANGUAGE_KEY).toString() != "langId2"
-                || tcData.value(DISPLAYNAME).toString() != "name2"
+                || tcData.value(LANGUAGE_KEY_V2).toString() != "langId2"
+                || tcData.value(DISPLAYNAME).toString() != "name"
                 || tcData.value(AUTODETECTED).toBool() != true
                 || tcData.value(PATH).toString() != "/tmp/test"
                 || tcData.value(TARGET_ABI).toString() != "test-abi"
@@ -253,13 +253,6 @@ QVariantMap AddToolChainOperation::addToolChain(const QVariantMap &map, const QS
         return QVariantMap();
     }
 
-    // Sanity check: Make sure displayName is unique.
-    QStringList nameKeys = FindKeyOperation::findKey(map, DISPLAYNAME);
-    QStringList nameList;
-    foreach (const QString &nameKey, nameKeys)
-        nameList << GetOperation::get(map, nameKey).toString();
-    const QString uniqueName = makeUnique(displayName, nameList);
-
     QVariantMap result = RmKeysOperation::rmKeys(map, {COUNT});
 
     const QString tc = QString::fromLatin1(PREFIX) + QString::number(count);
@@ -271,7 +264,7 @@ QVariantMap AddToolChainOperation::addToolChain(const QVariantMap &map, const QS
     QString newLang; // QtC 4.3 and later
     QString oldLang; // QtC 4.2
     int langInt = lang.toInt(&ok);
-    Q_UNUSED(langInt);
+    Q_UNUSED(langInt)
     if (lang == "2" || lang == "Cxx") {
         newLang = "Cxx";
         oldLang = "2";
@@ -290,7 +283,7 @@ QVariantMap AddToolChainOperation::addToolChain(const QVariantMap &map, const QS
         data << KeyValuePair({tc, LANGUAGE_KEY}, QVariant(oldLang));
     if (!newLang.isEmpty())
         data << KeyValuePair({tc, LANGUAGE_KEY_V2}, QVariant(newLang));
-    data << KeyValuePair({tc, DISPLAYNAME}, QVariant(uniqueName));
+    data << KeyValuePair({tc, DISPLAYNAME}, QVariant(displayName));
     data << KeyValuePair({tc, AUTODETECTED}, QVariant(true));
     data << KeyValuePair({tc, PATH}, QVariant(path));
     data << KeyValuePair({tc, TARGET_ABI}, QVariant(abi));

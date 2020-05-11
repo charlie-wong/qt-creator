@@ -25,10 +25,12 @@
 
 #include "diffeditorwidgetcontroller.h"
 #include "diffeditorconstants.h"
+#include "diffeditorcontroller.h"
 #include "diffeditordocument.h"
 
 #include <coreplugin/documentmanager.h>
 #include <coreplugin/editormanager/editormanager.h>
+#include <coreplugin/infobar.h>
 #include <coreplugin/patchtool.h>
 
 #include <texteditor/fontsettings.h>
@@ -65,7 +67,7 @@ DiffEditorWidgetController::DiffEditorWidgetController(QWidget *diffEditorWidget
 void DiffEditorWidgetController::setDocument(DiffEditorDocument *document)
 {
     if (!m_progressIndicator) {
-        m_progressIndicator = new Utils::ProgressIndicator(Utils::ProgressIndicator::Large);
+        m_progressIndicator = new Utils::ProgressIndicator(Utils::ProgressIndicatorSize::Large);
         m_progressIndicator->attachToWidget(m_diffEditorWidget);
         m_progressIndicator->hide();
     }
@@ -75,19 +77,20 @@ void DiffEditorWidgetController::setDocument(DiffEditorDocument *document)
 
     if (m_document) {
         disconnect(m_document, &IDocument::aboutToReload, this, &DiffEditorWidgetController::scheduleShowProgress);
-        disconnect(m_document, &IDocument::reloadFinished, this, &DiffEditorWidgetController::hideProgress);
+        disconnect(m_document, &IDocument::reloadFinished, this, &DiffEditorWidgetController::onDocumentReloadFinished);
     }
 
-    const bool wasRunning = m_document && m_document->isReloading();
+    const bool wasRunning = m_document && m_document->state() == DiffEditorDocument::Reloading;
 
     m_document = document;
 
     if (m_document) {
         connect(m_document, &IDocument::aboutToReload, this, &DiffEditorWidgetController::scheduleShowProgress);
-        connect(m_document, &IDocument::reloadFinished, this, &DiffEditorWidgetController::hideProgress);
+        connect(m_document, &IDocument::reloadFinished, this, &DiffEditorWidgetController::onDocumentReloadFinished);
+        updateCannotDecodeInfo();
     }
 
-    const bool isRunning = m_document && m_document->isReloading();
+    const bool isRunning = m_document && m_document->state() == DiffEditorDocument::Reloading;
 
     if (wasRunning == isRunning)
         return;
@@ -122,9 +125,18 @@ void DiffEditorWidgetController::hideProgress()
         m_progressIndicator->hide();
 }
 
-void DiffEditorWidgetController::patch(bool revert)
+void DiffEditorWidgetController::onDocumentReloadFinished()
+{
+    updateCannotDecodeInfo();
+    hideProgress();
+}
+
+void DiffEditorWidgetController::patch(bool revert, int fileIndex, int chunkIndex)
 {
     if (!m_document)
+        return;
+
+    if (!chunkExists(fileIndex, chunkIndex))
         return;
 
     const QString title = revert ? tr("Revert Chunk") : tr("Apply Chunk");
@@ -138,7 +150,7 @@ void DiffEditorWidgetController::patch(bool revert)
         return;
     }
 
-    const FileData fileData = m_contextFileData.at(m_contextMenuFileIndex);
+    const FileData fileData = m_contextFileData.at(fileIndex);
     const QString fileName = revert
             ? fileData.rightFileInfo.fileName
             : fileData.leftFileInfo.fileName;
@@ -154,7 +166,7 @@ void DiffEditorWidgetController::patch(bool revert)
     if (patchBehaviour == DiffFileInfo::PatchFile) {
         const int strip = m_document->baseDirectory().isEmpty() ? -1 : 0;
 
-        const QString patch = m_document->makePatch(m_contextMenuFileIndex, m_contextMenuChunkIndex, revert);
+        const QString patch = m_document->makePatch(fileIndex, chunkIndex, ChunkSelection(), revert);
 
         if (patch.isEmpty())
             return;
@@ -164,7 +176,7 @@ void DiffEditorWidgetController::patch(bool revert)
                                 workingDirectory, strip, revert))
             m_document->reload();
     } else { // PatchEditor
-        TextEditor::TextDocument *textDocument = qobject_cast<TextEditor::TextDocument *>(
+        auto textDocument = qobject_cast<TextEditor::TextDocument *>(
                     DocumentModel::documentForFilePath(absFileName));
         if (!textDocument)
             return;
@@ -179,8 +191,9 @@ void DiffEditorWidgetController::patch(bool revert)
         const QString contentsCopyFileName = contentsCopy.fileName();
         const QString contentsCopyDir = QFileInfo(contentsCopyFileName).absolutePath();
 
-        const QString patch = m_document->makePatch(m_contextMenuFileIndex,
-                              m_contextMenuChunkIndex, revert, false, QFileInfo(contentsCopyFileName).fileName());
+        const QString patch = m_document->makePatch(fileIndex, chunkIndex,
+                                                    ChunkSelection(), revert, false,
+                                                    QFileInfo(contentsCopyFileName).fileName());
 
         if (patch.isEmpty())
             return;
@@ -218,64 +231,99 @@ void DiffEditorWidgetController::setFontSettings(const FontSettings &fontSetting
     m_rightCharFormat = fontSettings.toTextCharFormat(C_DIFF_DEST_CHAR);
 }
 
-void DiffEditorWidgetController::addCodePasterAction(QMenu *menu)
+void DiffEditorWidgetController::addCodePasterAction(QMenu *menu, int fileIndex, int chunkIndex)
 {
     if (ExtensionSystem::PluginManager::getObject<CodePaster::Service>()) {
         // optional code pasting service
         QAction *sendChunkToCodePasterAction = menu->addAction(tr("Send Chunk to CodePaster..."));
-        connect(sendChunkToCodePasterAction, &QAction::triggered,
-                this, &DiffEditorWidgetController::slotSendChunkToCodePaster);
+        connect(sendChunkToCodePasterAction, &QAction::triggered, this, [this, fileIndex, chunkIndex]() {
+            sendChunkToCodePaster(fileIndex, chunkIndex);
+        });
     }
 }
 
-bool DiffEditorWidgetController::setAndVerifyIndexes(QMenu *menu,
-                                                     int diffFileIndex, int chunkIndex)
+bool DiffEditorWidgetController::chunkExists(int fileIndex, int chunkIndex) const
 {
     if (!m_document)
         return false;
 
-    m_contextMenuFileIndex = diffFileIndex;
-    m_contextMenuChunkIndex = chunkIndex;
+    if (DiffEditorController *controller = m_document->controller())
+        return controller->chunkExists(fileIndex, chunkIndex);
 
-    if (m_contextMenuFileIndex < 0 || m_contextMenuChunkIndex < 0)
-        return false;
-
-    if (m_contextMenuFileIndex >= m_contextFileData.count())
-        return false;
-
-    const FileData fileData = m_contextFileData.at(m_contextMenuFileIndex);
-    if (m_contextMenuChunkIndex >= fileData.chunks.count())
-        return false;
-
-    m_document->chunkActionsRequested(menu, diffFileIndex, chunkIndex);
-
-    return true;
+    return false;
 }
 
-bool DiffEditorWidgetController::fileNamesAreDifferent() const
+ChunkData DiffEditorWidgetController::chunkData(int fileIndex, int chunkIndex) const
 {
-    const FileData fileData = m_contextFileData.at(m_contextMenuFileIndex);
+    if (!m_document)
+        return ChunkData();
+
+    if (fileIndex < 0 || chunkIndex < 0)
+        return ChunkData();
+
+    if (fileIndex >= m_contextFileData.count())
+        return ChunkData();
+
+    const FileData fileData = m_contextFileData.at(fileIndex);
+    if (chunkIndex >= fileData.chunks.count())
+        return ChunkData();
+
+    return fileData.chunks.at(chunkIndex);
+}
+
+bool DiffEditorWidgetController::fileNamesAreDifferent(int fileIndex) const
+{
+    const FileData fileData = m_contextFileData.at(fileIndex);
     return fileData.leftFileInfo.fileName != fileData.rightFileInfo.fileName;
 }
 
-void DiffEditorWidgetController::addApplyAction(QMenu *menu, int diffFileIndex,
-                                                int chunkIndex)
+void DiffEditorWidgetController::addApplyAction(QMenu *menu, int fileIndex, int chunkIndex)
 {
     QAction *applyAction = menu->addAction(tr("Apply Chunk..."));
-    connect(applyAction, &QAction::triggered, this, &DiffEditorWidgetController::slotApplyChunk);
-    applyAction->setEnabled(setAndVerifyIndexes(menu, diffFileIndex, chunkIndex)
-                            && fileNamesAreDifferent());
+    connect(applyAction, &QAction::triggered, this, [this, fileIndex, chunkIndex]() {
+        patch(false, fileIndex, chunkIndex);
+    });
+    applyAction->setEnabled(chunkExists(fileIndex, chunkIndex) && fileNamesAreDifferent(fileIndex));
 }
 
-void DiffEditorWidgetController::addRevertAction(QMenu *menu, int diffFileIndex,
-                                                 int chunkIndex)
+void DiffEditorWidgetController::addRevertAction(QMenu *menu, int fileIndex, int chunkIndex)
 {
     QAction *revertAction = menu->addAction(tr("Revert Chunk..."));
-    connect(revertAction, &QAction::triggered, this, &DiffEditorWidgetController::slotRevertChunk);
-    revertAction->setEnabled(setAndVerifyIndexes(menu, diffFileIndex, chunkIndex));
+    connect(revertAction, &QAction::triggered, this, [this, fileIndex, chunkIndex]() {
+        patch(true, fileIndex, chunkIndex);
+    });
+    revertAction->setEnabled(chunkExists(fileIndex, chunkIndex));
 }
 
-void DiffEditorWidgetController::slotSendChunkToCodePaster()
+void DiffEditorWidgetController::addExtraActions(QMenu *menu, int fileIndex, int chunkIndex,
+                                                 const ChunkSelection &selection)
+{
+    if (DiffEditorController *controller = m_document->controller())
+        controller->requestChunkActions(menu, fileIndex, chunkIndex, selection);
+}
+
+void DiffEditorWidgetController::updateCannotDecodeInfo()
+{
+    if (!m_document)
+        return;
+
+    InfoBar *infoBar = m_document->infoBar();
+    Id selectEncodingId(Constants::SELECT_ENCODING);
+    if (m_document->hasDecodingError()) {
+        if (!infoBar->canInfoBeAdded(selectEncodingId))
+            return;
+        InfoBarEntry info(selectEncodingId,
+                          tr("<b>Error:</b> Could not decode \"%1\" with \"%2\"-encoding.")
+                              .arg(m_document->displayName(),
+                                   QString::fromLatin1(m_document->codec()->name())));
+        info.setCustomButtonInfo(tr("Select Encoding"), [this]() { m_document->selectEncoding(); });
+        infoBar->addInfo(info);
+    } else {
+        infoBar->removeInfo(selectEncodingId);
+    }
+}
+
+void DiffEditorWidgetController::sendChunkToCodePaster(int fileIndex, int chunkIndex)
 {
     if (!m_document)
         return;
@@ -284,22 +332,13 @@ void DiffEditorWidgetController::slotSendChunkToCodePaster()
     auto pasteService = ExtensionSystem::PluginManager::getObject<CodePaster::Service>();
     QTC_ASSERT(pasteService, return);
 
-    const QString patch = m_document->makePatch(m_contextMenuFileIndex, m_contextMenuChunkIndex, false);
+    const QString patch = m_document->makePatch(fileIndex, chunkIndex,
+                                                ChunkSelection(), false);
 
     if (patch.isEmpty())
         return;
 
-    pasteService->postText(patch, QLatin1String(Constants::DIFF_EDITOR_MIMETYPE));
-}
-
-void DiffEditorWidgetController::slotApplyChunk()
-{
-    patch(false);
-}
-
-void DiffEditorWidgetController::slotRevertChunk()
-{
-    patch(true);
+    pasteService->postText(patch, Constants::DIFF_EDITOR_MIMETYPE);
 }
 
 } // namespace Internal

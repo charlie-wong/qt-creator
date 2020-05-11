@@ -28,27 +28,27 @@
 
 #include <coreplugin/icontext.h>
 
+#include <utils/stringutils.h>
+
 #include <QDesignerOptionsPageInterface>
 #include <QCoreApplication>
 
 using namespace Designer::Internal;
 
 SettingsPage::SettingsPage(QDesignerOptionsPageInterface *designerPage) :
+    Core::IOptionsPage(nullptr, false),
     m_designerPage(designerPage)
 {
     setId(Core::Id::fromString(m_designerPage->name()));
     setDisplayName(m_designerPage->name());
     setCategory(Designer::Constants::SETTINGS_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("Designer",
-        Designer::Constants::SETTINGS_TR_CATEGORY));
-    setCategoryIcon(Utils::Icon(Designer::Constants::SETTINGS_CATEGORY_ICON));
 }
 
 QWidget *SettingsPage::widget()
 {
     m_initialized = true;
     if (!m_widget)
-        m_widget = m_designerPage->createPage(0);
+        m_widget = m_designerPage->createPage(nullptr);
     return m_widget;
 
 }
@@ -66,13 +66,13 @@ void SettingsPage::finish()
     delete m_widget;
 }
 
-SettingsPageProvider::SettingsPageProvider(QObject *parent)
-    : IOptionsPageProvider(parent)
+SettingsPageProvider::SettingsPageProvider()
 {
     setCategory(Designer::Constants::SETTINGS_CATEGORY);
     setDisplayCategory(QCoreApplication::translate("Designer",
         Designer::Constants::SETTINGS_TR_CATEGORY));
-    setCategoryIcon(QLatin1String(Designer::Constants::SETTINGS_CATEGORY_ICON));
+    setCategoryIcon(Utils::Icon({{":/core/images/settingscategory_design.png",
+                    Utils::Theme::PanelTextColorDark}}, Utils::Icon::Tint));
 }
 
 QList<Core::IOptionsPage *> SettingsPageProvider::pages() const
@@ -85,7 +85,7 @@ QList<Core::IOptionsPage *> SettingsPageProvider::pages() const
     return FormEditorW::optionsPages();
 }
 
-bool SettingsPageProvider::matches(const QString &searchKeyWord) const
+bool SettingsPageProvider::matches(const QRegularExpression &regex) const
 {
     // to avoid fully initializing designer when typing something in the options' filter edit
     // we hardcode matching of UI text from the designer pages, which are taken if the designer pages
@@ -116,10 +116,10 @@ bool SettingsPageProvider::matches(const QString &searchKeyWord) const
     if (m_keywords.isEmpty()) {
         m_keywords.reserve(itemCount);
         for (size_t i = 0; i < itemCount; ++i)
-            m_keywords << QCoreApplication::translate(uitext[i].context, uitext[i].value).remove(QLatin1Char('&'));
+            m_keywords << Utils::stripAccelerator(QCoreApplication::translate(uitext[i].context, uitext[i].value));
     }
-    foreach (const QString &key, m_keywords) {
-        if (key.contains(searchKeyWord, Qt::CaseInsensitive))
+    for (const QString &key : qAsConst(m_keywords)) {
+        if (key.contains(regex))
             return true;
     }
     return false;

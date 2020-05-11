@@ -38,6 +38,8 @@ namespace DiffEditor {
 
 namespace Internal { class DiffEditorDocument; }
 
+class ChunkSelection;
+
 class DIFFEDITOR_EXPORT DiffEditorController : public QObject
 {
     Q_OBJECT
@@ -48,48 +50,54 @@ public:
     bool isReloading() const;
 
     QString baseDirectory() const;
+    void setBaseDirectory(const QString &directory);
     int contextLineCount() const;
     bool ignoreWhitespace() const;
 
-    QString revisionFromDescription() const;
-
-    QString makePatch(bool revert, bool addPrefix = false) const;
+    enum PatchOption {
+        NoOption = 0,
+        Revert = 1,
+        AddPrefix = 2
+    };
+    Q_DECLARE_FLAGS(PatchOptions, PatchOption)
+    QString makePatch(int fileIndex, int chunkIndex, const ChunkSelection &selection,
+                      PatchOptions options) const;
 
     static Core::IDocument *findOrCreateDocument(const QString &vcsId,
                                                  const QString &displayName);
     static DiffEditorController *controller(Core::IDocument *document);
 
-    void branchesReceived(const QString &branches);
+    void requestChunkActions(QMenu *menu, int fileIndex, int chunkIndex,
+                             const ChunkSelection &selection);
+    bool chunkExists(int fileIndex, int chunkIndex) const;
+    Core::IDocument *document() const;
+
+    // reloadFinished() should be called inside the reloader (for synchronous reload)
+    // or later (for asynchronous reload)
+    void setReloader(const std::function<void ()> &reloader);
 
 signals:
-    void chunkActionsRequested(QMenu *menu, bool isValid);
-    void requestInformationForCommit(const QString &revision);
+    void chunkActionsRequested(QMenu *menu, int fileIndex, int chunkIndex,
+                               const ChunkSelection &selection);
 
 protected:
-    // reloadFinished() should be called
-    // inside reload() (for synchronous reload)
-    // or later (for asynchronous reload)
-    virtual void reload() = 0;
-    virtual void reloadFinished(bool success);
+    void reloadFinished(bool success);
 
     void setDiffFiles(const QList<FileData> &diffFileList,
                       const QString &baseDirectory = QString(),
                       const QString &startupFile = QString());
     void setDescription(const QString &description);
+    QString description() const;
     void forceContextLineCount(int lines);
-    Core::IDocument *document() const;
 
 private:
-    void requestMoreInformation();
-    void requestChunkActions(QMenu *menu, int diffFileIndex, int chunkIndex);
-
     Internal::DiffEditorDocument *const m_document;
-
-    bool m_isReloading;
-    int m_diffFileIndex;
-    int m_chunkIndex;
+    bool m_isReloading = false;
+    std::function<void()> m_reloader;
 
     friend class Internal::DiffEditorDocument;
 };
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(DiffEditorController::PatchOptions)
 
 } // namespace DiffEditor

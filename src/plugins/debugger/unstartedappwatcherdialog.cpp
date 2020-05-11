@@ -38,7 +38,6 @@
 #include <projectexplorer/projecttree.h>
 #include <projectexplorer/runconfiguration.h>
 #include <projectexplorer/buildconfiguration.h>
-#include <projectexplorer/runnables.h>
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -58,9 +57,9 @@ namespace Internal {
 
 static bool isLocal(RunConfiguration *runConfiguration)
 {
-    Target *target = runConfiguration ? runConfiguration->target() : 0;
-    Kit *kit = target ? target->kit() : 0;
-    return DeviceTypeKitInformation::deviceTypeId(kit) == ProjectExplorer::Constants::DESKTOP_DEVICE_TYPE;
+    Target *target = runConfiguration ? runConfiguration->target() : nullptr;
+    Kit *kit = target ? target->kit() : nullptr;
+    return DeviceTypeKitAspect::deviceTypeId(kit) == ProjectExplorer::Constants::DESKTOP_DEVICE_TYPE;
 }
 
 /*!
@@ -88,15 +87,18 @@ UnstartedAppWatcherDialog::UnstartedAppWatcherDialog(QWidget *parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Attach to Process Not Yet Started"));
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
-    m_kitChooser = new DebuggerKitChooser(DebuggerKitChooser::LocalDebugging, this);
+    m_kitChooser = new KitChooser(this);
+    m_kitChooser->setKitPredicate([](const Kit *k) {
+        return ToolChainKitAspect::targetAbi(k).os() == Abi::hostAbi().os();
+    });
+    m_kitChooser->setShowIcons(true);
     m_kitChooser->populate();
     m_kitChooser->setVisible(true);
 
     Project *project = ProjectTree::currentProject();
-    Target *activeTarget = project ? project->activeTarget() : 0;
-    Kit *kit = activeTarget ? activeTarget->kit() : 0;
+    Target *activeTarget = project ? project->activeTarget() : nullptr;
+    Kit *kit = activeTarget ? activeTarget->kit() : nullptr;
 
     if (kit)
         m_kitChooser->setCurrentKitId(kit->id());
@@ -106,7 +108,7 @@ UnstartedAppWatcherDialog::UnstartedAppWatcherDialog(QWidget *parent)
     auto pathLayout = new QHBoxLayout;
     m_pathChooser = new Utils::PathChooser(this);
     m_pathChooser->setExpectedKind(Utils::PathChooser::ExistingCommand);
-    m_pathChooser->setHistoryCompleter(QLatin1String("LocalExecutable"), true);
+    m_pathChooser->setHistoryCompleter("LocalExecutable", true);
     m_pathChooser->setMinimumWidth(400);
 
     auto resetExecutable = new QPushButton(tr("Reset"));
@@ -116,11 +118,10 @@ UnstartedAppWatcherDialog::UnstartedAppWatcherDialog(QWidget *parent)
     if (activeTarget) {
         if (RunConfiguration *runConfig = activeTarget->activeRunConfiguration()) {
             const Runnable runnable = runConfig->runnable();
-            if (runnable.is<StandardRunnable>() && isLocal(runConfig)) {
+            if (isLocal(runConfig)) {
                 resetExecutable->setEnabled(true);
-                connect(resetExecutable, &QPushButton::clicked,
-                        this, [this, runnable]() {
-                    m_pathChooser->setPath(runnable.as<StandardRunnable>().executable);
+                connect(resetExecutable, &QPushButton::clicked, this, [this, runnable] {
+                    m_pathChooser->setFilePath(runnable.executable);
                 });
             }
         }
@@ -142,14 +143,14 @@ UnstartedAppWatcherDialog::UnstartedAppWatcherDialog(QWidget *parent)
     m_waitingLabel = new QLabel(QString(), this);
     m_waitingLabel->setAlignment(Qt::AlignCenter);
 
-    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    auto buttonBox = new QDialogButtonBox(QDialogButtonBox::Close, this);
     m_watchingPushButton = buttonBox->addButton(tr("Start Watching"), QDialogButtonBox::ActionRole);
     m_watchingPushButton->setCheckable(true);
     m_watchingPushButton->setChecked(false);
     m_watchingPushButton->setEnabled(false);
     m_watchingPushButton->setDefault(true);
 
-    QFormLayout *mainLayout = new QFormLayout(this);
+    auto mainLayout = new QFormLayout(this);
     mainLayout->addRow(new QLabel(tr("Kit: "), this), m_kitChooser);
     mainLayout->addRow(new QLabel(tr("Executable: "), this), pathLayout);
     mainLayout->addRow(m_hideOnAttachCheckBox);
@@ -179,7 +180,7 @@ UnstartedAppWatcherDialog::UnstartedAppWatcherDialog(QWidget *parent)
 bool UnstartedAppWatcherDialog::event(QEvent *e)
 {
     if (e->type() == QEvent::ShortcutOverride) {
-        QKeyEvent *ke = static_cast<QKeyEvent *>(e);
+        auto ke = static_cast<QKeyEvent *>(e);
         if (ke->key() == Qt::Key_Escape && !ke->modifiers()) {
             ke->accept();
             return true;
@@ -193,13 +194,13 @@ void UnstartedAppWatcherDialog::selectExecutable()
     QString path;
 
     Project *project = ProjectTree::currentProject();
-    Target *activeTarget = project ? project->activeTarget() : 0;
+    Target *activeTarget = project ? project->activeTarget() : nullptr;
 
     if (activeTarget) {
         if (RunConfiguration *runConfig = activeTarget->activeRunConfiguration()) {
             const Runnable runnable = runConfig->runnable();
-            if (runnable.is<StandardRunnable>() && isLocal(runConfig))
-                path = QFileInfo(runnable.as<StandardRunnable>().executable).path();
+            if (isLocal(runConfig))
+                path = runnable.executable.toFileInfo().path();
         }
     }
 
@@ -241,8 +242,7 @@ void UnstartedAppWatcherDialog::pidFound(const DeviceProcessItem &p)
 void UnstartedAppWatcherDialog::startStopWatching(bool start)
 {
     setWaitingState(start ? WatchingState : NotWatchingState);
-    m_watchingPushButton->setText(start ? QLatin1String("Stop Watching")
-                                        : QLatin1String("Start Watching"));
+    m_watchingPushButton->setText(start ? tr("Stop Watching") : tr("Start Watching"));
     startStopTimer(start);
 }
 
@@ -256,7 +256,7 @@ void UnstartedAppWatcherDialog::startStopTimer(bool start)
 
 void UnstartedAppWatcherDialog::findProcess()
 {
-    const QString &appName = Utils::FileUtils::normalizePathName(m_pathChooser->path());
+    const QString &appName = Utils::FileUtils::normalizePathName(m_pathChooser->filePath().toString());
     DeviceProcessItem fallback;
     foreach (const DeviceProcessItem &p, DeviceProcessList::localProcesses()) {
         if (Utils::FileUtils::normalizePathName(p.exe) == appName) {
@@ -278,7 +278,7 @@ void UnstartedAppWatcherDialog::stopAndCheckExecutable()
 
 void UnstartedAppWatcherDialog::kitChanged()
 {
-    const DebuggerItem *debugger = DebuggerKitInformation::debugger(m_kitChooser->currentKit());
+    const DebuggerItem *debugger = DebuggerKitAspect::debugger(m_kitChooser->currentKit());
     if (!debugger)
         return;
     if (debugger->engineType() == Debugger::CdbEngineType) {
@@ -291,8 +291,8 @@ void UnstartedAppWatcherDialog::kitChanged()
 
 bool UnstartedAppWatcherDialog::checkExecutableString() const
 {
-    if (!m_pathChooser->path().isEmpty()) {
-        QFileInfo fileInfo(m_pathChooser->path());
+    if (!m_pathChooser->filePath().toString().isEmpty()) {
+        QFileInfo fileInfo(m_pathChooser->filePath().toString());
         return (fileInfo.exists() && fileInfo.isFile());
     }
     return false;

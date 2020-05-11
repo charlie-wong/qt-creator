@@ -38,8 +38,10 @@ public:
     Q_INVOKABLE void start();
     Q_INVOKABLE void end();
 
+    Q_INVOKABLE bool active() const;
+
 protected:
-     void timerEvent(QTimerEvent *event);
+     void timerEvent(QTimerEvent *event) override;
 
 private:
     QmlDesigner::PropertyEditorView *m_propertyEditor;

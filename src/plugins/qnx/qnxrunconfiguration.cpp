@@ -24,81 +24,83 @@
 ****************************************************************************/
 
 #include "qnxrunconfiguration.h"
+
 #include "qnxconstants.h"
 
-#include <projectexplorer/runnables.h>
-#include <remotelinux/remotelinuxrunconfigurationwidget.h>
-#include <utils/environment.h>
+#include <projectexplorer/buildsystem.h>
+#include <projectexplorer/deployablefile.h>
+#include <projectexplorer/project.h>
+#include <projectexplorer/runcontrol.h>
+#include <projectexplorer/target.h>
 
-#include <QLabel>
-#include <QLineEdit>
+#include <remotelinux/remotelinuxenvironmentaspect.h>
+
+#include <qtsupport/qtoutputformatter.h>
 
 using namespace ProjectExplorer;
 using namespace RemoteLinux;
+using namespace Utils;
 
 namespace Qnx {
 namespace Internal {
 
-const char QtLibPathKey[] = "Qt4ProjectManager.QnxRunConfiguration.QtLibPath";
-
-QnxRunConfiguration::QnxRunConfiguration(Target *parent, Core::Id id, const QString &targetName)
-    : RemoteLinuxRunConfiguration(parent, id, targetName)
+QnxRunConfiguration::QnxRunConfiguration(Target *target, Core::Id id)
+    : RunConfiguration(target, id)
 {
-}
+    auto exeAspect = addAspect<ExecutableAspect>();
+    exeAspect->setLabelText(tr("Executable on device:"));
+    exeAspect->setExecutablePathStyle(OsTypeLinux);
+    exeAspect->setPlaceHolderText(tr("Remote path not set"));
+    exeAspect->makeOverridable("RemoteLinux.RunConfig.AlternateRemoteExecutable",
+                               "RemoteLinux.RunConfig.UseAlternateRemoteExecutable");
+    exeAspect->setHistoryCompleter("RemoteLinux.AlternateExecutable.History");
 
-QnxRunConfiguration::QnxRunConfiguration(Target *parent, QnxRunConfiguration *source)
-    : RemoteLinuxRunConfiguration(parent, source), m_qtLibPath(source->m_qtLibPath)
-{
+    auto symbolsAspect = addAspect<SymbolFileAspect>();
+    symbolsAspect->setLabelText(tr("Executable on host:"));
+    symbolsAspect->setDisplayStyle(SymbolFileAspect::LabelDisplay);
+
+    addAspect<ArgumentsAspect>();
+    addAspect<WorkingDirectoryAspect>();
+    addAspect<TerminalAspect>();
+    addAspect<RemoteLinuxEnvironmentAspect>(target);
+
+    auto libAspect = addAspect<QtLibPathAspect>();
+    libAspect->setSettingsKey("Qt4ProjectManager.QnxRunConfiguration.QtLibPath");
+    libAspect->setLabelText(tr("Path to Qt libraries on device"));
+    libAspect->setDisplayStyle(BaseStringAspect::LineEditDisplay);
+
+    setUpdater([this, target, exeAspect, symbolsAspect] {
+        const BuildTargetInfo bti = buildTargetInfo();
+        const FilePath localExecutable = bti.targetFilePath;
+        const DeployableFile depFile = target->deploymentData()
+            .deployableForLocalFile(localExecutable);
+        exeAspect->setExecutable(FilePath::fromString(depFile.remoteFilePath()));
+        symbolsAspect->setFilePath(localExecutable);
+    });
+
+    connect(target, &Target::buildSystemUpdated, this, &RunConfiguration::update);
 }
 
 Runnable QnxRunConfiguration::runnable() const
 {
-    auto r = RemoteLinuxRunConfiguration::runnable().as<StandardRunnable>();
-    if (!m_qtLibPath.isEmpty()) {
-        r.environment.appendOrSet(QLatin1String("LD_LIBRARY_PATH"),
-                        m_qtLibPath + QLatin1String("/lib:$LD_LIBRARY_PATH"));
-        r.environment.appendOrSet(QLatin1String("QML_IMPORT_PATH"),
-                        m_qtLibPath + QLatin1String("/imports:$QML_IMPORT_PATH"));
-        r.environment.appendOrSet(QLatin1String("QML2_IMPORT_PATH"),
-                        m_qtLibPath + QLatin1String("/qml:$QML2_IMPORT_PATH"));
-        r.environment.appendOrSet(QLatin1String("QT_PLUGIN_PATH"),
-                        m_qtLibPath + QLatin1String("/plugins:$QT_PLUGIN_PATH"));
-        r.environment.set(QLatin1String("QT_QPA_FONTDIR"),
-                        m_qtLibPath + QLatin1String("/lib/fonts"));
+    Runnable r = RunConfiguration::runnable();
+    QString libPath = aspect<QtLibPathAspect>()->value();
+    if (!libPath.isEmpty()) {
+        r.environment.appendOrSet("LD_LIBRARY_PATH", libPath + "/lib:$LD_LIBRARY_PATH");
+        r.environment.appendOrSet("QML_IMPORT_PATH", libPath + "/imports:$QML_IMPORT_PATH");
+        r.environment.appendOrSet("QML2_IMPORT_PATH", libPath + "/qml:$QML2_IMPORT_PATH");
+        r.environment.appendOrSet("QT_PLUGIN_PATH", libPath + "/plugins:$QT_PLUGIN_PATH");
+        r.environment.set("QT_QPA_FONTDIR", libPath + "/lib/fonts");
     }
     return r;
 }
 
-QWidget *QnxRunConfiguration::createConfigurationWidget()
+// QnxRunConfigurationFactory
+
+QnxRunConfigurationFactory::QnxRunConfigurationFactory()
 {
-    auto rcWidget = qobject_cast<RemoteLinuxRunConfigurationWidget *>
-        (RemoteLinuxRunConfiguration::createConfigurationWidget());
-
-    auto label = new QLabel(tr("Path to Qt libraries on device:"));
-    auto lineEdit = new QLineEdit(m_qtLibPath);
-
-    connect(lineEdit, &QLineEdit::textChanged,
-            this, [this](const QString &path) { m_qtLibPath = path; });
-
-    rcWidget->addFormLayoutRow(label, lineEdit);
-
-    return rcWidget;
-}
-
-QVariantMap QnxRunConfiguration::toMap() const
-{
-    QVariantMap map(RemoteLinuxRunConfiguration::toMap());
-    map.insert(QLatin1String(QtLibPathKey), m_qtLibPath);
-    return map;
-}
-
-bool QnxRunConfiguration::fromMap(const QVariantMap &map)
-{
-    if (!RemoteLinuxRunConfiguration::fromMap(map))
-        return false;
-
-    m_qtLibPath = map.value(QLatin1String(QtLibPathKey)).toString();
-    return true;
+    registerRunConfiguration<QnxRunConfiguration>("Qt4ProjectManager.QNX.QNXRunConfiguration.");
+    addSupportedTargetDeviceType(Constants::QNX_QNX_OS_TYPE);
 }
 
 } // namespace Internal

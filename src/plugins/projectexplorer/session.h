@@ -31,9 +31,9 @@
 
 #include <utils/persistentsettings.h>
 
+#include <QDateTime>
 #include <QString>
 #include <QStringList>
-#include <QDateTime>
 
 namespace Core { class IEditor; }
 
@@ -42,8 +42,9 @@ namespace ProjectExplorer {
 class Project;
 class Target;
 class BuildConfiguration;
+class BuildSystem;
 class DeployConfiguration;
-class Node;
+class RunConfiguration;
 
 enum class SetActive { Cascade, NoCascade };
 
@@ -60,25 +61,27 @@ public:
     // higher level session management
     static QString activeSession();
     static QString lastSession();
+    static QString startupSession();
     static QStringList sessions();
     static QDateTime sessionDateTime(const QString &session);
 
     static bool createSession(const QString &session);
 
-    static bool confirmSessionDelete(const QString &session);
+    static bool confirmSessionDelete(const QStringList &sessions);
     static bool deleteSession(const QString &session);
+    static void deleteSessions(const QStringList &sessions);
 
     static bool cloneSession(const QString &original, const QString &clone);
     static bool renameSession(const QString &original, const QString &newName);
 
-    static bool loadSession(const QString &session);
+    static bool loadSession(const QString &session, bool initial = false);
 
     static bool save();
     static void closeAllProjects();
 
     static void addProject(Project *project);
     static void removeProject(Project *project);
-    static void removeProjects(QList<Project *> remove);
+    static void removeProjects(const QList<Project *> &remove);
 
     static void setStartupProject(Project *startupProject);
 
@@ -95,8 +98,11 @@ public:
     static void setActiveBuildConfiguration(Target *t, BuildConfiguration *bc, SetActive cascade);
     static void setActiveDeployConfiguration(Target *t, DeployConfiguration *dc, SetActive cascade);
 
-    static Utils::FileName sessionNameToFileName(const QString &session);
+    static Utils::FilePath sessionNameToFileName(const QString &session);
     static Project *startupProject();
+    static Target *startupTarget();
+    static BuildSystem *startupBuildSystem();
+    static RunConfiguration *startupRunConfiguration();
 
     static const QList<Project *> projects();
     static bool hasProjects();
@@ -110,12 +116,9 @@ public:
     static QVariant value(const QString &name);
 
     // NBS rewrite projectOrder (dependency management)
-    static QList<Project *> projectOrder(const Project *project = 0);
+    static QList<Project *> projectOrder(const Project *project = nullptr);
 
-    static Project *projectForNode(Node *node);
-    static Node *nodeForFile(const Utils::FileName &fileName);
-    static Project *projectForFile(const Utils::FileName &fileName);
-    static bool projectContainsFile(Project *p, const Utils::FileName &fileName);
+    static Project *projectForFile(const Utils::FilePath &fileName);
 
     static QStringList projectsForSessionName(const QString &session);
 
@@ -123,7 +126,10 @@ public:
     static bool loadingSession();
 
 signals:
-    void projectAdded(ProjectExplorer::Project *project); void aboutToRemoveProject(ProjectExplorer::Project *project);
+    void targetAdded(ProjectExplorer::Target *target);
+    void targetRemoved(ProjectExplorer::Target *target);
+    void projectAdded(ProjectExplorer::Project *project);
+    void aboutToRemoveProject(ProjectExplorer::Project *project);
     void projectDisplayNameChanged(ProjectExplorer::Project *project);
     void projectRemoved(ProjectExplorer::Project *project);
 
@@ -140,9 +146,8 @@ signals: // for tests only
 
 private:
     static void saveActiveMode(Core::Id mode);
-    void clearProjectFileCache();
     static void configureEditor(Core::IEditor *editor, const QString &fileName);
-    static void markSessionFileDirty(bool makeDefaultVirginDirty = true);
+    static void markSessionFileDirty();
     static void configureEditors(Project *project);
 };
 

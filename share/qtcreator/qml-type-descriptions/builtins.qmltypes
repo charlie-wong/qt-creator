@@ -417,6 +417,7 @@ Module {
         Property { name: "amplitude"; type: "qreal" }
         Property { name: "overshoot"; type: "qreal" }
         Property { name: "period"; type: "qreal" }
+        Property { name: "bezierCurve"; type: "QVariantList" }
     }
     Component {
         name: "QDeclarativeFlickable"
@@ -672,6 +673,8 @@ Module {
         Property { name: "capitalization"; type: "Capitalization" }
         Property { name: "letterSpacing"; type: "qreal" }
         Property { name: "wordSpacing"; type: "qreal" }
+        Property { name: "kerning"; type: "bool" }
+        Property { name: "preferShaping"; type: "bool" }
     }
     Component {
         name: "QDeclarativeGradient"
@@ -3220,15 +3223,15 @@ Module {
         Method { name: "deleteLater" }
     }
     Component {
-        name: "QRegExpValidator"
+        name: "QRegularExpressionValidator"
         prototype: "QValidator"
         exports: [
-            "QtQuick/RegExpValidator 1.0"
+            "QtQuick/RegularExpressionValidator 2.14"
         ]
         exportMetaObjectRevisions: [
             0
         ]
-        Property { name: "regExp"; type: "QRegExp" }
+        Property { name: "regularExpression"; type: "QRegularExpression" }
     }
     Component { name: "QValidator"; prototype: "QObject" }
     Component {

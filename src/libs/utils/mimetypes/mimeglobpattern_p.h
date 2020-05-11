@@ -58,15 +58,11 @@ namespace Internal {
 
 struct MimeGlobMatchResult
 {
-    MimeGlobMatchResult()
-    : m_weight(0), m_matchingPatternLength(0)
-    {}
-
     void addMatch(const QString &mimeType, int weight, const QString &pattern);
 
     QStringList m_matchingMimeTypes;
-    int m_weight;
-    int m_matchingPatternLength;
+    int m_weight = 0;
+    int m_matchingPatternLength = 0;
     QString m_foundSuffix;
 };
 
@@ -118,11 +114,10 @@ public:
      */
     void removeMimeType(const QString &mimeType)
     {
-        QMutableListIterator<MimeGlobPattern> it(*this);
-        while (it.hasNext()) {
-            if (it.next().mimeType() == mimeType)
-                it.remove();
-        }
+        auto isMimeTypeEqual = [&mimeType](const MimeGlobPattern &pattern) {
+            return pattern.mimeType() == mimeType;
+        };
+        erase(std::remove_if(begin(), end(), isMimeTypeEqual), end());
     }
 
     void match(MimeGlobMatchResult &result, const QString &fileName) const;

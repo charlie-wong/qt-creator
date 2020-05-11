@@ -50,7 +50,7 @@ bool SCAttributeItemModel::setData(const QModelIndex &index, const QVariant &val
 
     bool bEditable = m_tag->tagType() <= MetadataItem;
 
-    if (index.row() >= 0 && m_document != 0) {
+    if (index.row() >= 0 && m_document) {
         if (!bEditable) {
             if (index.row() < m_tag->info()->n_attributes)
                 m_document->setValue(m_tag, index.row(), value.toString());
@@ -91,15 +91,17 @@ QVariant SCAttributeItemModel::data(const QModelIndex &index, int role) const
     case Qt::DisplayRole:
         if (bExtraRow)
             return index.column() == 0 ? tr("- name -") : tr(" - value -");
+        Q_FALLTHROUGH();
     case Qt::EditRole: {
         if (index.column() == 0) {
             if (bEditable) {
                 return m_tag->attributeName(index.row());
             } else {
-                if (m_tag->info()->attributes[index.row()].required)
-                    return QString::fromLatin1("*%1").arg(QLatin1String(m_tag->info()->attributes[index.row()].name));
+                scxmltag_attribute_t attr = m_tag->info()->attributes[index.row()];
+                if (attr.required)
+                    return QString::fromLatin1("*%1").arg(QLatin1String(attr.name));
                 else
-                    return m_tag->info()->attributes[index.row()].name;
+                    return QString::fromLatin1(attr.name);
             }
         } else {
             if (bEditable) {
@@ -117,8 +119,6 @@ QVariant SCAttributeItemModel::data(const QModelIndex &index, int role) const
             return Qt::AlignHCenter;
         else
             break;
-    case Qt::ForegroundRole:
-        return bExtraRow ? QBrush(Qt::gray) : QBrush(Qt::black);
     case DataTypeRole: {
         if (m_tag->tagType() == Metadata || m_tag->tagType() == MetadataItem)
             return (int)QVariant::String;
@@ -129,7 +129,7 @@ QVariant SCAttributeItemModel::data(const QModelIndex &index, int role) const
     }
     case DataRole: {
         if (m_tag->info()->n_attributes > 0)
-            return m_tag->info()->attributes[index.row()].value;
+            return QString::fromLatin1(m_tag->info()->attributes[index.row()].value);
         else
             return QVariant();
     }
@@ -148,7 +148,7 @@ Qt::ItemFlags SCAttributeItemModel::flags(const QModelIndex &index) const
     if (m_tag->tagType() <= MetadataItem || (index.column() == 1 && m_tag->info()->n_attributes > 0 && m_tag->info()->attributes[index.row()].editable))
         return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable;
 
-    return Qt::NoItemFlags;
+    return index.column() == 0 ? Qt::ItemIsEnabled : Qt::NoItemFlags;
 }
 
 int SCAttributeItemModel::columnCount(const QModelIndex &parent) const

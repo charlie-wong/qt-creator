@@ -28,49 +28,46 @@
 
 #include <qmldesignerplugin.h>
 
+#include <coreplugin/icore.h>
+
 #include <utils/stylehelper.h>
 
+#include <QApplication>
 #include <QRegExp>
+#include <QScreen>
 #include <QPointer>
+#include <QQmlEngine>
+#include <QQmlComponent>
+#include <QQmlProperty>
 #include <qqml.h>
 
-namespace {
-QMap<QString, QColor> createDerivedDesignerColors()
-{
-    /* Define QmlDesigner colors and remove alpha channels */
-    const QColor backgroundColor = Utils::creatorTheme()->color(Utils::Theme::QmlDesigner_BackgroundColor);
-    const QColor panelStatusBarBackgroundColor = Utils::creatorTheme()->color(Utils::Theme::PanelStatusBarBackgroundColor);
-    const QColor fancyToolButtonSelectedColor  = Utils::creatorTheme()->color(Utils::Theme::FancyToolButtonSelectedColor);
-    const QColor darkerBackground = Utils::StyleHelper::alphaBlendedColors(panelStatusBarBackgroundColor, fancyToolButtonSelectedColor);
-    const QColor fancyToolButtonHoverColor  = Utils::creatorTheme()->color(Utils::Theme::FancyToolButtonHoverColor);
-    const QColor buttonColor = Utils::StyleHelper::alphaBlendedColors(panelStatusBarBackgroundColor, fancyToolButtonHoverColor);
-
-    QColor tabLight = Utils::creatorTheme()->color(Utils::Theme::PanelTextColorLight);
-    QColor tabDark = Utils::creatorTheme()->color(Utils::Theme::BackgroundColorDark);
-
-    /* hack for light themes */
-    /* The selected tab is always supposed to be lighter */
-    if (tabDark.value() > tabLight.value()) {
-        tabLight = tabDark.darker(110);
-        tabDark = tabDark.darker(260);
-    }
-    return {{"QmlDesignerBackgroundColorDarker", darkerBackground},
-            {"QmlDesignerBackgroundColorDarkAlternate", backgroundColor},
-            {"QmlDesignerTabLight", tabLight},
-            {"QmlDesignerTabDark", tabDark},
-            {"QmlDesignerButtonColor", buttonColor},
-            {"QmlDesignerBorderColor", Utils::creatorTheme()->color(Utils::Theme::SplitterColor)}
-    };
-}
-
-} // namespace
+static Q_LOGGING_CATEGORY(themeLog, "qtc.qmldesigner.theme", QtWarningMsg)
 
 namespace QmlDesigner {
 
 Theme::Theme(Utils::Theme *originTheme, QObject *parent)
     : Utils::Theme(originTheme, parent)
-    , m_derivedColors(createDerivedDesignerColors())
+    , m_constants(nullptr)
 {
+    QString constantsPath = Core::ICore::resourcePath() +
+            QStringLiteral("/qmldesigner/propertyEditorQmlSources/imports/StudioTheme/InternalConstants.qml");
+
+    QQmlEngine* engine = new QQmlEngine(this);
+    QQmlComponent component(engine, QUrl::fromLocalFile(constantsPath));
+
+    if (component.status() == QQmlComponent::Ready) {
+        m_constants = component.create();
+    }
+    else if (component.status() == QQmlComponent::Error ) {
+        qCWarning(themeLog) << "Couldn't load" << constantsPath
+                            << "due to the following error(s):";
+        for (QQmlError error : component.errors())
+            qCWarning(themeLog) << error.toString();
+    }
+    else {
+        qCWarning(themeLog) << "Couldn't load" << constantsPath
+                            << "the status of the QQmlComponent is" << component.status();
+    }
 }
 
 QColor Theme::evaluateColorAtThemeInstance(const QString &themeColorName)
@@ -82,8 +79,8 @@ QColor Theme::evaluateColorAtThemeInstance(const QString &themeColorName)
             return color(static_cast<Utils::Theme::Color>(i)).name();
     }
 
-    qWarning() << "error while evaluate " << themeColorName;
-    return QColor();
+    qWarning() << Q_FUNC_INFO << "error while evaluating" << themeColorName;
+    return {};
 }
 
 Theme *Theme::instance()
@@ -95,20 +92,22 @@ Theme *Theme::instance()
 
 QString Theme::replaceCssColors(const QString &input)
 {
-    const QMap<QString, QColor> &map = instance()->m_derivedColors;
-    QRegExp rx("creatorTheme\\.(\\w+);");
+    QRegExp rx("creatorTheme\\.(\\w+)");
 
     int pos = 0;
     QString output = input;
 
     while ((pos = rx.indexIn(input, pos)) != -1) {
         const QString themeColorName = rx.cap(1);
-        QColor color;
-        if (map.contains(themeColorName))
-            color = map.value(themeColorName);
-        else
-            color = instance()->evaluateColorAtThemeInstance(themeColorName);
-        output.replace("creatorTheme." + rx.cap(1), color.name());
+
+        if (themeColorName == "smallFontPixelSize") {
+            output.replace("creatorTheme." + themeColorName, QString::number(instance()->smallFontPixelSize()) + "px");
+        } else if (themeColorName == "captionFontPixelSize") {
+            output.replace("creatorTheme." + themeColorName, QString::number(instance()->captionFontPixelSize()) + "px");
+        } else {
+            const QColor color = instance()->evaluateColorAtThemeInstance(themeColorName);
+            output.replace("creatorTheme." + rx.cap(1), color.name());
+        }
         pos += rx.matchedLength();
     }
 
@@ -121,39 +120,89 @@ void Theme::setupTheme(QQmlEngine *engine)
         "Theme", [](QQmlEngine *, QJSEngine *) {
             return qobject_cast<QObject*>(new Theme(Utils::creatorTheme(), nullptr));
     });
-    Q_UNUSED(typeIndex);
+    Q_UNUSED(typeIndex)
 
     engine->addImageProvider(QLatin1String("icons"), new QmlDesignerIconProvider());
 }
 
+QColor Theme::getColor(Theme::Color role)
+{
+
+    return instance()->color(role);
+
+}
+
+int Theme::smallFontPixelSize() const
+{
+    if (highPixelDensity())
+        return 13;
+    return 9;
+}
+
+int Theme::captionFontPixelSize() const
+{
+    if (highPixelDensity())
+        return 14;
+    return 11;
+}
+
+bool Theme::highPixelDensity() const
+{
+    return qApp->primaryScreen()->logicalDotsPerInch() > 100;
+}
+
+QPixmap Theme::getPixmap(const QString &id)
+{
+    return QmlDesignerIconProvider::getPixmap(id);
+}
+
+QString Theme::getIconUnicode(Theme::Icon i)
+{
+    if (!instance()->m_constants)
+        return QString();
+
+    const QMetaObject *m = instance()->metaObject();
+    const char *enumName = "Icon";
+    int enumIndex = m->indexOfEnumerator(enumName);
+
+    if (enumIndex == -1) {
+        qCWarning(themeLog) << "Couldn't find enum" << enumName;
+        return QString();
+    }
+
+    QMetaEnum e = m->enumerator(enumIndex);
+
+    return instance()->m_constants->property(e.valueToKey(i)).toString();
+}
+
 QColor Theme::qmlDesignerBackgroundColorDarker() const
 {
-    return m_derivedColors.value("QmlDesignerBackgroundColorDarker");
+    return getColor(QmlDesigner_BackgroundColorDarker);
 }
 
 QColor Theme::qmlDesignerBackgroundColorDarkAlternate() const
 {
-    return m_derivedColors.value("QmlDesignerBackgroundColorDarkAlternate");
+    return getColor(QmlDesigner_BackgroundColorDarkAlternate);
 }
 
 QColor Theme::qmlDesignerTabLight() const
 {
-    return m_derivedColors.value("QmlDesignerTabLight");
+    return getColor(QmlDesigner_TabLight);
 }
 
 QColor Theme::qmlDesignerTabDark() const
 {
-    return m_derivedColors.value("QmlDesignerTabDark");
+    return getColor(QmlDesigner_TabDark);
 }
 
 QColor Theme::qmlDesignerButtonColor() const
 {
-    return m_derivedColors.value("QmlDesignerButtonColor");
+    return getColor(QmlDesigner_ButtonColor);
 }
 
 QColor Theme::qmlDesignerBorderColor() const
 {
-    return m_derivedColors.value("QmlDesignerBorderColor");
+    return getColor(QmlDesigner_BorderColor);
 }
 
 } // namespace QmlDesigner

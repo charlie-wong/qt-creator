@@ -39,13 +39,7 @@ namespace qmt {
 
 PropertiesView::PropertiesView(QObject *parent)
     : QObject(parent),
-      m_modelController(0),
-      m_diagramController(0),
-      m_stereotypeController(0),
-      m_styleController(0),
-      m_viewFactory([=](PropertiesView *propertiesView) { return new MView(propertiesView); }),
-      m_selectedDiagram(0),
-      m_widget(0)
+      m_viewFactory([=](PropertiesView *propertiesView) { return new MView(propertiesView); })
 {
 }
 
@@ -57,7 +51,7 @@ void PropertiesView::setModelController(ModelController *modelController)
 {
     if (m_modelController != modelController) {
         if (m_modelController)
-            disconnect(m_modelController, 0, this, 0);
+            disconnect(m_modelController, nullptr, this, nullptr);
         m_modelController = modelController;
         if (m_modelController) {
             connect(m_modelController, &ModelController::beginResetModel,
@@ -109,8 +103,8 @@ void PropertiesView::setDiagramController(DiagramController *diagramController)
 {
     if (m_diagramController != diagramController) {
         if (m_diagramController) {
-            disconnect(m_diagramController, 0, this, 0);
-            m_diagramController = 0;
+            disconnect(m_diagramController, nullptr, this, nullptr);
+            m_diagramController = nullptr;
         }
         m_diagramController = diagramController;
         if (diagramController) {
@@ -162,7 +156,7 @@ void PropertiesView::setSelectedModelElements(const QList<MElement *> &modelElem
     if (m_selectedModelElements != modelElements) {
         m_selectedModelElements = modelElements;
         m_selectedDiagramElements.clear();
-        m_selectedDiagram = 0;
+        m_selectedDiagram = nullptr;
         m_mview.reset(m_viewFactory(this));
         m_mview->update(m_selectedModelElements);
         m_widget = m_mview->topLevelWidget();
@@ -172,7 +166,7 @@ void PropertiesView::setSelectedModelElements(const QList<MElement *> &modelElem
 void PropertiesView::setSelectedDiagramElements(const QList<DElement *> &diagramElements, MDiagram *diagram)
 {
     QMT_CHECK(diagramElements.size() > 0);
-    QMT_CHECK(diagram);
+    QMT_ASSERT(diagram, return);
 
     if (m_selectedDiagramElements != diagramElements || m_selectedDiagram != diagram) {
         m_selectedDiagramElements = diagramElements;
@@ -188,9 +182,9 @@ void PropertiesView::clearSelection()
 {
     m_selectedModelElements.clear();
     m_selectedDiagramElements.clear();
-    m_selectedDiagram = 0;
+    m_selectedDiagram = nullptr;
     m_mview.reset();
-    m_widget = 0;
+    m_widget = nullptr;
 }
 
 QWidget *PropertiesView::widget() const
@@ -215,8 +209,8 @@ void PropertiesView::onEndResetModel()
 
 void PropertiesView::onBeginUpdateObject(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onEndUpdateObject(int row, const MObject *parent)
@@ -228,14 +222,14 @@ void PropertiesView::onEndUpdateObject(int row, const MObject *parent)
 
 void PropertiesView::onBeginInsertObject(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onEndInsertObject(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onBeginRemoveObject(int row, const MObject *parent)
@@ -247,14 +241,14 @@ void PropertiesView::onBeginRemoveObject(int row, const MObject *parent)
 
 void PropertiesView::onEndRemoveObject(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onBeginMoveObject(int formerRow, const MObject *formerOwner)
 {
-    Q_UNUSED(formerRow);
-    Q_UNUSED(formerOwner);
+    Q_UNUSED(formerRow)
+    Q_UNUSED(formerOwner)
 }
 
 void PropertiesView::onEndMoveObject(int row, const MObject *owner)
@@ -266,8 +260,8 @@ void PropertiesView::onEndMoveObject(int row, const MObject *owner)
 
 void PropertiesView::onBeginUpdateRelation(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onEndUpdateRelation(int row, const MObject *parent)
@@ -279,14 +273,14 @@ void PropertiesView::onEndUpdateRelation(int row, const MObject *parent)
 
 void PropertiesView::onBeginInsertRelation(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onEndInsertRelation(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onBeginRemoveRelation(int row, const MObject *parent)
@@ -298,14 +292,14 @@ void PropertiesView::onBeginRemoveRelation(int row, const MObject *parent)
 
 void PropertiesView::onEndRemoveRelation(int row, const MObject *parent)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(parent);
+    Q_UNUSED(row)
+    Q_UNUSED(parent)
 }
 
 void PropertiesView::onBeginMoveRelation(int formerRow, const MObject *formerOwner)
 {
-    Q_UNUSED(formerRow);
-    Q_UNUSED(formerOwner);
+    Q_UNUSED(formerRow)
+    Q_UNUSED(formerOwner)
 }
 
 void PropertiesView::onEndMoveRelation(int row, const MObject *owner)
@@ -317,7 +311,7 @@ void PropertiesView::onEndMoveRelation(int row, const MObject *owner)
 
 void PropertiesView::onRelationEndChanged(MRelation *relation, MObject *endObject)
 {
-    Q_UNUSED(endObject);
+    Q_UNUSED(endObject)
     if (relation && m_selectedModelElements.contains(relation))
         m_mview->update(m_selectedModelElements);
 }
@@ -333,7 +327,7 @@ void PropertiesView::onEndResetAllDiagrams()
 
 void PropertiesView::onBeginResetDiagram(const MDiagram *diagram)
 {
-    Q_UNUSED(diagram);
+    Q_UNUSED(diagram)
 }
 
 void PropertiesView::onEndResetDiagram(const MDiagram *diagram)
@@ -344,8 +338,8 @@ void PropertiesView::onEndResetDiagram(const MDiagram *diagram)
 
 void PropertiesView::onBeginUpdateElement(int row, const MDiagram *diagram)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(diagram);
+    Q_UNUSED(row)
+    Q_UNUSED(diagram)
 }
 
 void PropertiesView::onEndUpdateElement(int row, const MDiagram *diagram)
@@ -359,14 +353,14 @@ void PropertiesView::onEndUpdateElement(int row, const MDiagram *diagram)
 
 void PropertiesView::onBeginInsertElement(int row, const MDiagram *diagram)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(diagram);
+    Q_UNUSED(row)
+    Q_UNUSED(diagram)
 }
 
 void PropertiesView::onEndInsertElement(int row, const MDiagram *diagram)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(diagram);
+    Q_UNUSED(row)
+    Q_UNUSED(diagram)
 }
 
 void PropertiesView::onBeginRemoveElement(int row, const MDiagram *diagram)
@@ -380,13 +374,13 @@ void PropertiesView::onBeginRemoveElement(int row, const MDiagram *diagram)
 
 void PropertiesView::onEndRemoveElement(int row, const MDiagram *diagram)
 {
-    Q_UNUSED(row);
-    Q_UNUSED(diagram);
+    Q_UNUSED(row)
+    Q_UNUSED(diagram)
 }
 
 void PropertiesView::beginUpdate(MElement *modelElement)
 {
-    QMT_CHECK(modelElement);
+    QMT_ASSERT(modelElement, return);
 
     if (auto object = dynamic_cast<MObject *>(modelElement)) {
         m_modelController->startUpdateObject(object);
@@ -399,7 +393,7 @@ void PropertiesView::beginUpdate(MElement *modelElement)
 
 void PropertiesView::endUpdate(MElement *modelElement, bool cancelled)
 {
-    QMT_CHECK(modelElement);
+    QMT_ASSERT(modelElement, return);
 
     if (auto object = dynamic_cast<MObject *>(modelElement)) {
         m_modelController->finishUpdateObject(object, cancelled);
@@ -412,18 +406,18 @@ void PropertiesView::endUpdate(MElement *modelElement, bool cancelled)
 
 void PropertiesView::beginUpdate(DElement *diagramElement)
 {
-    QMT_CHECK(diagramElement);
-    QMT_CHECK(m_selectedDiagram != 0);
-    QMT_CHECK(m_diagramController->findElement(diagramElement->uid(), m_selectedDiagram) == diagramElement);
+    QMT_ASSERT(diagramElement, return);
+    QMT_ASSERT(m_selectedDiagram, return);
+    QMT_ASSERT(m_diagramController->findElement(diagramElement->uid(), m_selectedDiagram) == diagramElement, return);
 
     m_diagramController->startUpdateElement(diagramElement, m_selectedDiagram, DiagramController::UpdateMinor);
 }
 
 void PropertiesView::endUpdate(DElement *diagramElement, bool cancelled)
 {
-    QMT_CHECK(diagramElement);
-    QMT_CHECK(m_selectedDiagram != 0);
-    QMT_CHECK(m_diagramController->findElement(diagramElement->uid(), m_selectedDiagram) == diagramElement);
+    QMT_ASSERT(diagramElement, return);
+    QMT_ASSERT(m_selectedDiagram, return);
+    QMT_ASSERT(m_diagramController->findElement(diagramElement->uid(), m_selectedDiagram) == diagramElement, return);
 
     m_diagramController->finishUpdateElement(diagramElement, m_selectedDiagram, cancelled);
 }

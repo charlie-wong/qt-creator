@@ -69,25 +69,20 @@ public:
 
     }
 
-    QSize sizeHint() const
+    QSize sizeHint() const override
     {
         QSize sh = QLineEdit::minimumSizeHint();
-        sh.rwidth() += qMax(25 * fontMetrics().width(QLatin1Char('x')),
-                            fontMetrics().width(text()));
+        sh.rwidth() += qMax(25 * fontMetrics().horizontalAdvance(QLatin1Char('x')),
+                            fontMetrics().horizontalAdvance(text()));
         return sh;
     }
 };
 
 SearchResultWidget::SearchResultWidget(QWidget *parent) :
-    QWidget(parent),
-    m_count(0),
-    m_preserveCaseSupported(true),
-    m_isShowingReplaceUI(false),
-    m_searchAgainSupported(false),
-    m_replaceSupported(false)
+    QWidget(parent)
 {
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setMargin(0);
+    auto layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     setLayout(layout);
 
@@ -109,13 +104,13 @@ SearchResultWidget::SearchResultWidget(QWidget *parent) :
 
     auto topFindWidget = new QWidget(topWidget);
     auto topFindLayout = new QHBoxLayout(topFindWidget);
-    topFindLayout->setMargin(0);
+    topFindLayout->setContentsMargins(0, 0, 0, 0);
     topFindWidget->setLayout(topFindLayout);
     topLayout->addWidget(topFindWidget);
 
     m_topReplaceWidget = new QWidget(topWidget);
     auto topReplaceLayout = new QHBoxLayout(m_topReplaceWidget);
-    topReplaceLayout->setMargin(0);
+    topReplaceLayout->setContentsMargins(0, 0, 0, 0);
     m_topReplaceWidget->setLayout(topReplaceLayout);
     topLayout->addWidget(m_topReplaceWidget);
 
@@ -127,8 +122,8 @@ SearchResultWidget::SearchResultWidget(QWidget *parent) :
         m_messageWidget->setLineWidth(1);
     }
     m_messageWidget->setAutoFillBackground(true);
-    QHBoxLayout *messageLayout = new QHBoxLayout(m_messageWidget);
-    messageLayout->setMargin(2);
+    auto messageLayout = new QHBoxLayout(m_messageWidget);
+    messageLayout->setContentsMargins(2, 2, 2, 2);
     m_messageWidget->setLayout(messageLayout);
     QLabel *messageLabel = new QLabel(tr("Search was canceled."));
     messageLabel->setPalette(pal);
@@ -139,7 +134,7 @@ SearchResultWidget::SearchResultWidget(QWidget *parent) :
     m_searchResultTreeView = new SearchResultTreeView(this);
     m_searchResultTreeView->setFrameStyle(QFrame::NoFrame);
     m_searchResultTreeView->setAttribute(Qt::WA_MacShowFocusRect, false);
-    Aggregation::Aggregate * agg = new Aggregation::Aggregate;
+    auto  agg = new Aggregation::Aggregate;
     agg->add(m_searchResultTreeView);
     agg->add(new ItemViewFind(m_searchResultTreeView,
                                       ItemDataRoles::ResultLineRole));
@@ -149,9 +144,9 @@ SearchResultWidget::SearchResultWidget(QWidget *parent) :
     m_infoBarDisplay.setInfoBar(&m_infoBar);
 
     m_descriptionContainer = new QWidget(topFindWidget);
-    QHBoxLayout *descriptionLayout = new QHBoxLayout(m_descriptionContainer);
+    auto descriptionLayout = new QHBoxLayout(m_descriptionContainer);
     m_descriptionContainer->setLayout(descriptionLayout);
-    descriptionLayout->setMargin(0);
+    descriptionLayout->setContentsMargins(0, 0, 0, 0);
     m_descriptionContainer->setMinimumWidth(200);
     m_descriptionContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     m_label = new QLabel(m_descriptionContainer);
@@ -262,7 +257,7 @@ void SearchResultWidget::addResults(const QList<SearchResultItem> &items, Search
             Id undoWarningId = Id("warninglabel/").withSuffix(m_dontAskAgainGroup);
             if (m_infoBar.canInfoBeAdded(undoWarningId)) {
                 InfoBarEntry info(undoWarningId, tr("This change cannot be undone."),
-                                  InfoBarEntry::GlobalSuppressionEnabled);
+                                  InfoBarEntry::GlobalSuppression::Enabled);
                 m_infoBar.addInfo(info);
             }
         }
@@ -287,15 +282,13 @@ void SearchResultWidget::addResults(const QList<SearchResultItem> &items, Search
         emit paused(true);
         InfoBarEntry info(sizeWarningId,
                           tr("The search resulted in more than %n items, do you still want to continue?",
-                             0, SEARCHRESULT_WARNING_LIMIT));
+                             nullptr, SEARCHRESULT_WARNING_LIMIT));
         info.setCancelButtonInfo(tr("Cancel"), [this]() { cancelAfterSizeWarning(); });
         info.setCustomButtonInfo(tr("Continue"), [this]() { continueAfterSizeWarning(); });
         m_infoBar.addInfo(info);
         emit requestPopup(false/*no focus*/);
     }
 }
-
-
 
 int SearchResultWidget::count() const
 {
@@ -308,7 +301,6 @@ void SearchResultWidget::setSupportsReplace(bool replaceSupported, const QString
     setShowReplaceUI(replaceSupported);
     m_dontAskAgainGroup = group;
 }
-
 
 void SearchResultWidget::setTextToReplace(const QString &textToReplace)
 {
@@ -419,7 +411,7 @@ void SearchResultWidget::restart()
     m_count = 0;
     Id sizeWarningId(SIZE_WARNING_ID);
     m_infoBar.removeInfo(sizeWarningId);
-    m_infoBar.enableInfo(sizeWarningId);
+    m_infoBar.unsuppressInfo(sizeWarningId);
     m_cancelButton->setVisible(true);
     m_searchAgainButton->setVisible(false);
     m_messageWidget->setVisible(false);
@@ -442,7 +434,7 @@ void SearchResultWidget::finishSearch(bool canceled)
 {
     Id sizeWarningId(SIZE_WARNING_ID);
     m_infoBar.removeInfo(sizeWarningId);
-    m_infoBar.enableInfo(sizeWarningId);
+    m_infoBar.unsuppressInfo(sizeWarningId);
     m_replaceTextEdit->setEnabled(m_count > 0);
     m_replaceButton->setEnabled(m_count > 0);
     m_preserveCaseCheck->setEnabled(m_count > 0);
@@ -507,12 +499,12 @@ QList<SearchResultItem> SearchResultWidget::checkedItems() const
     const int fileCount = model->rowCount();
     for (int i = 0; i < fileCount; ++i) {
         QModelIndex fileIndex = model->index(i, 0);
-        SearchResultTreeItem *fileItem = static_cast<SearchResultTreeItem *>(fileIndex.internalPointer());
-        QTC_ASSERT(fileItem != 0, continue);
+        auto fileItem = static_cast<SearchResultTreeItem *>(fileIndex.internalPointer());
+        QTC_ASSERT(fileItem != nullptr, continue);
         for (int rowIndex = 0; rowIndex < fileItem->childrenCount(); ++rowIndex) {
             QModelIndex textIndex = model->index(rowIndex, 0, fileIndex);
-            SearchResultTreeItem *rowItem = static_cast<SearchResultTreeItem *>(textIndex.internalPointer());
-            QTC_ASSERT(rowItem != 0, continue);
+            auto rowItem = static_cast<SearchResultTreeItem *>(textIndex.internalPointer());
+            QTC_ASSERT(rowItem != nullptr, continue);
             if (rowItem->checkState())
                 result << rowItem->item;
         }
@@ -525,7 +517,7 @@ void SearchResultWidget::updateMatchesFoundLabel()
     if (m_count == 0)
         m_matchesFoundLabel->setText(tr("No matches found."));
     else
-        m_matchesFoundLabel->setText(tr("%n matches found.", 0, m_count));
+        m_matchesFoundLabel->setText(tr("%n matches found.", nullptr, m_count));
 }
 
 } // namespace Internal

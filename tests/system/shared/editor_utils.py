@@ -23,7 +23,9 @@
 #
 ############################################################################
 
-import re;
+def jumpToFirstLine(editor):
+    home = "<Home>" if platform.system() == 'Darwin' else "<Ctrl+Home>"
+    type(editor, home)
 
 # places the cursor inside the given editor into the given line
 # (leading and trailing whitespaces are ignored!)
@@ -38,10 +40,7 @@ def placeCursorToLine(editor, line, isRegex=False):
     if not isinstance(editor, (str, unicode)):
         editor = objectMap.realName(editor)
     oldPosition = 0
-    if isDarwin:
-        type(getEditor(), "<Home>")
-    else:
-        type(getEditor(), "<Ctrl+Home>")
+    jumpToFirstLine(getEditor())
     found = False
     if isRegex:
         regex = re.compile(line)
@@ -71,21 +70,17 @@ def placeCursorToLine(editor, line, isRegex=False):
 def menuVisibleAtEditor(editor, menuInList):
     menuInList[0] = None
     try:
-        # Hack for Squish 5.0.1 handling menus of Qt5.2 on Mac (avoids crash) - remove asap
-        if platform.system() == 'Darwin':
-            for obj in object.topLevelObjects():
-                if className(obj) == "QMenu" and obj.visible and widgetContainsPoint(editor, obj.mapToGlobal(QPoint(0, 0))):
-                    menuInList[0] = obj
-                    return True
-            return False
         menu = waitForObject("{type='QMenu' unnamed='1' visible='1'}", 500)
-        if platform.system() == 'Darwin':
-            menu.activateWindow()
-        success = menu.visible and widgetContainsPoint(editor, menu.mapToGlobal(QPoint(0, 0)))
+        topLeft = menu.mapToGlobal(QPoint(0, 0))
+        bottomLeft = menu.mapToGlobal(QPoint(0, menu.height))
+        success = menu.visible and (widgetContainsPoint(editor, topLeft)
+                                    or widgetContainsPoint(editor, bottomLeft))
         if success:
             menuInList[0] = menu
         return success
     except:
+        t, v = sys.exc_info()[:2]
+        test.log("Exception: %s" % str(t), str(v))
         return False
 
 # this function checks whether the given global point (QPoint)
@@ -106,7 +101,7 @@ def openContextMenuOnTextCursorPosition(editor):
 # param direction is one of "Left", "Right", "Up", "Down", but "End" and combinations work as well
 # param typeCount defines how often the cursor will be moved in the given direction (while marking)
 def markText(editor, direction, typeCount=1):
-    for i in range(typeCount):
+    for _ in range(typeCount):
         type(editor, "<Shift+%s>" % direction)
 
 # works for all standard editors
@@ -148,7 +143,7 @@ def verifyHoveringOnEditor(editor, lines, additionalKeyPresses, expectedTypes, e
         for ty in additionalKeyPresses:
             type(editor, ty)
         rect = editor.cursorRect(editor.textCursor())
-        expectedToolTip = "{type='QTipLabel' visible='1'}"
+        expectedToolTip = "{type='QLabel' objectName='qcToolTip' visible='1'}"
         # wait for similar tooltips to disappear
         checkIfObjectExists(expectedToolTip, False, 1000, True)
         sendEvent("QMouseEvent", editor, QEvent.MouseMove, rect.x+rect.width/2, rect.y+rect.height/2, Qt.NoButton, 0)
@@ -164,8 +159,8 @@ def verifyHoveringOnEditor(editor, lines, additionalKeyPresses, expectedTypes, e
             elif expectedType == "TextTip":
                 __handleTextTips__(tip, expectedVals, altVal)
             elif expectedType == "WidgetTip":
-                test.warning("Sorry - WidgetTip checks aren't implemented yet.")
-            sendEvent("QMouseEvent", editor, QEvent.MouseMove, 0, -50, Qt.NoButton, 0)
+                __handleWidgetTips__(tip, expectedVals)
+            sendEvent("QMouseEvent", editor, QEvent.MouseMove, 0, 0, Qt.NoButton, 0)
             waitFor("isNull(tip)", 10000)
 
 # helper function that handles verification of TextTip hoverings
@@ -173,7 +168,7 @@ def verifyHoveringOnEditor(editor, lines, additionalKeyPresses, expectedTypes, e
 # param expectedVals a dict holding property value pairs that must match
 def __handleTextTips__(textTip, expectedVals, alternativeVals):
     props = object.properties(textTip)
-    expFail = altFail = False
+    expFail = False
     eResult = verifyProperties(props, expectedVals)
     for val in eResult.itervalues():
         if not val:
@@ -182,7 +177,6 @@ def __handleTextTips__(textTip, expectedVals, alternativeVals):
     if expFail and alternativeVals != None:
         aResult = verifyProperties(props, alternativeVals)
     else:
-        altFail = True
         aResult = None
     if not expFail:
         test.passes("TextTip verified")
@@ -234,6 +228,19 @@ def __handleColorTips__(colTip, expectedColor, alternativeColor):
         test.fail("ColorTip does not match - expected color '%X'%s got '%X'"
                   % (uint(cmp.rgb()), altColorText, uint(rgb.rgb())))
 
+# helper function that handles verification of WidgetTip hoverings
+# param widgetTip the WidgetTip object
+# param expectedVals a dict holding property value pairs that must match
+def __handleWidgetTips__(widgetTip, expectedVals):
+    toplabel = waitForObject("{type='QLabel' objectName='qcWidgetTipTopLabel' visible='1'}")
+    foundText = str(toplabel.text)
+    try:
+        helplabel = waitForObject("{type='QLabel' objectName='qcWidgetTipHelpLabel' visible='1'}", 1000)
+        foundText += str(helplabel.text)
+    except:
+        pass
+    test.compare(foundText, expectedVals["text"])
+
 # function that checks whether all expected properties (including their values)
 # match the given properties
 # param properties a dict holding the properties to check
@@ -267,7 +274,7 @@ def getEditorForFileSuffix(curFile, treeViewSyntax=False):
     if treeViewSyntax:
         expected = simpleFileName(curFile)
     mainWindow = waitForObject(":Qt Creator_Core::Internal::MainWindow")
-    if not waitFor("expected in str(mainWindow.windowTitle)", 5000):
+    if not waitFor("str(mainWindow.windowTitle).startswith(expected + ' ')", 5000):
         test.fatal("Window title (%s) did not switch to expected file (%s)."
                    % (str(mainWindow.windowTitle), expected))
     try:
@@ -333,7 +340,7 @@ def validateSearchResult(expectedCount):
             resultTreeView.scrollTo(chIndex)
             text = str(chIndex.data()).rstrip('\r')
             rect = resultTreeView.visualRect(chIndex)
-            doubleClick(resultTreeView, rect.x+5, rect.y+5, 0, Qt.LeftButton)
+            doubleClick(resultTreeView, rect.x+50, rect.y+5, 0, Qt.LeftButton)
             editor = getEditorForFileSuffix(itemText)
             if not waitFor("lineUnderCursor(editor) == text", 2000):
                 test.warning("Jumping to search result '%s' is pretty slow." % text)
@@ -344,7 +351,10 @@ def validateSearchResult(expectedCount):
 def invokeContextMenuItem(editorArea, command1, command2 = None):
     ctxtMenu = openContextMenuOnTextCursorPosition(editorArea)
     snooze(1)
-    activateItem(waitForObjectItem(objectMap.realName(ctxtMenu), command1, 2000))
+    item1 = waitForObjectItem(objectMap.realName(ctxtMenu), command1, 2000)
+    if command2 and platform.system() == 'Darwin':
+        mouseMove(item1)
+    activateItem(item1)
     if command2:
         activateItem(waitForObjectItem("{title='%s' type='QMenu' visible='1' window=%s}"
                                        % (command1, objectMap.realName(ctxtMenu)), command2, 2000))
@@ -357,9 +367,10 @@ def invokeContextMenuItem(editorArea, command1, command2 = None):
 def invokeFindUsage(editor, line, typeOperation, n=1):
     if not placeCursorToLine(editor, line, True):
         return False
-    for i in range(n):
+    for _ in range(n):
         type(editor, typeOperation)
-    invokeContextMenuItem(editor, "Find Usages")
+    snooze(1)
+    invokeContextMenuItem(editor, "Find References to Symbol Under Cursor")
     return True
 
 def addBranchWildcardToRoot(rootNode):
@@ -377,14 +388,14 @@ def openDocument(treeElement):
         except:
             treeElement = addBranchWildcardToRoot(treeElement)
             item = waitForObjectItem(navigator, treeElement)
+        expected = str(item.text).split("/")[-1]
         for _ in range(2):
             # Expands items as needed what might make scrollbars appear.
             # These might cover the item to click.
             # In this case, do it again to hit the item then.
             doubleClickItem(navigator, treeElement, 5, 5, 0, Qt.LeftButton)
             mainWindow = waitForObject(":Qt Creator_Core::Internal::MainWindow")
-            expected = str(item.text).split("/")[-1]
-            if waitFor("expected in str(mainWindow.windowTitle)", 5000):
+            if waitFor("str(mainWindow.windowTitle).startswith(expected + ' ')", 5000):
                 return True
         test.log("Expected file (%s) was not being opened in openDocument()" % expected)
         return False
@@ -420,3 +431,14 @@ def replaceLine(fileSpec, oldLine, newLine):
         type(editor, "<Backspace>")
     type(editor, newLine)
     return True
+
+def addTestableCodeAfterLine(editorObject, line, newCodeLines):
+    if not placeCursorToLine(editorObject, line):
+        return False
+    type(editorObject, "<Return>")
+    typeLines(editorObject, newCodeLines)
+    return True
+
+def saveAndExit():
+    invokeMenuItem("File", "Save All")
+    invokeMenuItem("File", "Exit")

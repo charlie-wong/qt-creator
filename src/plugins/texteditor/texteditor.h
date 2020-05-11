@@ -27,14 +27,18 @@
 
 #include "texteditor_global.h"
 #include "blockrange.h"
+#include "indenter.h"
 #include "codeassist/assistenums.h"
 
+#include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/editormanager/ieditor.h>
 #include <coreplugin/editormanager/ieditorfactory.h>
+#include <coreplugin/helpitem.h>
 
+#include <utils/elidinglabel.h>
+#include <utils/link.h>
 #include <utils/uncommentselection.h>
 
-#include <QLabel>
 #include <QPlainTextEdit>
 #include <QSharedPointer>
 #include <functional>
@@ -49,19 +53,23 @@ class QRect;
 class QTextBlock;
 QT_END_NAMESPACE
 
+namespace Core {
+class HighlightScrollBarController;
+}
+
 namespace TextEditor {
 class TextDocument;
+class TextMark;
 class BaseHoverHandler;
-class TabSettings;
 class RefactorOverlay;
 struct RefactorMarker;
 class SyntaxHighlighter;
-class IAssistMonitorInterface;
 class AssistInterface;
 class IAssistProvider;
 class ICodeStylePreferences;
 class CompletionAssistProvider;
-typedef QList<RefactorMarker> RefactorMarkers;
+using RefactorMarkers = QList<RefactorMarker>;
+using TextMarks = QList<TextMark *>;
 
 namespace Internal {
 class BaseTextEditorPrivate;
@@ -81,7 +89,6 @@ class CompletionSettings;
 class DisplaySettings;
 class ExtraEncodingSettings;
 class FontSettings;
-class Indenter;
 class MarginSettings;
 class StorageSettings;
 class TypingSettings;
@@ -99,11 +106,12 @@ class TEXTEDITOR_EXPORT BaseTextEditor : public Core::IEditor
 
 public:
     BaseTextEditor();
-    ~BaseTextEditor();
+    ~BaseTextEditor() override;
 
     virtual void finalizeInitialization() {}
 
     static BaseTextEditor *currentTextEditor();
+    static QVector<BaseTextEditor *> textEditorsForDocument(TextDocument *textDocument);
 
     TextEditorWidget *editorWidget() const;
     TextDocument *textDocument() const;
@@ -117,7 +125,7 @@ public:
     void addContext(Core::Id id);
 
     // IEditor
-    Core::IDocument *document() override;
+    Core::IDocument *document() const override;
 
     IEditor *duplicate() override;
 
@@ -125,8 +133,8 @@ public:
     bool restoreState(const QByteArray &state) override;
     QWidget *toolBar() override;
 
-    QString contextHelpId() const override; // from IContext
-    void setContextHelpId(const QString &id) override;
+    void contextHelp(const HelpCallback &callback) const override; // from IContext
+    void setContextHelp(const Core::HelpItem &item) override;
 
     int currentLine() const override;
     int currentColumn() const override;
@@ -171,7 +179,7 @@ class TEXTEDITOR_EXPORT TextEditorWidget : public QPlainTextEdit
     Q_PROPERTY(int verticalBlockSelectionLastColumn READ verticalBlockSelectionLastColumn)
 
 public:
-    TextEditorWidget(QWidget *parent = 0);
+    TextEditorWidget(QWidget *parent = nullptr);
     ~TextEditorWidget() override;
 
     void setTextDocument(const QSharedPointer<TextDocument> &doc);
@@ -182,8 +190,8 @@ public:
     virtual void openFinishedSuccessfully();
     // IEditor
     QByteArray saveState() const;
-    bool restoreState(const QByteArray &state);
-    void gotoLine(int line, int column = 0, bool centerLine = true);
+    virtual bool restoreState(const QByteArray &state);
+    void gotoLine(int line, int column = 0, bool centerLine = true, bool animate = false);
     int position(TextPositionOperation posOp = CurrentPosition,
          int at = -1) const;
     void convertPosition(int pos, int *line, int *column) const;
@@ -268,8 +276,11 @@ public:
     QRegion translatedLineRegion(int lineStart, int lineEnd) const;
 
     QPoint toolTipPosition(const QTextCursor &c) const;
+    void showTextMarksToolTip(const QPoint &pos,
+                              const TextMarks &marks,
+                              const TextMark *mainTextMark = nullptr) const;
 
-    void invokeAssist(AssistKind assistKind, IAssistProvider *provider = 0);
+    void invokeAssist(AssistKind assistKind, IAssistProvider *provider = nullptr);
 
     virtual TextEditor::AssistInterface *createAssistInterface(AssistKind assistKind,
                                                     AssistReason assistReason) const;
@@ -280,7 +291,7 @@ public:
     void insertPlainText(const QString &text);
 
     QWidget *extraArea() const;
-    virtual int extraAreaWidth(int *markWidthPtr = 0) const;
+    virtual int extraAreaWidth(int *markWidthPtr = nullptr) const;
     virtual void extraAreaPaintEvent(QPaintEvent *);
     virtual void extraAreaLeaveEvent(QEvent *);
     virtual void extraAreaContextMenuEvent(QContextMenuEvent *);
@@ -297,6 +308,7 @@ public:
     const BehaviorSettings &behaviorSettings() const;
 
     void ensureCursorVisible();
+    void ensureBlockIsUnfolded(QTextBlock block);
 
     static Core::Id FakeVimSelection;
     static Core::Id SnippetPlaceholderSelection;
@@ -320,7 +332,6 @@ public:
 
     // the blocks list must be sorted
     void setIfdefedOutBlocks(const QList<BlockRange> &blocks);
-    bool isMissingSyntaxDefinition() const;
 
     enum Side { Left, Right };
     QAction *insertExtraToolBarWidget(Side side, QWidget *widget);
@@ -334,9 +345,11 @@ public:
     virtual void cut();
     virtual void selectAll();
 
-    virtual void format();
+    virtual void autoIndent();
     virtual void rewrapParagraph();
     virtual void unCommentSelection();
+
+    virtual void autoFormat();
 
     virtual void encourageApply();
 
@@ -370,12 +383,16 @@ public:
     void unfold();
     void selectEncoding();
     void updateTextCodecLabel();
+    void selectLineEnding(int index);
+    void updateTextLineEndingLabel();
 
     void gotoBlockStart();
     void gotoBlockEnd();
     void gotoBlockStartWithSelection();
     void gotoBlockEndWithSelection();
 
+    void gotoDocumentStart();
+    void gotoDocumentEnd();
     void gotoLineStart();
     void gotoLineStartWithSelection();
     void gotoLineEnd();
@@ -422,6 +439,8 @@ public:
     void uppercaseSelection();
     void lowercaseSelection();
 
+    void sortSelectedLines();
+
     void cleanWhitespace();
 
     void indent();
@@ -432,6 +451,8 @@ public:
 
     void openLinkUnderCursor();
     void openLinkUnderCursorInNextSplit();
+
+    virtual void findUsages();
 
     /// Abort code assistant if it is running.
     void abortAssist();
@@ -446,14 +467,19 @@ public:
      *
      * Any invalid row will return -1 as line number.
      */
-    int lineForVisibleRow(int row) const;
+    int blockNumberForVisibleRow(int row) const;
 
     /*! Returns the first visible line of the document. */
-    int firstVisibleLine() const;
+    int firstVisibleBlockNumber() const;
     /*! Returns the last visible line of the document. */
-    int lastVisibleLine() const;
+    int lastVisibleBlockNumber() const;
     /*! Returns the line visible closest to the vertical center of the editor. */
-    int centerVisibleLine() const;
+    int centerVisibleBlockNumber() const;
+
+    Core::HighlightScrollBarController *highlightScrollBarController() const;
+
+    void addHoverHandler(BaseHoverHandler *handler);
+    void removeHoverHandler(BaseHoverHandler *handler);
 
 signals:
     void assistFinished(); // Used in tests.
@@ -461,9 +487,15 @@ signals:
 
     void requestBlockUpdate(const QTextBlock &);
 
+    void requestLinkAt(const QTextCursor &cursor, Utils::ProcessLinkCallback &callback,
+                       bool resolveTarget, bool inNextSplit);
+    void requestUsages(const QTextCursor &cursor);
+
 protected:
     QTextBlock blockForVisibleRow(int row) const;
+    QTextBlock blockForVerticalOffset(int offset) const;
     bool event(QEvent *e) override;
+    void contextMenuEvent(QContextMenuEvent *e) override;
     void inputMethodEvent(QInputMethodEvent *e) override;
     void keyPressEvent(QKeyEvent *e) override;
     void wheelEvent(QWheelEvent *e) override;
@@ -504,41 +536,12 @@ protected:
     virtual void triggerPendingUpdates();
     virtual void applyFontSettings();
 
-    virtual void onRefactorMarkerClicked(const RefactorMarker &) {}
-
     void showDefaultContextMenu(QContextMenuEvent *e, Core::Id menuContextId);
     virtual void finalizeInitialization() {}
     virtual void finalizeInitializationAfterDuplication(TextEditorWidget *) {}
     static QTextCursor flippedCursor(const QTextCursor &cursor);
 
 public:
-    struct Link
-    {
-        Link(const QString &fileName = QString(), int line = 0, int column = 0)
-            : linkTextStart(-1)
-            , linkTextEnd(-1)
-            , targetFileName(fileName)
-            , targetLine(line)
-            , targetColumn(column)
-        {}
-
-        bool hasValidTarget() const
-        { return !targetFileName.isEmpty(); }
-
-        bool hasValidLinkText() const
-        { return linkTextStart != linkTextEnd; }
-
-        bool operator==(const Link &other) const
-        { return linkTextStart == other.linkTextStart && linkTextEnd == other.linkTextEnd; }
-
-        int linkTextStart;
-        int linkTextEnd;
-
-        QString targetFileName;
-        int targetLine;
-        int targetColumn;
-    };
-
     QString selectedText() const;
 
     void setupGenericHighlighter();
@@ -549,10 +552,11 @@ public:
     QChar characterAt(int pos) const;
     QString textAt(int from, int to) const;
 
-    QString contextHelpId();
-    void setContextHelpId(const QString &id);
+    void contextHelpItem(const Core::IContext::HelpCallback &callback);
+    void setContextHelpItem(const Core::HelpItem &item);
 
     static TextEditorWidget *currentTextEditorWidget();
+    static TextEditorWidget *fromEditor(const Core::IEditor *editor);
 
 protected:
     /*!
@@ -561,13 +565,15 @@ protected:
        \a resolveTarget is set to true when the target of the link is relevant
        (it isn't until the link is used).
      */
-    virtual Link findLinkAt(const QTextCursor &, bool resolveTarget = true,
+    virtual void findLinkAt(const QTextCursor &,
+                            Utils::ProcessLinkCallback &&processLinkCallback,
+                            bool resolveTarget = true,
                             bool inNextSplit = false);
 
     /*!
        Returns whether the link was opened successfully.
      */
-    bool openLink(const Link &link, bool inNextSplit = false);
+    bool openLink(const Utils::Link &link, bool inNextSplit = false);
 
     /*!
       Reimplement this function to change the default replacement text.
@@ -589,7 +595,7 @@ signals:
     void tooltipOverrideRequested(TextEditor::TextEditorWidget *widget,
         const QPoint &globalPos, int position, bool *handled);
     void tooltipRequested(const QPoint &globalPos, int position);
-    void activateEditor();
+    void activateEditor(Core::EditorManager::OpenEditorFlags flags = {});
 
 protected:
     virtual void slotCursorPositionChanged(); // Used in VcsBase
@@ -608,38 +614,38 @@ private:
     friend class RefactorOverlay;
 };
 
-class TEXTEDITOR_EXPORT TextEditorLinkLabel : public QLabel
+class TEXTEDITOR_EXPORT TextEditorLinkLabel : public Utils::ElidingLabel
 {
 public:
-    TextEditorLinkLabel(QWidget *parent = 0);
+    TextEditorLinkLabel(QWidget *parent = nullptr);
 
-    void setLink(TextEditorWidget::Link link);
-    TextEditorWidget::Link link() const;
+    void setLink(Utils::Link link);
+    Utils::Link link() const;
 
 protected:
-    void mousePressEvent(QMouseEvent *event);
-    void mouseMoveEvent(QMouseEvent *event);
-    void mouseReleaseEvent(QMouseEvent *event);
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
     QPoint m_dragStartPosition;
-    TextEditorWidget::Link m_link;
+    Utils::Link m_link;
 };
 
 class TEXTEDITOR_EXPORT TextEditorFactory : public Core::IEditorFactory
 {
-    Q_OBJECT
 
 public:
-    TextEditorFactory(QObject *parent = 0);
-    ~TextEditorFactory();
+    TextEditorFactory();
+    ~TextEditorFactory() override;
 
-    typedef std::function<BaseTextEditor *()> EditorCreator;
-    typedef std::function<TextDocument *()> DocumentCreator;
-    typedef std::function<TextEditorWidget *()> EditorWidgetCreator;
-    typedef std::function<SyntaxHighlighter *()> SyntaxHighLighterCreator;
-    typedef std::function<Indenter *()> IndenterCreator;
-    typedef std::function<AutoCompleter *()> AutoCompleterCreator;
+    using EditorCreator = std::function<BaseTextEditor *()>;
+    using DocumentCreator = std::function<TextDocument *()>;
+    // editor widget must be castable (qobject_cast or Aggregate::query) to TextEditorWidget
+    using EditorWidgetCreator = std::function<QWidget *()>;
+    using SyntaxHighLighterCreator = std::function<SyntaxHighlighter *()>;
+    using IndenterCreator = std::function<Indenter *(QTextDocument *)>;
+    using AutoCompleterCreator = std::function<AutoCompleter *()>;
 
     void setDocumentCreator(const DocumentCreator &creator);
     void setEditorWidgetCreator(const EditorWidgetCreator &creator);
@@ -648,8 +654,6 @@ public:
     void setSyntaxHighlighterCreator(const SyntaxHighLighterCreator &creator);
     void setUseGenericHighlighter(bool enabled);
     void setAutoCompleterCreator(const AutoCompleterCreator &creator);
-
-    void setEditorActionHandlers(Core::Id contextId, uint optionalActions);
     void setEditorActionHandlers(uint optionalActions);
 
     void addHoverHandler(BaseHoverHandler *handler);
@@ -661,8 +665,6 @@ public:
     void setParenthesesMatchingEnabled(bool on);
     void setCodeFoldingSupported(bool on);
 
-    Core::IEditor *createEditor() override;
-
 private:
     friend class BaseTextEditor;
     friend class PlainTextEditorFactory;
@@ -671,4 +673,8 @@ private:
 
 } // namespace TextEditor
 
-Q_DECLARE_METATYPE(TextEditor::TextEditorWidget::Link)
+QT_BEGIN_NAMESPACE
+
+uint qHash(const QColor &color);
+
+QT_END_NAMESPACE

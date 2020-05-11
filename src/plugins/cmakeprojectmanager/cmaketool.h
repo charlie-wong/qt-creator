@@ -31,11 +31,8 @@
 #include <texteditor/codeassist/keywordscompletionassist.h>
 
 #include <utils/fileutils.h>
+#include <utils/optional.h>
 #include <utils/synchronousprocess.h>
-
-#include <QObject>
-#include <QMap>
-#include <QStringList>
 
 QT_FORWARD_DECLARE_CLASS(QProcess)
 
@@ -43,14 +40,14 @@ namespace ProjectExplorer { class Kit; }
 
 namespace CMakeProjectManager {
 
-class CMAKE_EXPORT CMakeTool : public QObject
+namespace Internal {  class IntrospectionData;  }
+
+class CMAKE_EXPORT CMakeTool
 {
-    Q_OBJECT
 public:
-    enum Detection {
-        ManualDetection,
-        AutoDetection
-    };
+    enum Detection { ManualDetection, AutoDetection };
+
+    enum ReaderType { FileApi };
 
     struct Version
     {
@@ -72,14 +69,14 @@ public:
         bool supportsPlatform = true;
         bool supportsToolset = true;
 
-        bool matches(const QString &n, const QString &ex) const;
+        bool matches(const QString &n, const QString &ex = QString()) const;
     };
 
-    typedef std::function<Utils::FileName (const Utils::FileName &)> PathMapper;
+    using PathMapper = std::function<Utils::FilePath (const Utils::FilePath &)>;
 
     explicit CMakeTool(Detection d, const Core::Id &id);
     explicit CMakeTool(const QVariantMap &map, bool fromSdk);
-    ~CMakeTool() override = default;
+    ~CMakeTool();
 
     static Core::Id createId();
 
@@ -88,14 +85,21 @@ public:
     Core::Id id() const { return m_id; }
     QVariantMap toMap () const;
 
-    void setCMakeExecutable(const Utils::FileName &executable);
     void setAutorun(bool autoRun);
+    void setAutoCreateBuildDirectory(bool autoBuildDir);
 
-    Utils::FileName cmakeExecutable() const;
+    void setFilePath(const Utils::FilePath &executable);
+    Utils::FilePath filePath() const;
+    Utils::FilePath cmakeExecutable() const;
+    void setQchFilePath(const Utils::FilePath &path);
+    Utils::FilePath qchFilePath() const;
+    static Utils::FilePath cmakeExecutable(const Utils::FilePath &path);
     bool isAutoRun() const;
+    bool autoCreateBuildDirectory() const;
     QList<Generator> supportedGenerators() const;
     TextEditor::Keywords keywords();
-    bool hasServerMode() const;
+    bool hasFileApi() const;
+    QVector<std::pair<QString, int>> supportedFileApiObjects() const;
     Version version() const;
 
     bool isAutoDetected() const;
@@ -105,41 +109,32 @@ public:
     void setPathMapper(const PathMapper &includePathMapper);
     PathMapper pathMapper() const;
 
-private:
-    enum class QueryType {
-        GENERATORS,
-        SERVER_MODE,
-        VERSION
-    };
-    void readInformation(QueryType type) const;
+    Utils::optional<ReaderType> readerType() const;
 
-    Utils::SynchronousProcessResponse run(const QStringList &args, bool mayFail = false) const;
+    static Utils::FilePath searchQchFile(const Utils::FilePath &executable);
+
+private:
+    void readInformation() const;
+
+    Utils::SynchronousProcessResponse run(const QStringList &args, int timeoutS = 1) const;
     void parseFunctionDetailsOutput(const QString &output);
     QStringList parseVariableOutput(const QString &output);
 
-    void fetchGeneratorsFromHelp() const;
-    void fetchVersionFromVersionOutput() const;
     void fetchFromCapabilities() const;
+    void parseFromCapabilities(const QString &input) const;
 
     Core::Id m_id;
     QString m_displayName;
-    Utils::FileName m_executable;
+    Utils::FilePath m_executable;
+    Utils::FilePath m_qchFilePath;
 
     bool m_isAutoRun = true;
     bool m_isAutoDetected = false;
+    bool m_autoCreateBuildDirectory = false;
 
-    mutable bool m_didAttemptToRun = false;
-    mutable bool m_didRun = false;
-    mutable bool m_hasServerMode = false;
+    Utils::optional<ReaderType> m_readerType;
 
-    mutable bool m_queriedServerMode = false;
-    mutable bool m_triedCapabilities = false;
-
-    mutable QList<Generator> m_generators;
-    mutable QMap<QString, QStringList> m_functionArgs;
-    mutable QStringList m_variables;
-    mutable QStringList m_functions;
-    mutable Version m_version;
+    std::unique_ptr<Internal::IntrospectionData> m_introspection;
 
     PathMapper m_pathMapper;
 };

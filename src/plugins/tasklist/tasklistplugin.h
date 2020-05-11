@@ -28,37 +28,33 @@
 #include <coreplugin/idocumentfactory.h>
 #include <extensionsystem/iplugin.h>
 
-namespace Utils { class FileName; }
+namespace Utils { class FilePath; }
 
 namespace TaskList {
 namespace Internal {
 
-class TaskFile;
-
-class TaskListPlugin : public ExtensionSystem::IPlugin
+class TaskListPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "TaskList.json")
 
 public:
     TaskListPlugin();
+    ~TaskListPlugin() final;
 
-    bool initialize(const QStringList &arguments, QString *errorMessage);
-    void extensionsInitialized() {}
+    bool initialize(const QStringList &arguments, QString *errorMessage) override;
 
-    static bool loadFile(QString *errorString, const Utils::FileName &fileName);
+    static bool loadFile(QString *errorString, const Utils::FilePath &fileName);
 
     static void stopMonitoring();
     static void clearTasks();
 
-    Core::IDocument *openTasks(const Utils::FileName &fileName);
+    Core::IDocument *openTasks(const Utils::FilePath &fileName);
 
-public slots:
     void loadDataFromSession();
 
 private:
-    Core::IDocumentFactory *m_fileFactory = nullptr;
-    QList<TaskFile *> m_openFiles;
+    class TaskListPluginPrivate *d = nullptr;
 };
 
 } // namespace Internal

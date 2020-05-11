@@ -43,13 +43,19 @@
 #include <QClipboard>
 #include <QScrollBar>
 
-#include <QtPlugin>
-
 QT_BEGIN_NAMESPACE
 extern void qt_set_sequence_auto_mnemonic(bool enable);
 QT_END_NAMESPACE
 
 using namespace Core;
+
+namespace {
+QString plainSelectedText(const QTextCursor &cursor)
+{
+    // selectedText() returns U+2029 (PARAGRAPH SEPARATOR) instead of newline
+    return cursor.selectedText().replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+}
+}
 
 namespace EmacsKeys {
 namespace Internal {
@@ -58,13 +64,9 @@ namespace Internal {
 // EmacsKeysPlugin
 //---------------------------------------------------------------------------
 
-EmacsKeysPlugin::EmacsKeysPlugin(): m_currentEditorWidget(0)
-{
-}
+EmacsKeysPlugin::EmacsKeysPlugin() = default;
 
-EmacsKeysPlugin::~EmacsKeysPlugin()
-{
-}
+EmacsKeysPlugin::~EmacsKeysPlugin() = default;
 
 bool EmacsKeysPlugin::initialize(const QStringList &arguments, QString *errorString)
 {
@@ -141,7 +143,7 @@ ExtensionSystem::IPlugin::ShutdownFlag EmacsKeysPlugin::aboutToShutdown()
 
 void EmacsKeysPlugin::editorAboutToClose(IEditor *editor)
 {
-    QPlainTextEdit *w = qobject_cast<QPlainTextEdit*>(editor->widget());
+    auto w = qobject_cast<QPlainTextEdit*>(editor->widget());
     if (!w)
         return;
 
@@ -154,7 +156,7 @@ void EmacsKeysPlugin::editorAboutToClose(IEditor *editor)
 void EmacsKeysPlugin::currentEditorChanged(IEditor *editor)
 {
     if (!editor) {
-        m_currentEditorWidget = 0;
+        m_currentEditorWidget = nullptr;
         return;
     }
     m_currentEditorWidget = qobject_cast<QPlainTextEdit*>(editor->widget());
@@ -222,7 +224,7 @@ void EmacsKeysPlugin::copy()
 
     m_currentState->beginOwnAction();
     QTextCursor cursor = m_currentEditorWidget->textCursor();
-    QApplication::clipboard()->setText(cursor.selectedText());
+    QApplication::clipboard()->setText(plainSelectedText(cursor));
     cursor.clearSelection();
     m_currentEditorWidget->setTextCursor(cursor);
     m_currentState->setMark(-1);
@@ -236,7 +238,7 @@ void EmacsKeysPlugin::cut()
 
     m_currentState->beginOwnAction();
     QTextCursor cursor = m_currentEditorWidget->textCursor();
-    QApplication::clipboard()->setText(cursor.selectedText());
+    QApplication::clipboard()->setText(plainSelectedText(cursor));
     cursor.removeSelectedText();
     m_currentState->setMark(-1);
     m_currentState->endOwnAction(KeysActionOther);
@@ -274,9 +276,9 @@ void EmacsKeysPlugin::killWord()
     cursor.movePosition(QTextCursor::NextWord, QTextCursor::KeepAnchor);
     if (m_currentState->lastAction() == KeysActionKillWord) {
         QApplication::clipboard()->setText(
-            QApplication::clipboard()->text() + cursor.selectedText());
+            QApplication::clipboard()->text() + plainSelectedText(cursor));
     } else {
-        QApplication::clipboard()->setText(cursor.selectedText());
+        QApplication::clipboard()->setText(plainSelectedText(cursor));
     }
     cursor.removeSelectedText();
     m_currentState->endOwnAction(KeysActionKillWord);
@@ -297,9 +299,9 @@ void EmacsKeysPlugin::killLine()
     }
     if (m_currentState->lastAction() == KeysActionKillLine) {
         QApplication::clipboard()->setText(
-            QApplication::clipboard()->text() + cursor.selectedText());
+            QApplication::clipboard()->text() + plainSelectedText(cursor));
     } else {
-        QApplication::clipboard()->setText(cursor.selectedText());
+        QApplication::clipboard()->setText(plainSelectedText(cursor));
     }
     cursor.removeSelectedText();
     m_currentState->endOwnAction(KeysActionKillLine);
@@ -314,7 +316,7 @@ void EmacsKeysPlugin::insertLineAndIndent()
     QTextCursor cursor = m_currentEditorWidget->textCursor();
     cursor.beginEditBlock();
     cursor.insertBlock();
-    if (m_currentBaseTextEditorWidget != 0)
+    if (m_currentBaseTextEditorWidget)
         m_currentBaseTextEditorWidget->textDocument()->autoIndent(cursor);
     cursor.endEditBlock();
     m_currentEditorWidget->setTextCursor(cursor);
@@ -324,7 +326,7 @@ void EmacsKeysPlugin::insertLineAndIndent()
 QAction *EmacsKeysPlugin::registerAction(Id id, void (EmacsKeysPlugin::*callback)(),
                                          const QString &title)
 {
-    QAction *result = new QAction(title, this);
+    auto result = new QAction(title, this);
     ActionManager::registerAction(result, id, Context(Core::Constants::C_GLOBAL), true);
     connect(result, &QAction::triggered, this, callback);
     return result;
@@ -339,7 +341,7 @@ void EmacsKeysPlugin::genericGoto(QTextCursor::MoveOperation op, bool abortAssis
     cursor.movePosition(op, m_currentState->mark() != -1 ?
         QTextCursor::KeepAnchor : QTextCursor::MoveAnchor);
     m_currentEditorWidget->setTextCursor(cursor);
-    if (abortAssist && m_currentBaseTextEditorWidget != 0)
+    if (abortAssist && m_currentBaseTextEditorWidget)
         m_currentBaseTextEditorWidget->abortAssist();
     m_currentState->endOwnAction(KeysActionOther);
 }

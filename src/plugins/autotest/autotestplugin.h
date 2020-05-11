@@ -29,11 +29,26 @@
 
 #include <extensionsystem/iplugin.h>
 
+namespace ProjectExplorer {
+class Project;
+class RunConfiguration;
+}
+
 namespace Autotest {
 namespace Internal {
 
-class TestFrameworkManager;
+class TestProjectSettings;
 struct TestSettings;
+
+struct ChoicePair
+{
+    explicit ChoicePair(const QString &name = QString(), const QString &exe = QString())
+        : displayName(name), executable(exe) {}
+    bool matches(const ProjectExplorer::RunConfiguration *rc) const;
+
+    QString displayName;
+    QString executable;
+};
 
 class AutotestPlugin : public ExtensionSystem::IPlugin
 {
@@ -42,25 +57,22 @@ class AutotestPlugin : public ExtensionSystem::IPlugin
 
 public:
     AutotestPlugin();
-    ~AutotestPlugin();
-
-    static AutotestPlugin *instance();
-
-    QSharedPointer<TestSettings> settings() const;
+    ~AutotestPlugin() override;
 
     bool initialize(const QStringList &arguments, QString *errorString) override;
     void extensionsInitialized() override;
     ShutdownFlag aboutToShutdown() override;
 
+    static TestSettings *settings();
+    static TestProjectSettings *projectSettings(ProjectExplorer::Project *project);
+    static void updateMenuItemsEnabledState();
+    static void cacheRunConfigChoice(const QString &buildTargetKey, const ChoicePair &choice);
+    static ChoicePair cachedChoiceFor(const QString &buildTargetKey);
+    static void clearChoiceCache();
+    static void popupResultsPane();
+
 private:
-    bool checkLicense();
-    void initializeMenuEntries();
-    void onRunAllTriggered();
-    void onRunSelectedTriggered();
-    void updateMenuItemsEnabledState();
-    QList<QObject *> createTestObjects() const override;
-    const QSharedPointer<TestSettings> m_settings;
-    TestFrameworkManager *m_frameworkManager = 0;
+    QVector<QObject *> createTestObjects() const override;
 };
 
 } // namespace Internal

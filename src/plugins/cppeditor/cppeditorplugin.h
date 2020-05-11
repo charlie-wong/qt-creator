@@ -25,21 +25,12 @@
 
 #pragma once
 
-#include <coreplugin/editormanager/ieditorfactory.h>
-
 #include <extensionsystem/iplugin.h>
-
-#include <QtPlugin>
-#include <QAction>
-
-namespace TextEditor { class BaseTextEditor; }
 
 namespace CppEditor {
 namespace Internal {
 
-class CppEditorWidget;
-class CppCodeModelInspectorDialog;
-class CppQuickFixCollector;
+class CppEditorPluginPrivate;
 class CppQuickFixAssistProvider;
 
 class CppEditorPlugin : public ExtensionSystem::IPlugin
@@ -49,13 +40,12 @@ class CppEditorPlugin : public ExtensionSystem::IPlugin
 
 public:
     CppEditorPlugin();
-    ~CppEditorPlugin();
+    ~CppEditorPlugin() override;
 
     static CppEditorPlugin *instance();
 
-    bool initialize(const QStringList &arguments, QString *errorMessage = 0) override;
+    bool initialize(const QStringList &arguments, QString *errorMessage) override;
     void extensionsInitialized() override;
-    ShutdownFlag aboutToShutdown() override;
 
     CppQuickFixAssistProvider *quickFixProvider() const;
 
@@ -68,19 +58,13 @@ public:
     void openDeclarationDefinitionInNextSplit();
     void openTypeHierarchy();
     void openIncludeHierarchy();
-    void findUsages();
     void showPreProcessorDialog();
     void renameSymbolUnderCursor();
     void switchDeclarationDefinition();
 
-private:
-    void onTaskStarted(Core::Id type);
-    void onAllTasksFinished(Core::Id type);
-    void inspectCppCodeModel();
-
 #ifdef WITH_TESTS
 private:
-    QList<QObject *> createTestObjects() const override;
+    QVector<QObject *> createTestObjects() const override;
 
 private slots:
     // The following tests expect that no projects are loaded on start-up.
@@ -92,6 +76,9 @@ private slots:
 
     void test_FollowSymbolUnderCursor_data();
     void test_FollowSymbolUnderCursor();
+
+    void test_FollowSymbolUnderCursor_QTCREATORBUG7903_data();
+    void test_FollowSymbolUnderCursor_QTCREATORBUG7903();
 
     void test_FollowSymbolUnderCursor_followCall_data();
     void test_FollowSymbolUnderCursor_followCall();
@@ -139,6 +126,7 @@ private slots:
     void test_quickfix_InsertDefFromDecl_ignoreSurroundingGeneratedDeclarations();
     void test_quickfix_InsertDefFromDecl_respectWsInOperatorNames1();
     void test_quickfix_InsertDefFromDecl_respectWsInOperatorNames2();
+    void test_quickfix_InsertDefFromDecl_noexcept_specifier();
     void test_quickfix_InsertDefFromDecl_macroUsesAtEndOfFile1();
     void test_quickfix_InsertDefFromDecl_macroUsesAtEndOfFile2();
     void test_quickfix_InsertDefFromDecl_erroneousStatementAtEndOfFile();
@@ -251,21 +239,7 @@ private slots:
 #endif // WITH_TESTS
 
 private:
-    Core::IEditor *createEditor(QWidget *parent);
-
-    static CppEditorPlugin *m_instance;
-
-    QAction *m_renameSymbolUnderCursorAction;
-    QAction *m_findUsagesAction;
-    QAction *m_reparseExternallyChangedFiles;
-    QAction *m_openTypeHierarchyAction;
-    QAction *m_openIncludeHierarchyAction;
-
-    CppQuickFixAssistProvider *m_quickFixProvider;
-
-    QPointer<CppCodeModelInspectorDialog> m_cppCodeModelInspectorDialog;
-
-    QPointer<TextEditor::BaseTextEditor> m_currentEditor;
+    CppEditorPluginPrivate *d = nullptr;
 };
 
 } // namespace Internal

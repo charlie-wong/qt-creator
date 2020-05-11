@@ -62,15 +62,6 @@ QVariant Operation::valueFromString(const QString &v)
     return QVariant();
 }
 
-QString Operation::makeUnique(const QString &name, const QStringList &inUse)
-{
-    QString unique = name;
-    int i = 1;
-    while (inUse.contains(unique))
-        unique = name + QString::number(++i);
-    return unique;
-}
-
 Operation::KeyValuePair::KeyValuePair(const QString &k, const QString &v) :
     value(valueFromString(v))
 {
@@ -96,7 +87,7 @@ QVariantMap Operation::load(const QString &file)
     QVariantMap map;
 
     // Read values from original file:
-    Utils::FileName path = Settings::instance()->getPath(file);
+    Utils::FilePath path = Settings::instance()->getPath(file);
     if (path.exists()) {
         Utils::PersistentSettingsReader reader;
         if (!reader.load(path))
@@ -109,14 +100,14 @@ QVariantMap Operation::load(const QString &file)
 
 bool Operation::save(const QVariantMap &map, const QString &file) const
 {
-    Utils::FileName path = Settings::instance()->getPath(file);
+    Utils::FilePath path = Settings::instance()->getPath(file);
 
     if (path.isEmpty()) {
         std::cerr << "Error: No path found for " << qPrintable(file) << "." << std::endl;
         return false;
     }
 
-    Utils::FileName dirName = path.parentDir();
+    Utils::FilePath dirName = path.parentDir();
     QDir dir(dirName.toString());
     if (!dir.exists() && !dir.mkpath(QLatin1String("."))) {
         std::cerr << "Error: Could not create directory " << qPrintable(dirName.toString())
@@ -126,8 +117,18 @@ bool Operation::save(const QVariantMap &map, const QString &file) const
 
     Utils::PersistentSettingsWriter writer(path, QLatin1String("QtCreator")
                                            + file[0].toUpper() + file.mid(1));
-    return writer.save(map, 0)
-            && QFile::setPermissions(path.toString(),
-                                     QFile::ReadOwner | QFile::WriteOwner
-                                     | QFile::ReadGroup | QFile::ReadOther);
+    QString errorMessage;
+    if (!writer.save(map, &errorMessage)) {
+        std::cerr << "Error: Could not save settings " << qPrintable(path.toString())
+                  << "." << std::endl;
+        return false;
+    }
+    if (!QFile::setPermissions(path.toString(),
+                               QFile::ReadOwner | QFile::WriteOwner
+                               | QFile::ReadGroup | QFile::ReadOther)) {
+        std::cerr << "Error: Could not set permissions for " << qPrintable(path.toString())
+                  << "." << std::endl;
+        return false;
+    }
+    return true;
 }

@@ -32,6 +32,8 @@
 
 #include <cplusplus/TranslationUnit.h>
 
+#include <utils/algorithm.h>
+
 #include <cctype>
 
 namespace Todo {
@@ -57,7 +59,8 @@ void CppTodoItemsScanner::scannerParamsChanged()
 
     QSet<QString> filesToBeUpdated;
     foreach (const CppTools::ProjectInfo &info, modelManager->projectInfos())
-        filesToBeUpdated.unite(info.project().data()->files(ProjectExplorer::Project::SourceFiles).toSet());
+        filesToBeUpdated.unite(Utils::transform<QSet>(info.project().data()->files(ProjectExplorer::Project::SourceFiles),
+                                                &Utils::FilePath::toString));
 
     modelManager->updateSourceFiles(filesToBeUpdated);
 }
@@ -74,7 +77,7 @@ void CppTodoItemsScanner::processDocument(CPlusPlus::Document::Ptr doc)
     QList<TodoItem> itemList;
     CPlusPlus::TranslationUnit *translationUnit = doc->translationUnit();
 
-    for (unsigned i = 0; i < translationUnit->commentCount(); ++i) {
+    for (int i = 0; i < translationUnit->commentCount(); ++i) {
 
         // Get comment source
         CPlusPlus::Token token = doc->translationUnit()->commentAt(i);
@@ -86,7 +89,7 @@ void CppTodoItemsScanner::processDocument(CPlusPlus::Document::Ptr doc)
         }
 
         // Process every line of the comment
-        unsigned lineNumber = 0;
+        int lineNumber = 0;
         translationUnit->getPosition(token.utf16charsBegin(), &lineNumber);
 
         for (int from = 0, sz = source.size(); from < sz; ++lineNumber) {

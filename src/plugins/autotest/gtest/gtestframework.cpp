@@ -24,23 +24,30 @@
 ****************************************************************************/
 
 #include "gtestframework.h"
-#include "gtestconstants.h"
-#include "gtestsettings.h"
-#include "gtestsettingspage.h"
 #include "gtesttreeitem.h"
 #include "gtestparser.h"
+#include "../testframeworkmanager.h"
 
 namespace Autotest {
 namespace Internal {
 
-ITestParser *GTestFramework::createTestParser() const
+static GTestSettings *g_settings;
+
+GTestFramework::GTestFramework()
+    : ITestFramework(true)
 {
-    return new GTestParser;
+    g_settings = &m_settings;
 }
 
-TestTreeItem *GTestFramework::createRootNode() const
+ITestParser *GTestFramework::createTestParser()
+{
+    return new GTestParser(this);
+}
+
+TestTreeItem *GTestFramework::createRootNode()
 {
     return new GTestTreeItem(
+                this,
                 QCoreApplication::translate("GTestFramework",
                                             GTest::Constants::FRAMEWORK_SETTINGS_CATEGORY),
                 QString(), TestTreeItem::Root);
@@ -56,19 +63,21 @@ unsigned GTestFramework::priority() const
     return GTest::Constants::FRAMEWORK_PRIORITY;
 }
 
-IFrameworkSettings *GTestFramework::createFrameworkSettings() const
+QString GTestFramework::currentGTestFilter()
 {
-    return new GTestSettings;
+    return g_settings->gtestFilter;
 }
 
-ITestSettingsPage *GTestFramework::createSettingsPage(QSharedPointer<IFrameworkSettings> settings) const
+QString GTestFramework::groupingToolTip() const
 {
-    return new GTestSettingsPage(settings, this);
+    return QCoreApplication::translate("GTestFramework",
+                                       "Enable or disable grouping of test cases by folder or "
+                                       "GTest filter.\nSee also Google Test settings.");
 }
 
-bool GTestFramework::hasFrameworkSettings() const
+GTest::Constants::GroupMode GTestFramework::groupMode()
 {
-    return true;
+    return g_settings->groupMode;
 }
 
 } // namespace Internal

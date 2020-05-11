@@ -33,7 +33,6 @@
 #include <QMap>
 
 QT_BEGIN_NAMESPACE
-class QProcess;
 class QTcpSocket;
 QT_END_NAMESPACE
 
@@ -111,7 +110,7 @@ private:
     void processTerminated(const QString &binary);
 
     // A per-binary entry containing the socket
-    typedef QMap<QString, QTcpSocket*> ProcessCache;
+    using ProcessCache = QMap<QString, QTcpSocket*>;
 
     ProcessCache m_processCache;
 };

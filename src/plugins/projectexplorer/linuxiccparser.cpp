@@ -25,11 +25,13 @@
 
 #include "linuxiccparser.h"
 #include "ldparser.h"
+#include "lldparser.h"
 #include "projectexplorerconstants.h"
 
 #include <utils/qtcassert.h>
 
 using namespace ProjectExplorer;
+using namespace Utils;
 
 LinuxIccParser::LinuxIccParser() :
     m_temporary(Task())
@@ -61,16 +63,15 @@ LinuxIccParser::LinuxIccParser() :
     m_pchInfoLine.setPattern(QLatin1String("^\".*\": (creating|using) precompiled header file \".*\"\n$"));
     m_pchInfoLine.setMinimal(true);
     QTC_CHECK(m_pchInfoLine.isValid());
-
-    appendOutputParser(new LdParser);
 }
 
-void LinuxIccParser::stdError(const QString &line)
+OutputLineParser::Result LinuxIccParser::handleLine(const QString &line, OutputFormat type)
 {
-    if (m_pchInfoLine.indexIn(line) != -1) {
-        // totally ignore this line
-        return;
-    }
+    if (type != Utils::StdErrFormat)
+        return Status::NotHandled;
+
+    if (m_pchInfoLine.indexIn(line) != -1)
+        return Status::Done; // totally ignore this line
 
     if (m_expectFirstLine  && m_firstLine.indexIn(line) != -1) {
         // Clear out old task
@@ -80,14 +81,17 @@ void LinuxIccParser::stdError(const QString &line)
             type = Task::Error;
         else if (category == QLatin1String("warning"))
             type = Task::Warning;
-        m_temporary = Task(type, m_firstLine.cap(6).trimmed(),
-                                            Utils::FileName::fromUserInput(m_firstLine.cap(1)),
-                                            m_firstLine.cap(2).toInt(),
-                                            Constants::TASK_CATEGORY_COMPILE);
+        const FilePath filePath = absoluteFilePath(FilePath::fromUserInput(m_firstLine.cap(1)));
+        const int lineNo = m_firstLine.cap(2).toInt();
+        LinkSpecs linkSpecs;
+        addLinkSpecForAbsoluteFilePath(linkSpecs, filePath, lineNo, m_firstLine, 1);
+        m_temporary = CompileTask(type, m_firstLine.cap(6).trimmed(), filePath, lineNo);
 
         m_lines = 1;
         m_expectFirstLine = false;
-    } else if (!m_expectFirstLine && m_caretLine.indexIn(line) != -1) {
+        return Status::InProgress;
+    }
+    if (!m_expectFirstLine && m_caretLine.indexIn(line) != -1) {
         // Format the last line as code
         QTextLayout::FormatRange fr;
         fr.start = m_temporary.description.lastIndexOf(QLatin1Char('\n')) + 1;
@@ -100,20 +104,25 @@ void LinuxIccParser::stdError(const QString &line)
         fr2.length = 1;
         fr2.format.setFontWeight(QFont::Bold);
         m_temporary.formats.append(fr2);
-    } else if (!m_expectFirstLine && line.trimmed().isEmpty()) { // last Line
+        return Status::InProgress;
+    }
+    if (!m_expectFirstLine && line.trimmed().isEmpty()) { // last Line
         m_expectFirstLine = true;
-        emit addTask(m_temporary, m_lines);
+        scheduleTask(m_temporary, m_lines);
         m_temporary = Task();
-    } else if (!m_expectFirstLine && m_continuationLines.indexIn(line) != -1) {
+        return Status::Done;
+    }
+    if (!m_expectFirstLine && m_continuationLines.indexIn(line) != -1) {
         m_temporary.description.append(QLatin1Char('\n'));
         m_indent = 0;
         while (m_indent < line.length() && line.at(m_indent).isSpace())
             m_indent++;
         m_temporary.description.append(m_continuationLines.cap(1).trimmed());
         ++m_lines;
-    } else {
-        IOutputParser::stdError(line);
+        return Status::InProgress;
     }
+    QTC_CHECK(m_temporary.isNull());
+    return Status::NotHandled;
 }
 
 Core::Id LinuxIccParser::id()
@@ -121,13 +130,18 @@ Core::Id LinuxIccParser::id()
     return Core::Id("ProjectExplorer.OutputParser.Icc");
 }
 
-void LinuxIccParser::doFlush()
+QList<OutputLineParser *> LinuxIccParser::iccParserSuite()
+{
+    return {new LinuxIccParser, new Internal::LldParser, new LdParser};
+}
+
+void LinuxIccParser::flush()
 {
     if (m_temporary.isNull())
         return;
     Task t = m_temporary;
     m_temporary.clear();
-    emit addTask(t, m_lines, 1);
+    scheduleTask(t, m_lines, 1);
 }
 
 #ifdef WITH_TESTS
@@ -141,25 +155,25 @@ void ProjectExplorerPlugin::testLinuxIccOutputParsers_data()
     QTest::addColumn<OutputParserTester::Channel>("inputChannel");
     QTest::addColumn<QString>("childStdOutLines");
     QTest::addColumn<QString>("childStdErrLines");
-    QTest::addColumn<QList<Task> >("tasks");
+    QTest::addColumn<Tasks >("tasks");
     QTest::addColumn<QString>("outputLines");
 
     QTest::newRow("pass-through stdout")
             << QString::fromLatin1("Sometext") << OutputParserTester::STDOUT
             << QString::fromLatin1("Sometext\n") << QString()
-            << QList<Task>()
+            << Tasks()
             << QString();
     QTest::newRow("pass-through stderr")
             << QString::fromLatin1("Sometext") << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("Sometext\n")
-            << QList<Task>()
+            << Tasks()
             << QString();
 
     QTest::newRow("pch creation")
             << QString::fromLatin1("\".pch/Qt5Core.pchi.cpp\": creating precompiled header file \".pch/Qt5Core.pchi\"")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << QList<Task>()
+            << Tasks()
             << QString();
 
     QTest::newRow("undeclared function")
@@ -169,11 +183,10 @@ void ProjectExplorerPlugin::testLinuxIccOutputParsers_data()
                                    "\n")
             << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("\n")
-            << (QList<Task>()
-                << Task(Task::Error,
-                        QLatin1String("identifier \"f\" is undefined\nf(0);"),
-                        Utils::FileName::fromUserInput(QLatin1String("main.cpp")), 13,
-                        Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Error,
+                               "identifier \"f\" is undefined\nf(0);",
+                               FilePath::fromUserInput(QLatin1String("main.cpp")), 13))
             << QString();
 
     // same, with PCH remark
@@ -185,11 +198,10 @@ void ProjectExplorerPlugin::testLinuxIccOutputParsers_data()
                                    "\n")
             << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("\n")
-            << (QList<Task>()
-                << Task(Task::Error,
-                        QLatin1String("identifier \"f\" is undefined\nf(0);"),
-                        Utils::FileName::fromUserInput(QLatin1String("main.cpp")), 13,
-                        Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Error,
+                               "identifier \"f\" is undefined\nf(0);",
+                               FilePath::fromUserInput("main.cpp"), 13))
             << QString();
 
 
@@ -200,11 +212,10 @@ void ProjectExplorerPlugin::testLinuxIccOutputParsers_data()
                                    "\n")
             << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("\n")
-            << (QList<Task>()
-                << Task(Task::Error,
-                        QLatin1String("function \"AClass::privatefunc\" (declared at line 4 of \"main.h\") is inaccessible\nb.privatefunc();"),
-                        Utils::FileName::fromUserInput(QLatin1String("main.cpp")), 53,
-                        Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Error,
+                               "function \"AClass::privatefunc\" (declared at line 4 of \"main.h\") is inaccessible\nb.privatefunc();",
+                               FilePath::fromUserInput("main.cpp"), 53))
             << QString();
 
     QTest::newRow("simple warning")
@@ -214,32 +225,30 @@ void ProjectExplorerPlugin::testLinuxIccOutputParsers_data()
                                    "\n")
             << OutputParserTester::STDERR
             << QString() << QString::fromLatin1("\n")
-            << (QList<Task>()
-                << Task(Task::Warning,
-                        QLatin1String("use of \"=\" where \"==\" may have been intended\nwhile (a = true)"),
-                        Utils::FileName::fromUserInput(QLatin1String("main.cpp")), 41,
-                        Constants::TASK_CATEGORY_COMPILE))
+            << (Tasks()
+                << CompileTask(Task::Warning,
+                               "use of \"=\" where \"==\" may have been intended\nwhile (a = true)",
+                               FilePath::fromUserInput("main.cpp"), 41))
             << QString();
+
     QTest::newRow("moc note")
             << QString::fromLatin1("/home/qtwebkithelpviewer.h:0: Note: No relevant classes found. No output generated.")
             << OutputParserTester::STDERR
             << QString() << QString()
-            << (QList<ProjectExplorer::Task>()
-                << Task(Task::Unknown,
-                        QLatin1String("Note: No relevant classes found. No output generated."),
-                        Utils::FileName::fromUserInput(QLatin1String("/home/qtwebkithelpviewer.h")), 0,
-                        Constants::TASK_CATEGORY_COMPILE)
-                )
+            << (Tasks()
+                << CompileTask(Task::Unknown,
+                               "Note: No relevant classes found. No output generated.",
+                               FilePath::fromUserInput("/home/qtwebkithelpviewer.h"), -1))
             << QString();
 }
 
 void ProjectExplorerPlugin::testLinuxIccOutputParsers()
 {
     OutputParserTester testbench;
-    testbench.appendOutputParser(new LinuxIccParser);
+    testbench.setLineParsers(LinuxIccParser::iccParserSuite());
     QFETCH(QString, input);
     QFETCH(OutputParserTester::Channel, inputChannel);
-    QFETCH(QList<Task>, tasks);
+    QFETCH(Tasks, tasks);
     QFETCH(QString, childStdOutLines);
     QFETCH(QString, childStdErrLines);
     QFETCH(QString, outputLines);

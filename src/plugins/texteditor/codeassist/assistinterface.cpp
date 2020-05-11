@@ -91,7 +91,7 @@ using namespace TextEditor;
 
 #include "assistinterface.h"
 
-#include <texteditor/convenience.h>
+#include <utils/textutils.h>
 
 #include <QTextBlock>
 #include <QTextDocument>
@@ -125,7 +125,7 @@ QChar AssistInterface::characterAt(int position) const
 
 QString AssistInterface::textAt(int pos, int length) const
 {
-    return Convenience::textAt(QTextCursor(m_textDocument), pos, length);
+    return Utils::Text::textAt(QTextCursor(m_textDocument), pos, length);
 }
 
 void AssistInterface::prepareForAsyncUse()
@@ -134,7 +134,7 @@ void AssistInterface::prepareForAsyncUse()
     m_userStates.reserve(m_textDocument->blockCount());
     for (QTextBlock block = m_textDocument->firstBlock(); block.isValid(); block = block.next())
         m_userStates.append(block.userState());
-    m_textDocument = 0;
+    m_textDocument = nullptr;
     m_isAsync = true;
 }
 

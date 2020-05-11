@@ -24,28 +24,35 @@
 ****************************************************************************/
 
 #include "defaultpropertyprovider.h"
+
+#include "qbskitinformation.h"
 #include "qbsprojectmanagerconstants.h"
 
 #include <coreplugin/messagemanager.h>
+#include <baremetal/baremetalconstants.h>
 #include <projectexplorer/abi.h>
 #include <projectexplorer/gcctoolchain.h>
 #include <projectexplorer/kit.h>
 #include <projectexplorer/kitinformation.h>
 #include <projectexplorer/toolchain.h>
 #include <projectexplorer/projectexplorerconstants.h>
+#include <projectexplorer/msvctoolchain.h>
 
 #include <utils/hostosinfo.h>
 #include <utils/qtcassert.h>
 
-#include <qbs.h>
-
+#include <android/androidconstants.h>
 #include <ios/iosconstants.h>
+#include <qtsupport/baseqtversion.h>
+#include <qtsupport/qtkitinformation.h>
 #include <winrt/winrtconstants.h>
 
 #include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSettings>
+
+using namespace ProjectExplorer;
 
 namespace QbsProjectManager {
 using namespace Constants;
@@ -60,89 +67,160 @@ static QString extractToolchainPrefix(QString *compilerName)
     QString prefix;
     const QStringList candidates = {QLatin1String("g++"), QLatin1String("clang++"),
                                     QLatin1String("gcc"), QLatin1String("clang")};
-    foreach (const QString &candidate, candidates) {
-        const QString suffix = Utils::HostOsInfo::withExecutableSuffix(QLatin1Char('-')
-                                                                       + candidate);
-        if (compilerName->endsWith(suffix)) {
-            const int idx = compilerName->lastIndexOf(QLatin1Char('-')) + 1;
-            prefix = compilerName->left(idx);
-            compilerName->remove(0, idx);
-        }
+    for (const QString &candidate : candidates) {
+        const QString suffix = QLatin1Char('-') + candidate;
+        const int suffixIndex = compilerName->lastIndexOf(suffix);
+        if (suffixIndex == -1)
+            continue;
+        prefix = compilerName->left(suffixIndex + 1);
+        compilerName->remove(0, suffixIndex + 1);
+        break;
     }
     return prefix;
 }
 
-static QStringList targetOSList(const ProjectExplorer::Abi &abi, const ProjectExplorer::Kit *k)
+static QString targetPlatform(const ProjectExplorer::Abi &abi, const ProjectExplorer::Kit *k)
 {
-    const Core::Id device = ProjectExplorer::DeviceTypeKitInformation::deviceTypeId(k);
-    QStringList os;
+    const Core::Id device = ProjectExplorer::DeviceTypeKitAspect::deviceTypeId(k);
     switch (abi.os()) {
     case ProjectExplorer::Abi::WindowsOS:
-        if (device == WINRT_DEVICE_TYPE_LOCAL ||
-                device == WINRT_DEVICE_TYPE_PHONE ||
-                device == WINRT_DEVICE_TYPE_EMULATOR) {
-            os << QLatin1String("winrt");
-        } else if (abi.osFlavor() == ProjectExplorer::Abi::WindowsCEFlavor) {
-            os << QLatin1String("windowsce");
-        }
-        os << QLatin1String("windows");
-        break;
-    case ProjectExplorer::Abi::DarwinOS:
+        return QLatin1String("windows");
+   case ProjectExplorer::Abi::DarwinOS:
         if (device == DESKTOP_DEVICE_TYPE)
-            os << QLatin1String("macos") << QLatin1String("osx");
-        else if (device == IOS_DEVICE_TYPE)
-            os << QLatin1String("ios");
-        else if (device == IOS_SIMULATOR_TYPE)
-            os << QLatin1String("ios-simulator") << QLatin1String("ios");
-        os << QLatin1String("darwin") << QLatin1String("bsd") << QLatin1String("unix");
-        break;
+            return QLatin1String("macos");
+        if (device == IOS_DEVICE_TYPE)
+            return QLatin1String("ios");
+        if (device == IOS_SIMULATOR_TYPE)
+            return QLatin1String("ios-simulator");
+        return QLatin1String("darwin");
     case ProjectExplorer::Abi::LinuxOS:
         if (abi.osFlavor() == ProjectExplorer::Abi::AndroidLinuxFlavor)
-            os << QLatin1String("android");
-        os << QLatin1String("linux") << QLatin1String("unix");
-        break;
+            return QLatin1String("android");
+        return QLatin1String("linux");
     case ProjectExplorer::Abi::BsdOS:
         switch (abi.osFlavor()) {
         case ProjectExplorer::Abi::FreeBsdFlavor:
-            os << QLatin1String("freebsd");
-            break;
+            return QLatin1String("freebsd");
         case ProjectExplorer::Abi::NetBsdFlavor:
-            os << QLatin1String("netbsd");
-            break;
+            return QLatin1String("netbsd");
         case ProjectExplorer::Abi::OpenBsdFlavor:
-            os << QLatin1String("openbsd");
-            break;
+            return QLatin1String("openbsd");
         default:
             break;
         }
-        os << QLatin1String("bsd") << QLatin1String("unix");
-        break;
+        return QLatin1String("bsd");
     case ProjectExplorer::Abi::QnxOS:
-        os << QLatin1String("qnx") << QLatin1String("unix");
-        break;
+        return QLatin1String("qnx");
     case ProjectExplorer::Abi::UnixOS:
         if (abi.osFlavor() == ProjectExplorer::Abi::SolarisUnixFlavor)
-            os << QLatin1String("solaris");
-        os << QLatin1String("unix");
-        break;
-    default:
+            return QLatin1String("solaris");
+        return QLatin1String("unix");
+    case ProjectExplorer::Abi::VxWorks:
+        return QLatin1String("vxworks");
+    case ProjectExplorer::Abi::BareMetalOS:
+    case ProjectExplorer::Abi::UnknownOS:
         break;
     }
-    return os;
+    return QString();
 }
 
 static QStringList toolchainList(const ProjectExplorer::ToolChain *tc)
 {
     QStringList list;
-    if (tc->typeId() == ProjectExplorer::Constants::CLANG_TOOLCHAIN_TYPEID)
+    if (tc->typeId() == ProjectExplorer::Constants::CLANG_TOOLCHAIN_TYPEID
+            || (tc->typeId() == Android::Constants::ANDROID_TOOLCHAIN_TYPEID
+                && tc->compilerCommand().toString().contains("clang"))) {
         list << QLatin1String("clang") << QLatin1String("llvm") << QLatin1String("gcc");
-    else if (tc->typeId() == ProjectExplorer::Constants::GCC_TOOLCHAIN_TYPEID)
+    } else if (tc->typeId() == ProjectExplorer::Constants::GCC_TOOLCHAIN_TYPEID
+               || tc->typeId() == Android::Constants::ANDROID_TOOLCHAIN_TYPEID) {
         list << QLatin1String("gcc"); // TODO: Detect llvm-gcc
-    else if (tc->typeId() == ProjectExplorer::Constants::MINGW_TOOLCHAIN_TYPEID)
+    } else if (tc->typeId() == ProjectExplorer::Constants::MINGW_TOOLCHAIN_TYPEID) {
         list << QLatin1String("mingw") << QLatin1String("gcc");
-    else if (tc->typeId() == ProjectExplorer::Constants::MSVC_TOOLCHAIN_TYPEID)
+    } else if (tc->typeId() == ProjectExplorer::Constants::CLANG_CL_TOOLCHAIN_TYPEID) {
+        list << QLatin1String("clang-cl") << QLatin1String("msvc");
+    } else if (tc->typeId() == ProjectExplorer::Constants::MSVC_TOOLCHAIN_TYPEID) {
         list << QLatin1String("msvc");
+    } else if (tc->typeId() == BareMetal::Constants::IAREW_TOOLCHAIN_TYPEID) {
+        list << QLatin1String("iar");
+    } else if (tc->typeId() == BareMetal::Constants::KEIL_TOOLCHAIN_TYPEID) {
+        list << QLatin1String("keil");
+    } else if (tc->typeId() == BareMetal::Constants::SDCC_TOOLCHAIN_TYPEID) {
+        list << QLatin1String("sdcc");
+    }
     return list;
+}
+
+static QString architecture(const ProjectExplorer::Abi &targetAbi)
+{
+    if (targetAbi.architecture() != ProjectExplorer::Abi::UnknownArchitecture) {
+        QString architecture = ProjectExplorer::Abi::toString(targetAbi.architecture());
+
+        if (targetAbi.osFlavor() == ProjectExplorer::Abi::AndroidLinuxFlavor) {
+            switch (targetAbi.architecture()) {
+            case ProjectExplorer::Abi::X86Architecture:
+                if (targetAbi.wordWidth() == 64)
+                    architecture += "_64";
+                return architecture;
+            case ProjectExplorer::Abi::ArmArchitecture:
+                if (targetAbi.wordWidth() == 64)
+                    architecture += "64";
+                else
+                    architecture += "v7a";
+                return architecture;
+            default:
+                break;
+            }
+        }
+        // We have to be conservative tacking on suffixes to arch names because an arch that is
+        // already 64-bit may get an incorrect name as a result (i.e. Itanium)
+        if (targetAbi.wordWidth() == 64) {
+            switch (targetAbi.architecture()) {
+            case ProjectExplorer::Abi::X86Architecture:
+                architecture.append(QLatin1Char('_'));
+                // fall through
+            case ProjectExplorer::Abi::ArmArchitecture:
+                // ARM sub-architectures are currently not handled, which is kind of problematic
+            case ProjectExplorer::Abi::MipsArchitecture:
+            case ProjectExplorer::Abi::PowerPCArchitecture:
+                architecture.append(QString::number(targetAbi.wordWidth()));
+                break;
+            default:
+                break;
+            }
+        }
+
+        return architecture;
+    }
+
+    return QString();
+}
+
+static bool isMultiTargetingToolchain(const ProjectExplorer::ToolChain *tc)
+{
+    // Clang and QCC are multi-targeting compilers; others (GCC/MinGW, MSVC, ICC) are not
+    return tc->targetAbi().os() == ProjectExplorer::Abi::QnxOS
+            || tc->typeId() == ProjectExplorer::Constants::CLANG_TOOLCHAIN_TYPEID;
+}
+
+static QStringList architectures(const ProjectExplorer::ToolChain *tc)
+{
+    // For platforms which can have builds for multiple architectures in a single configuration
+    // (Darwin, Android), regardless of whether the toolchain is multi-targeting or not (Clang
+    // always is, but Android GCC is not), let qbs automatically determine the list of architectures
+    // to build for by default. Similarly, if the underlying toolchain only targets a single
+    // architecture there's no reason to duplicate the detection logic here.
+    // Handles: GCC/MinGW, ICC, MSVC, Clang (Darwin, Android)
+    if (tc->targetAbi().os() == ProjectExplorer::Abi::DarwinOS
+            || tc->targetAbi().osFlavor() == ProjectExplorer::Abi::AndroidLinuxFlavor
+            || !isMultiTargetingToolchain(tc))
+        return { };
+
+    // This attempts to use the preferred architecture for toolchains which are multi-targeting.
+    // Handles: Clang (Linux/UNIX), QCC
+    const auto arch = architecture(tc->targetAbi());
+    if (!arch.isEmpty())
+        return { arch };
+    return { };
 }
 
 QVariantMap DefaultPropertyProvider::properties(const ProjectExplorer::Kit *k,
@@ -150,7 +228,7 @@ QVariantMap DefaultPropertyProvider::properties(const ProjectExplorer::Kit *k,
 {
     QTC_ASSERT(k, return defaultData);
     QVariantMap data = autoGeneratedProperties(k, defaultData);
-    const QVariantMap customProperties = k->value(Core::Id(QBS_PROPERTIES_KEY_FOR_KITS)).toMap();
+    const QVariantMap customProperties = QbsKitAspect::properties(k);
     for (QVariantMap::ConstIterator it = customProperties.constBegin();
          it != customProperties.constEnd(); ++it) {
         data.insert(it.key(), it.value());
@@ -177,135 +255,151 @@ QVariantMap DefaultPropertyProvider::autoGeneratedProperties(const ProjectExplor
 {
     QVariantMap data = defaultData;
 
-    const QString sysroot = ProjectExplorer::SysRootKitInformation::sysRoot(k).toUserOutput();
-    if (ProjectExplorer::SysRootKitInformation::hasSysRoot(k))
+    const QString sysroot = SysRootKitAspect::sysRoot(k).toUserOutput();
+    if (!sysroot.isEmpty())
         data.insert(QLatin1String(QBS_SYSROOT), sysroot);
 
-    ProjectExplorer::ToolChain *tcC
-            = ProjectExplorer::ToolChainKitInformation::toolChain(k, ProjectExplorer::Constants::C_LANGUAGE_ID);
-    ProjectExplorer::ToolChain *tcCxx
-            = ProjectExplorer::ToolChainKitInformation::toolChain(k, ProjectExplorer::Constants::CXX_LANGUAGE_ID);
+    ToolChain *tcC = ToolChainKitAspect::cToolChain(k);
+    ToolChain *tcCxx = ToolChainKitAspect::cxxToolChain(k);
     if (!tcC && !tcCxx)
         return data;
 
-    ProjectExplorer::ToolChain *mainTc = tcCxx ? tcCxx : tcC;
+    ToolChain *mainTc = tcCxx ? tcCxx : tcC;
 
-    ProjectExplorer::Abi targetAbi = mainTc->targetAbi();
-    if (targetAbi.architecture() != ProjectExplorer::Abi::UnknownArchitecture) {
-        QString architecture = ProjectExplorer::Abi::toString(targetAbi.architecture());
+    Abi targetAbi = mainTc->targetAbi();
 
-        // We have to be conservative tacking on suffixes to arch names because an arch that is
-        // already 64-bit may get an incorrect name as a result (i.e. Itanium)
-        if (targetAbi.wordWidth() == 64) {
-            switch (targetAbi.architecture()) {
-            case ProjectExplorer::Abi::X86Architecture:
-                architecture.append(QLatin1Char('_'));
-                // fall through
-            case ProjectExplorer::Abi::ArmArchitecture:
-            case ProjectExplorer::Abi::MipsArchitecture:
-            case ProjectExplorer::Abi::PowerPCArchitecture:
-                architecture.append(QString::number(targetAbi.wordWidth()));
-                break;
-            default:
-                break;
-            }
-        } else if (targetAbi.architecture() == ProjectExplorer::Abi::ArmArchitecture &&
-                   targetAbi.os() == ProjectExplorer::Abi::DarwinOS) {
-            architecture.append(QLatin1String("v7"));
-        }
-
-        data.insert(QLatin1String(QBS_ARCHITECTURE), qbs::canonicalArchitecture(architecture));
+    auto archs = architectures(mainTc);
+    if (!archs.isEmpty())
+        data.insert(QLatin1String(QBS_ARCHITECTURES), archs);
+    if (mainTc->targetAbi() != Abi::abiFromTargetTriplet(mainTc->originalTargetTriple())
+            || targetAbi.osFlavor() == Abi::AndroidLinuxFlavor) {
+        data.insert(QLatin1String(QBS_ARCHITECTURE), architecture(mainTc->targetAbi()));
+    } else if (archs.count() == 1) {
+        data.insert(QLatin1String(QBS_ARCHITECTURE), archs.first());
     }
-
-    data.insert(QLatin1String(QBS_TARGETOS), targetOSList(targetAbi, k));
+    data.insert(QLatin1String(QBS_TARGETPLATFORM), targetPlatform(targetAbi, k));
 
     QStringList toolchain = toolchainList(mainTc);
-
-    Utils::FileName cCompilerPath;
-    if (tcC)
-        cCompilerPath = tcC->compilerCommand();
-
-    Utils::FileName cxxCompilerPath;
-    if (tcCxx)
-        cxxCompilerPath = tcCxx->compilerCommand();
-
-    const QFileInfo cFileInfo = cCompilerPath.toFileInfo();
-    const QFileInfo cxxFileInfo = cxxCompilerPath.toFileInfo();
-    QString cCompilerName = cFileInfo.fileName();
-    QString cxxCompilerName = cxxFileInfo.fileName();
-    const QString cToolchainPrefix = extractToolchainPrefix(&cCompilerName);
-    const QString cxxToolchainPrefix = extractToolchainPrefix(&cxxCompilerName);
-
-    QFileInfo mainFileInfo;
-    QString mainCompilerName;
-    QString mainToolchainPrefix;
-    if (tcCxx) {
-        mainFileInfo = cxxFileInfo;
-        mainCompilerName = cxxCompilerName;
-        mainToolchainPrefix = cxxToolchainPrefix;
+    if (targetAbi.osFlavor() == Abi::AndroidLinuxFlavor) {
+        const IDevice::ConstPtr dev = DeviceKitAspect::device(k);
+        if (dev) {
+            const QString sdkDir = k->value(Android::Constants::ANDROID_KIT_SDK).toString();
+            if (!sdkDir.isEmpty())
+                data.insert("Android.sdk.sdkDir", sdkDir);
+            const QString ndkDir = k->value(Android::Constants::ANDROID_KIT_NDK).toString();
+            if (!ndkDir.isEmpty()) {
+                data.insert("Android.sdk.ndkDir", ndkDir);
+                data.insert("Android.ndk.ndkDir", ndkDir);
+            }
+        }
+        QtSupport::BaseQtVersion *qtVersion = QtSupport::QtKitAspect::qtVersion(k);
+        if (qtVersion) {
+            data.remove(QBS_ARCHITECTURES);
+            data.remove(QBS_ARCHITECTURE);
+            QStringList abis;
+            for (const auto &abi : qtVersion->qtAbis())
+                abis << architecture(abi);
+            if (abis.size() == 1)
+                data.insert(QLatin1String(QBS_ARCHITECTURE), abis.first());
+            else
+                data.insert(QLatin1String(QBS_ARCHITECTURES), abis);
+        }
     } else {
-        mainFileInfo = cFileInfo;
-        mainCompilerName = cCompilerName;
-        mainToolchainPrefix = cToolchainPrefix;
-    }
+        Utils::FilePath cCompilerPath;
+        if (tcC)
+            cCompilerPath = tcC->compilerCommand();
 
-    if (!mainToolchainPrefix.isEmpty())
-        data.insert(QLatin1String(CPP_TOOLCHAINPREFIX), mainToolchainPrefix);
+        Utils::FilePath cxxCompilerPath;
+        if (tcCxx)
+            cxxCompilerPath = tcCxx->compilerCommand();
 
-    if (toolchain.contains(QLatin1String("msvc"))) {
-        data.insert(QLatin1String(CPP_COMPILERNAME), mainCompilerName);
-    } else {
-        if (!cCompilerName.isEmpty())
-            data.insert(QLatin1String(CPP_COMPILERNAME), cCompilerName);
-        if (!cxxCompilerName.isEmpty())
-            data.insert(QLatin1String(CPP_CXXCOMPILERNAME), cxxCompilerName);
-    }
+        const QFileInfo cFileInfo = cCompilerPath.toFileInfo();
+        const QFileInfo cxxFileInfo = cxxCompilerPath.toFileInfo();
+        QString cCompilerName = cFileInfo.fileName();
+        QString cxxCompilerName = cxxFileInfo.fileName();
+        const QString cToolchainPrefix = extractToolchainPrefix(&cCompilerName);
+        const QString cxxToolchainPrefix = extractToolchainPrefix(&cxxCompilerName);
 
-    if (tcC && tcCxx && cFileInfo.absolutePath() != cxxFileInfo.absolutePath()) {
-        Core::MessageManager::write(tr("C and C++ compiler paths differ. C compiler may not work."),
-                                    Core::MessageManager::ModeSwitch);
-    }
-    data.insert(QLatin1String(CPP_TOOLCHAINPATH), mainFileInfo.absolutePath());
+        QFileInfo mainFileInfo;
+        QString mainCompilerName;
+        QString mainToolchainPrefix;
+        if (tcCxx) {
+            mainFileInfo = cxxFileInfo;
+            mainCompilerName = cxxCompilerName;
+            mainToolchainPrefix = cxxToolchainPrefix;
+        } else {
+            mainFileInfo = cFileInfo;
+            mainCompilerName = cCompilerName;
+            mainToolchainPrefix = cToolchainPrefix;
+        }
 
-    if (ProjectExplorer::GccToolChain *gcc = dynamic_cast<ProjectExplorer::GccToolChain *>(mainTc)) {
-        QStringList compilerFlags = gcc->platformCodeGenFlags();
-        filterCompilerLinkerFlags(targetAbi, compilerFlags);
-        data.insert(QLatin1String(CPP_PLATFORMCOMMONCOMPILERFLAGS), compilerFlags);
+        if (!mainToolchainPrefix.isEmpty())
+            data.insert(QLatin1String(CPP_TOOLCHAINPREFIX), mainToolchainPrefix);
 
-        QStringList linkerFlags = gcc->platformLinkerFlags();
-        filterCompilerLinkerFlags(targetAbi, linkerFlags);
-        data.insert(QLatin1String(CPP_PLATFORMLINKERFLAGS), linkerFlags);
-    }
+        if (toolchain.contains(QLatin1String("clang-cl"))) {
+            data.insert(QLatin1String(CPP_COMPILERNAME), mainCompilerName);
+            const auto clangClToolchain =
+                    static_cast<ProjectExplorer::Internal::ClangClToolChain *>(mainTc);
+            data.insert(QLatin1String(CPP_VCVARSALLPATH), clangClToolchain->varsBat());
+        } else if (toolchain.contains(QLatin1String("msvc"))) {
+            data.insert(QLatin1String(CPP_COMPILERNAME), mainCompilerName);
+        } else {
+            if (!mainCompilerName.isEmpty())
+                data.insert(QLatin1String(CPP_COMPILERNAME), mainCompilerName);
+            if (!cCompilerName.isEmpty())
+                data.insert(QLatin1String(CPP_CCOMPILERNAME), cCompilerName);
+            if (!cxxCompilerName.isEmpty())
+                data.insert(QLatin1String(CPP_CXXCOMPILERNAME), cxxCompilerName);
+        }
 
-    if (targetAbi.os() == ProjectExplorer::Abi::DarwinOS) {
-        // Reverse engineer the Xcode developer path from the compiler path
-        const QRegularExpression compilerRe(
-            QStringLiteral("^(?<developerpath>.*)/Toolchains/(?:.+)\\.xctoolchain/usr/bin$"));
-        const QRegularExpressionMatch compilerReMatch = compilerRe.match(cxxFileInfo.absolutePath());
-        if (compilerReMatch.hasMatch()) {
-            const QString developerPath = compilerReMatch.captured(QStringLiteral("developerpath"));
-            data.insert(QLatin1String(XCODE_DEVELOPERPATH), developerPath);
-            toolchain.insert(0, QStringLiteral("xcode"));
+        if (tcC && tcCxx && !cCompilerPath.isEmpty() && !cxxCompilerPath.isEmpty()
+                && cFileInfo.absolutePath() != cxxFileInfo.absolutePath()) {
+            Core::MessageManager::write(tr("C and C++ compiler paths differ. C compiler may not work."),
+                                        Core::MessageManager::ModeSwitch);
+        }
+        data.insert(QLatin1String(CPP_TOOLCHAINPATH), mainFileInfo.absolutePath());
 
-            // If the sysroot is part of this developer path, set the canonical SDK name
-            const QDir sysrootdir(QDir::cleanPath(sysroot));
-            const QString sysrootAbs = sysrootdir.absolutePath();
-            const QSettings sdkSettings(
-                sysrootdir.absoluteFilePath(QStringLiteral("SDKSettings.plist")),
-                QSettings::NativeFormat);
-            const QString version(
-                sdkSettings.value(QStringLiteral("Version")).toString());
-            QString canonicalName(
-                sdkSettings.value(QStringLiteral("CanonicalName")).toString());
-            canonicalName.chop(version.size());
-            if (!canonicalName.isEmpty() && !version.isEmpty()
-                    && sysrootAbs.startsWith(developerPath)) {
-                if (sysrootAbs.toLower().endsWith(QStringLiteral("/%1.sdk")
-                                                  .arg(canonicalName + version)))
-                    data.insert(QLatin1String(XCODE_SDK), QString(canonicalName + version));
-                if (sysrootAbs.toLower().endsWith(QStringLiteral("/%1.sdk")
-                                                  .arg(canonicalName)))
-                    data.insert(QLatin1String(XCODE_SDK), canonicalName);
+        if (auto gcc = dynamic_cast<ProjectExplorer::GccToolChain *>(mainTc)) {
+            QStringList compilerFlags = gcc->platformCodeGenFlags();
+            filterCompilerLinkerFlags(targetAbi, compilerFlags);
+            data.insert(QLatin1String(CPP_PLATFORMCOMMONCOMPILERFLAGS), compilerFlags);
+
+            QStringList linkerFlags = gcc->platformLinkerFlags();
+            filterCompilerLinkerFlags(targetAbi, linkerFlags);
+            data.insert(QLatin1String(CPP_PLATFORMLINKERFLAGS), linkerFlags);
+        }
+        if (targetAbi.os() == ProjectExplorer::Abi::DarwinOS) {
+            // Reverse engineer the Xcode developer path from the compiler path
+            const QRegularExpression compilerRe(
+                QStringLiteral("^(?<developerpath>.*)/Toolchains/(?:.+)\\.xctoolchain/usr/bin$"));
+            const QRegularExpressionMatch compilerReMatch = compilerRe.match(cxxFileInfo.absolutePath());
+            if (compilerReMatch.hasMatch()) {
+                const QString developerPath = compilerReMatch.captured(QStringLiteral("developerpath"));
+                data.insert(QLatin1String(XCODE_DEVELOPERPATH), developerPath);
+                toolchain.insert(0, QStringLiteral("xcode"));
+
+                // If the sysroot is part of this developer path, set the canonical SDK name
+                const QDir sysrootdir(QDir::cleanPath(sysroot));
+                const QString sysrootAbs = sysrootdir.absolutePath();
+                const QSettings sdkSettings(
+                    sysrootdir.absoluteFilePath(QStringLiteral("SDKSettings.plist")),
+                    QSettings::NativeFormat);
+                const QString version(
+                    sdkSettings.value(QStringLiteral("Version")).toString());
+                QString canonicalName(
+                    sdkSettings.value(QStringLiteral("CanonicalName")).toString());
+                canonicalName.chop(version.size());
+                if (!canonicalName.isEmpty() && !version.isEmpty()
+                        && sysrootAbs.startsWith(developerPath)) {
+                    if (sysrootAbs.endsWith(QStringLiteral("/%1.sdk").arg(canonicalName + version),
+                                            Qt::CaseInsensitive)) {
+                        data.insert(QLatin1String(XCODE_SDK), QString(canonicalName + version));
+                    }
+                    if (sysrootAbs.endsWith(QStringLiteral("/%1.sdk").arg(canonicalName),
+                                            Qt::CaseInsensitive)) {
+                        data.insert(QLatin1String(XCODE_SDK), canonicalName);
+                    }
+                }
             }
         }
     }

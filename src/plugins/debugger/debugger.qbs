@@ -20,6 +20,7 @@ Project {
         Depends { name: "ProjectExplorer" }
         Depends { name: "QtSupport" }
         Depends { name: "TextEditor" }
+        Depends { name: "app_version_header" }
 
         pluginTestDepends: [
             "QmakeProjectManager"
@@ -50,7 +51,6 @@ Project {
                 "debuggerinternalconstants.h",
                 "debuggeritem.cpp", "debuggeritem.h",
                 "debuggeritemmanager.cpp", "debuggeritemmanager.h",
-                "debuggerkitconfigwidget.cpp", "debuggerkitconfigwidget.h",
                 "debuggerkitinformation.cpp", "debuggerkitinformation.h",
                 "debuggermainwindow.cpp", "debuggermainwindow.h",
                 "debuggerplugin.cpp", "debuggerplugin.h",
@@ -58,10 +58,10 @@ Project {
                 "debuggerrunconfigurationaspect.cpp", "debuggerrunconfigurationaspect.h",
                 "debuggerruncontrol.cpp", "debuggerruncontrol.h",
                 "debuggersourcepathmappingwidget.cpp", "debuggersourcepathmappingwidget.h",
-                "debuggerstartparameters.h",
                 "debuggertooltipmanager.cpp", "debuggertooltipmanager.h",
                 "disassembleragent.cpp", "disassembleragent.h",
                 "disassemblerlines.cpp", "disassemblerlines.h",
+                "enginemanager.cpp", "enginemanager.h",
                 "imageviewer.cpp", "imageviewer.h",
                 "loadcoredialog.cpp", "loadcoredialog.h",
                 "localsandexpressionswindow.cpp", "localsandexpressionswindow.h",
@@ -69,10 +69,9 @@ Project {
                 "memoryagent.cpp", "memoryagent.h",
                 "moduleshandler.cpp", "moduleshandler.h",
                 "outputcollector.cpp", "outputcollector.h",
+                "peripheralregisterhandler.cpp", "peripheralregisterhandler.h",
                 "procinterrupt.cpp", "procinterrupt.h",
                 "registerhandler.cpp", "registerhandler.h",
-                "snapshothandler.cpp", "snapshothandler.h",
-                "snapshotwindow.cpp", "snapshotwindow.h",
                 "sourceagent.cpp", "sourceagent.h",
                 "sourcefileshandler.cpp", "sourcefileshandler.h",
                 "sourceutils.cpp", "sourceutils.h",
@@ -108,14 +107,8 @@ Project {
             name: "gdb"
             prefix: "gdb/"
             files: [
-                "attachgdbadapter.cpp", "attachgdbadapter.h",
-                "coregdbadapter.cpp", "coregdbadapter.h",
                 "gdbengine.cpp", "gdbengine.h",
                 "gdboptionspage.cpp",
-                "gdbplainengine.cpp", "gdbplainengine.h",
-                "remotegdbserveradapter.cpp", "remotegdbserveradapter.h",
-                "startgdbserverdialog.cpp", "startgdbserverdialog.h",
-                "termgdbadapter.cpp", "termgdbadapter.h"
             ]
         }
 
@@ -134,6 +127,18 @@ Project {
         }
 
         Group {
+            name: "uvsc"
+            prefix: "uvsc/"
+            files: [
+                "uvscclient.cpp", "uvscclient.h",
+                "uvscdatatypes.h",
+                "uvscengine.cpp", "uvscengine.h",
+                "uvscfunctions.h",
+                "uvscutils.cpp", "uvscutils.h",
+            ]
+        }
+
+        Group {
             name: "Name Demangler"
             prefix: "namedemangler/"
             files: [
@@ -149,7 +154,6 @@ Project {
             prefix: "qml/"
             files: [
                 "interactiveinterpreter.cpp", "interactiveinterpreter.h",
-                "qmlcppengine.cpp", "qmlcppengine.h",
                 "qmlengine.cpp", "qmlengine.h",
                 "qmlengineutils.cpp", "qmlengineutils.h",
                 "qmlinspectoragent.cpp", "qmlinspectoragent.h",
@@ -236,10 +240,10 @@ Project {
             files: [
                 "analyzerbase.qrc",
                 "analyzerconstants.h",
+                "analyzericons.h",
                 "analyzermanager.h",
                 "analyzerrunconfigwidget.cpp",
                 "analyzerrunconfigwidget.h",
-                "analyzerstartparameters.h",
                 "analyzerutils.cpp",
                 "analyzerutils.h",
                 "detailederrorview.cpp",

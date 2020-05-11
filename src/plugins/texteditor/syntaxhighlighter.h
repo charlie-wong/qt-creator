@@ -33,7 +33,7 @@
 #include <QTextLayout>
 
 #include <functional>
-#include <limits.h>
+#include <climits>
 
 QT_BEGIN_NAMESPACE
 class QTextDocument;
@@ -55,20 +55,25 @@ class TEXTEDITOR_EXPORT SyntaxHighlighter : public QObject
     Q_OBJECT
     Q_DECLARE_PRIVATE(SyntaxHighlighter)
 public:
-    SyntaxHighlighter(QObject *parent = 0);
+    SyntaxHighlighter(QObject *parent = nullptr);
     SyntaxHighlighter(QTextDocument *parent);
     SyntaxHighlighter(QTextEdit *parent);
-    virtual ~SyntaxHighlighter();
+    ~SyntaxHighlighter() override;
 
     void setDocument(QTextDocument *doc);
     QTextDocument *document() const;
 
-    void setExtraFormats(const QTextBlock &block, QVector<QTextLayout::FormatRange> &formats);
+    void setExtraFormats(const QTextBlock &block, QVector<QTextLayout::FormatRange> &&formats);
+    void clearExtraFormats(const QTextBlock &block);
+    void clearAllExtraFormats();
 
     static QList<QColor> generateColors(int n, const QColor &background);
 
     // Don't call in constructors of derived classes
     virtual void setFontSettings(const TextEditor::FontSettings &fontSettings);
+    TextEditor::FontSettings fontSettings() const;
+
+    void setNoAutomaticHighlighting(bool noAutomatic);
 
 public slots:
     void rehighlight();
@@ -78,7 +83,10 @@ protected:
     void setDefaultTextFormatCategories();
     void setTextFormatCategories(int count, std::function<TextStyle(int)> formatMapping);
     QTextCharFormat formatForCategory(int categoryIndex) const;
-    virtual void highlightBlock(const QString &text) = 0;
+
+    // implement in subclasses
+    // default implementation highlights whitespace
+    virtual void highlightBlock(const QString &text);
 
     void setFormat(int start, int count, const QTextCharFormat &format);
     void setFormat(int start, int count, const QColor &color);

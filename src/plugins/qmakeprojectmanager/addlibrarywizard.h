@@ -30,7 +30,6 @@
 
 QT_BEGIN_NAMESPACE
 class QRadioButton;
-class QCheckBox;
 class QLabel;
 QT_END_NAMESPACE
 
@@ -77,8 +76,8 @@ public:
 
     Q_DECLARE_FLAGS(Platforms, Platform)
 
-    explicit AddLibraryWizard(const QString &fileName, QWidget *parent = 0);
-    ~AddLibraryWizard();
+    explicit AddLibraryWizard(const QString &fileName, QWidget *parent = nullptr);
+    ~AddLibraryWizard() override;
 
     LibraryKind libraryKind() const;
     QString proFile() const;
@@ -92,8 +91,6 @@ private:
     SummaryPage *m_summaryPage = nullptr;
     QString m_proFile;
 };
-
-Q_DECLARE_OPERATORS_FOR_FLAGS(AddLibraryWizard::Platforms)
 
 class LibraryTypePage : public QWizardPage
 {
@@ -114,8 +111,8 @@ class DetailsPage : public QWizardPage
     Q_OBJECT
 public:
     DetailsPage(AddLibraryWizard *parent);
-    virtual void initializePage();
-    virtual bool isComplete() const;
+    void initializePage() override;
+    bool isComplete() const override;
     QString snippet() const;
 
 private:
@@ -129,7 +126,7 @@ class SummaryPage : public QWizardPage
     Q_OBJECT
 public:
     SummaryPage(AddLibraryWizard *parent);
-    virtual void initializePage();
+    void initializePage() override;
     QString snippet() const;
 private:
     AddLibraryWizard *m_libraryWizard = nullptr;
@@ -140,3 +137,5 @@ private:
 
 } // namespace Internal
 } // namespace QmakeProjectManager
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(QmakeProjectManager::Internal::AddLibraryWizard::Platforms)

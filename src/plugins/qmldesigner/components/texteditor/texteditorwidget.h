@@ -50,7 +50,7 @@ public:
         return m_textEditor.get();
     }
 
-    QString contextHelpId() const;
+    void contextHelp(const Core::IContext::HelpCallback &callback) const;
     void jumpTextCursorToSelectedModelNode();
     void gotoCursorPosition(int line, int column);
 
@@ -59,7 +59,7 @@ public:
 
     int currentLine() const;
 
-    void setBlockCurserSelectionSyncronisation(bool b);
+    void setBlockCursorSelectionSynchronisation(bool b);
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
@@ -71,7 +71,8 @@ private:
     QPointer<TextEditorView> m_textEditorView;
     QTimer m_updateSelectionTimer;
     TextEditorStatusBar *m_statusBar;
-    bool m_blockCurserSelectionSyncronisation = false;
+    bool m_blockCursorSelectionSynchronisation = false;
+    bool m_blockRoundTrip = false;
 };
 
 } // namespace QmlDesigner

@@ -24,17 +24,22 @@
 ****************************************************************************/
 
 #include "kitmanagerconfigwidget.h"
-#include "projectexplorerconstants.h"
 
+#include "devicesupport/idevicefactory.h"
 #include "kit.h"
+#include "kitinformation.h"
 #include "kitmanager.h"
+#include "projectexplorerconstants.h"
 #include "task.h"
 
 #include <coreplugin/variablechooser.h>
 
+#include <utils/algorithm.h>
 #include <utils/detailswidget.h>
-#include <utils/qtcassert.h>
 #include <utils/macroexpander.h>
+#include <utils/pathchooser.h>
+#include <utils/qtcassert.h>
+#include <utils/utilsicons.h>
 
 #include <QAction>
 #include <QRegularExpression>
@@ -43,7 +48,9 @@
 #include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPainter>
+#include <QPushButton>
 #include <QToolButton>
 #include <QScrollArea>
 #include <QSizePolicy>
@@ -60,7 +67,7 @@ KitManagerConfigWidget::KitManagerConfigWidget(Kit *k) :
     m_nameEdit(new QLineEdit),
     m_fileSystemFriendlyNameLineEdit(new QLineEdit),
     m_kit(k),
-    m_modifiedKit(new Kit(Core::Id(WORKING_COPY_KIT_ID)))
+    m_modifiedKit(std::make_unique<Kit>(Core::Id(WORKING_COPY_KIT_ID)))
 {
     static auto alignment
             = static_cast<const Qt::Alignment>(style()->styleHint(QStyle::SH_FormLayoutLabelAlignment));
@@ -88,14 +95,13 @@ KitManagerConfigWidget::KitManagerConfigWidget(Kit *k) :
     inner->setLayout(m_layout);
 
     auto mainLayout = new QGridLayout(this);
-    mainLayout->setMargin(1);
+    mainLayout->setContentsMargins(1, 1, 1, 1);
     mainLayout->addWidget(inner, 0, 0);
 
-    toolTip = tr("Kit name and icon.");
-    label = createLabel(tr("Name:"), toolTip);
+    label = createLabel(tr("Name:"), tr("Kit name and icon."));
     m_layout->addWidget(label, 0, LabelColumn, alignment);
-    m_iconButton->setToolTip(toolTip);
-    auto setIconAction = new QAction(tr("Select Icon File"), this);
+    m_iconButton->setToolTip(tr("Kit icon."));
+    auto setIconAction = new QAction(tr("Select Icon..."), this);
     m_iconButton->addAction(setIconAction);
     auto resetIconAction = new QAction(tr("Reset to Device Default Icon"), this);
     m_iconButton->addAction(resetIconAction);
@@ -120,6 +126,15 @@ KitManagerConfigWidget::KitManagerConfigWidget(Kit *k) :
     auto chooser = new Core::VariableChooser(this);
     chooser->addSupportedWidget(m_nameEdit);
     chooser->addMacroExpanderProvider([this]() { return m_modifiedKit->macroExpander(); });
+
+    for (KitAspect *aspect : KitManager::kitAspects())
+        addAspectToWorkingCopy(aspect);
+
+    updateVisibility();
+
+    if (k && k->isAutoDetected())
+        makeStickySubWidgetsReadOnly();
+    setVisible(false);
 }
 
 KitManagerConfigWidget::~KitManagerConfigWidget()
@@ -129,10 +144,9 @@ KitManagerConfigWidget::~KitManagerConfigWidget()
     qDeleteAll(m_actions);
     m_actions.clear();
 
-    KitManager::deleteKit(m_modifiedKit);
     // Make sure our workingCopy did not get registered somehow:
-    foreach (const Kit *k, KitManager::kits())
-        QTC_CHECK(k->id() != Core::Id(WORKING_COPY_KIT_ID));
+    QTC_CHECK(!Utils::contains(KitManager::kits(),
+                               Utils::equal(&Kit::id, Core::Id(WORKING_COPY_KIT_ID))));
 }
 
 QString KitManagerConfigWidget::displayName() const
@@ -142,27 +156,34 @@ QString KitManagerConfigWidget::displayName() const
     return m_cachedDisplayName;
 }
 
-QIcon KitManagerConfigWidget::icon() const
+QIcon KitManagerConfigWidget::displayIcon() const
 {
-    return m_modifiedKit->icon();
+    // Special case: Extra warning if there are no errors but name is not unique.
+    if (m_modifiedKit->isValid() && !m_hasUniqueName) {
+        static const QIcon warningIcon(Utils::Icons::WARNING.icon());
+        return warningIcon;
+    }
+
+    return m_modifiedKit->displayIcon();
 }
 
 void KitManagerConfigWidget::apply()
 {
-    bool mustSetDefault = m_isDefaultKit;
-    bool mustRegister = false;
-    if (!m_kit) {
-        mustRegister = true;
-        m_kit = new Kit;
+    // TODO: Rework the mechanism so this won't be necessary.
+    const bool wasDefaultKit = m_isDefaultKit;
+
+    const auto copyIntoKit = [this](Kit *k) { k->copyFrom(m_modifiedKit.get()); };
+    if (m_kit) {
+        copyIntoKit(m_kit);
+        KitManager::notifyAboutUpdate(m_kit);
+    } else {
+        m_isRegistering = true;
+        m_kit = KitManager::registerKit(copyIntoKit);
+        m_isRegistering = false;
     }
-    m_kit->copyFrom(m_modifiedKit); //m_isDefaultKit is reset in discard() here.
-    if (mustRegister)
-        KitManager::registerKit(m_kit);
-
-    if (mustSetDefault)
+    m_isDefaultKit = wasDefaultKit;
+    if (m_isDefaultKit)
         KitManager::setDefaultKit(m_kit);
-
-    m_isDefaultKit = mustSetDefault;
     emit dirty();
 }
 
@@ -186,46 +207,38 @@ void KitManagerConfigWidget::discard()
 bool KitManagerConfigWidget::isDirty() const
 {
     return !m_kit
-            || !m_kit->isEqual(m_modifiedKit)
+            || !m_kit->isEqual(m_modifiedKit.get())
             || m_isDefaultKit != (KitManager::defaultKit() == m_kit);
-}
-
-bool KitManagerConfigWidget::isValid() const
-{
-    return m_modifiedKit->isValid();
-}
-
-bool KitManagerConfigWidget::hasWarning() const
-{
-    return m_modifiedKit->hasWarning() || !m_hasUniqueName;
 }
 
 QString KitManagerConfigWidget::validityMessage() const
 {
-    QList<Task> tmp;
-    if (!m_hasUniqueName) {
-        tmp.append(Task(Task::Warning, tr("Display name is not unique."), Utils::FileName(), -1,
-                        ProjectExplorer::Constants::TASK_CATEGORY_COMPILE));
-    }
+    Tasks tmp;
+    if (!m_hasUniqueName)
+        tmp.append(CompileTask(Task::Warning, tr("Display name is not unique.")));
+
     return m_modifiedKit->toHtml(tmp);
 }
 
-void KitManagerConfigWidget::addConfigWidget(KitConfigWidget *widget)
+void KitManagerConfigWidget::addAspectToWorkingCopy(KitAspect *aspect)
 {
+    QTC_ASSERT(aspect, return);
+    KitAspectWidget *widget = aspect->createConfigWidget(workingCopy());
     QTC_ASSERT(widget, return);
     QTC_ASSERT(!m_widgets.contains(widget), return);
 
-    QString name = widget->displayName();
-    QString toolTip = widget->toolTip();
+    const QString name = aspect->displayName() + ':';
+    QString toolTip = aspect->description();
 
-    auto action = new QAction(tr("Mark as Mutable"), 0);
+    auto action = new QAction(tr("Mark as Mutable"), nullptr);
     action->setCheckable(true);
-    action->setChecked(widget->isMutable());
+    action->setChecked(workingCopy()->isMutable(aspect->id()));
+
     action->setEnabled(!widget->isSticky());
     widget->mainWidget()->addAction(action);
     widget->mainWidget()->setContextMenuPolicy(Qt::ActionsContextMenu);
-    connect(action, &QAction::toggled, this, [this, widget, action] {
-        widget->setMutable(action->isChecked());
+    connect(action, &QAction::toggled, this, [this, aspect, action] {
+        workingCopy()->setMutable(aspect->id(), action->isChecked());
         emit dirty();
     });
 
@@ -248,8 +261,9 @@ void KitManagerConfigWidget::updateVisibility()
 {
     int count = m_widgets.count();
     for (int i = 0; i < count; ++i) {
-        KitConfigWidget *widget = m_widgets.at(i);
-        bool visible = widget->visibleInKit();
+        KitAspectWidget *widget = m_widgets.at(i);
+        const bool visible = widget->visibleInKit()
+                && !m_modifiedKit->irrelevantAspects().contains(widget->kitInformationId());
         widget->mainWidget()->setVisible(visible);
         if (widget->buttonWidget())
             widget->buttonWidget()->setVisible(visible);
@@ -264,7 +278,7 @@ void KitManagerConfigWidget::setHasUniqueName(bool unique)
 
 void KitManagerConfigWidget::makeStickySubWidgetsReadOnly()
 {
-    foreach (KitConfigWidget *w, m_widgets) {
+    foreach (KitAspectWidget *w, m_widgets) {
         if (w->isSticky())
             w->makeReadOnly();
     }
@@ -272,7 +286,7 @@ void KitManagerConfigWidget::makeStickySubWidgetsReadOnly()
 
 Kit *KitManagerConfigWidget::workingCopy() const
 {
-    return m_modifiedKit;
+    return m_modifiedKit.get();
 }
 
 bool KitManagerConfigWidget::configures(Kit *k) const
@@ -302,24 +316,49 @@ void KitManagerConfigWidget::removeKit()
 
 void KitManagerConfigWidget::setIcon()
 {
-    const QString path = QFileDialog::getOpenFileName(this, tr("Select Icon"),
-                                                      m_modifiedKit->iconPath().toString(),
-                                                      tr("Images (*.png *.xpm *.jpg)"));
-    if (path.isEmpty())
-        return;
-
-    const QIcon icon(path);
-    if (icon.isNull())
-        return;
-
-    m_iconButton->setIcon(icon);
-    m_modifiedKit->setIconPath(Utils::FileName::fromString(path));
-    emit dirty();
+    const Core::Id deviceType = DeviceTypeKitAspect::deviceTypeId(m_modifiedKit.get());
+    QList<IDeviceFactory *> allDeviceFactories = IDeviceFactory::allDeviceFactories();
+    if (deviceType.isValid()) {
+        const auto less = [deviceType](const IDeviceFactory *f1, const IDeviceFactory *f2) {
+            if (f1->deviceType() == deviceType)
+                return true;
+            if (f2->deviceType() == deviceType)
+                return false;
+            return f1->displayName() < f2->displayName();
+        };
+        Utils::sort(allDeviceFactories, less);
+    }
+    QMenu iconMenu;
+    for (const IDeviceFactory * const factory : qAsConst(allDeviceFactories)) {
+        if (factory->icon().isNull())
+            continue;
+        iconMenu.addAction(factory->icon(), tr("Default for %1").arg(factory->displayName()),
+                           [this, factory] {
+            m_iconButton->setIcon(factory->icon());
+            m_modifiedKit->setDeviceTypeForIcon(factory->deviceType());
+            emit dirty();
+        });
+    }
+    iconMenu.addSeparator();
+    iconMenu.addAction(Utils::PathChooser::browseButtonLabel(), [this] {
+        const QString path = QFileDialog::getOpenFileName(this, tr("Select Icon"),
+                                                          m_modifiedKit->iconPath().toString(),
+                                                          tr("Images (*.png *.xpm *.jpg)"));
+        if (path.isEmpty())
+            return;
+        const QIcon icon(path);
+        if (icon.isNull())
+            return;
+        m_iconButton->setIcon(icon);
+        m_modifiedKit->setIconPath(Utils::FilePath::fromString(path));
+        emit dirty();
+    });
+    iconMenu.exec(mapToGlobal(m_iconButton->pos()));
 }
 
 void KitManagerConfigWidget::resetIcon()
 {
-    m_modifiedKit->setIconPath(Utils::FileName());
+    m_modifiedKit->setIconPath(Utils::FilePath());
     emit dirty();
 }
 
@@ -340,14 +379,14 @@ void KitManagerConfigWidget::setFileSystemFriendlyName()
 
 void KitManagerConfigWidget::workingCopyWasUpdated(Kit *k)
 {
-    if (k != m_modifiedKit || m_fixingKit)
+    if (k != m_modifiedKit.get() || m_fixingKit)
         return;
 
     m_fixingKit = true;
     k->fix();
     m_fixingKit = false;
 
-    foreach (KitConfigWidget *w, m_widgets)
+    foreach (KitAspectWidget *w, m_widgets)
         w->refresh();
 
     m_cachedDisplayName.clear();
@@ -374,8 +413,8 @@ void KitManagerConfigWidget::kitWasUpdated(Kit *k)
 
 void KitManagerConfigWidget::showEvent(QShowEvent *event)
 {
-    Q_UNUSED(event);
-    foreach (KitConfigWidget *widget, m_widgets)
+    Q_UNUSED(event)
+    foreach (KitAspectWidget *widget, m_widgets)
         widget->refresh();
 }
 

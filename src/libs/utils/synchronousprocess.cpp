@@ -24,15 +24,18 @@
 ****************************************************************************/
 
 #include "synchronousprocess.h"
-#include "qtcassert.h"
+#include "executeondestruction.h"
 #include "hostosinfo.h"
+#include "qtcassert.h"
+#include "qtcprocess.h"
 
 #include <QDebug>
-#include <QTimer>
-#include <QTextCodec>
 #include <QDir>
+#include <QLoggingCategory>
 #include <QMessageBox>
+#include <QTextCodec>
 #include <QThread>
+#include <QTimer>
 
 #include <QApplication>
 
@@ -81,22 +84,32 @@ enum { defaultMaxHangTimerCount = 10 };
 
 namespace Utils {
 
+static Q_LOGGING_CATEGORY(processLog, "qtc.utils.synchronousprocess", QtWarningMsg);
+
 // A special QProcess derivative allowing for terminal control.
 class TerminalControllingProcess : public QProcess {
 public:
-    TerminalControllingProcess() : m_flags(0) {}
+    TerminalControllingProcess()
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6,0,0) && defined(Q_OS_UNIX)
+        setChildProcessModifier([this]() { maybeSetsid(); });
+#endif
+    }
 
     unsigned flags() const { return m_flags; }
     void setFlags(unsigned tc) { m_flags = tc; }
 
 protected:
-    virtual void setupChildProcess();
+    inline void maybeSetsid();
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0) && defined(Q_OS_UNIX)
+    void setupChildProcess() override { maybeSetsid(); }
+#endif
 
 private:
-    unsigned m_flags;
+    unsigned m_flags = 0;
 };
 
-void TerminalControllingProcess::setupChildProcess()
+inline void TerminalControllingProcess::maybeSetsid()
 {
 #ifdef Q_OS_UNIX
     // Disable terminal by becoming a session leader.
@@ -266,7 +279,7 @@ public:
     QTimer m_timer;
     QEventLoop m_eventLoop;
     SynchronousProcessResponse m_result;
-    QString m_binary;
+    FilePath m_binary;
     ChannelBuffer m_stdOut;
     ChannelBuffer m_stdErr;
     ExitCodeInterpreter m_exitCodeInterpreter = defaultExitCodeInterpreter;
@@ -288,7 +301,7 @@ void SynchronousProcessPrivate::clearForRun()
     m_result.clear();
     m_result.codec = m_codec;
     m_startFailure = false;
-    m_binary.clear();
+    m_binary = {};
 }
 
 // ----------- SynchronousProcess
@@ -297,8 +310,7 @@ SynchronousProcess::SynchronousProcess() :
 {
     d->m_timer.setInterval(1000);
     connect(&d->m_timer, &QTimer::timeout, this, &SynchronousProcess::slotTimeout);
-    connect(&d->m_process,
-            static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+    connect(&d->m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &SynchronousProcess::finished);
     connect(&d->m_process, &QProcess::errorOccurred, this, &SynchronousProcess::error);
     connect(&d->m_process, &QProcess::readyReadStandardOutput,
@@ -317,8 +329,8 @@ SynchronousProcess::SynchronousProcess() :
 
 SynchronousProcess::~SynchronousProcess()
 {
-    disconnect(&d->m_timer, 0, this, 0);
-    disconnect(&d->m_process, 0, this, 0);
+    disconnect(&d->m_timer, nullptr, this, nullptr);
+    disconnect(&d->m_process, nullptr, this, nullptr);
     delete d;
 }
 
@@ -442,20 +454,40 @@ static bool isGuiThread()
     return QThread::currentThread() == QCoreApplication::instance()->thread();
 }
 
-SynchronousProcessResponse SynchronousProcess::run(const QString &binary,
-                                                   const QStringList &args)
+SynchronousProcessResponse SynchronousProcess::run(const CommandLine &cmd,
+                                                   const QByteArray &writeData)
 {
-    if (debug)
-        qDebug() << '>' << Q_FUNC_INFO << binary << args;
+    qCDebug(processLog).noquote() << "Starting:" << cmd.toUserOutput();
+    ExecuteOnDestruction logResult([this] {
+        qCDebug(processLog) << d->m_result;
+    });
 
     d->clearForRun();
 
     // On Windows, start failure is triggered immediately if the
     // executable cannot be found in the path. Do not start the
     // event loop in that case.
-    d->m_binary = binary;
-    d->m_process.start(binary, args, QIODevice::ReadOnly);
-    d->m_process.closeWriteChannel();
+    d->m_binary = cmd.executable();
+    // using QProcess::start() and passing program, args and OpenMode results in a different
+    // quoting of arguments than using QProcess::setArguments() beforehand and calling start()
+    // only with the OpenMode
+    d->m_process.setProgram(cmd.executable().toString());
+    d->m_process.setArguments(cmd.splitArguments());
+    connect(&d->m_process, &QProcess::started, this, [this, writeData] {
+        if (!writeData.isEmpty()) {
+            int pos = 0;
+            int sz = writeData.size();
+            do {
+                d->m_process.waitForBytesWritten();
+                auto res = d->m_process.write(writeData.constData() + pos, sz - pos);
+                if (res > 0) pos += res;
+            } while (pos < sz);
+            d->m_process.waitForBytesWritten();
+        }
+        d->m_process.closeWriteChannel();
+    });
+    d->m_process.start(writeData.isEmpty() ? QIODevice::ReadOnly : QIODevice::ReadWrite);
+
     if (!d->m_startFailure) {
         d->m_timer.start();
         if (isGuiThread())
@@ -474,21 +506,25 @@ SynchronousProcessResponse SynchronousProcess::run(const QString &binary,
             QApplication::restoreOverrideCursor();
     }
 
-    if (debug)
-        qDebug() << '<' << Q_FUNC_INFO << binary << d->m_result;
     return  d->m_result;
 }
 
-SynchronousProcessResponse SynchronousProcess::runBlocking(const QString &binary, const QStringList &args)
+SynchronousProcessResponse SynchronousProcess::runBlocking(const CommandLine &cmd)
 {
+    qCDebug(processLog).noquote() << "Starting blocking:" << cmd.toUserOutput();
+    ExecuteOnDestruction logResult([this] {
+        qCDebug(processLog) << d->m_result;
+    });
+
     d->clearForRun();
 
     // On Windows, start failure is triggered immediately if the
     // executable cannot be found in the path. Do not start the
     // event loop in that case.
-    d->m_binary = binary;
-    d->m_process.start(binary, args, QIODevice::ReadOnly);
-    if (!d->m_process.waitForStarted(d->m_maxHangTimerCount * 1000)) {
+    d->m_binary = cmd.executable();
+    d->m_process.start(cmd.executable().toString(), cmd.splitArguments(), QIODevice::ReadOnly);
+    if (!d->m_process.waitForStarted(d->m_maxHangTimerCount * 1000)
+            && d->m_process.state() == QProcess::NotRunning) {
         d->m_result.result = SynchronousProcessResponse::StartFailed;
         return d->m_result;
     }
@@ -539,10 +575,10 @@ static inline bool askToKill(const QString &binary = QString())
     msg += QLatin1Char(' ');
     msg += SynchronousProcess::tr("Would you like to terminate it?");
     // Restore the cursor that is set to wait while running.
-    const bool hasOverrideCursor = QApplication::overrideCursor() != 0;
+    const bool hasOverrideCursor = QApplication::overrideCursor() != nullptr;
     if (hasOverrideCursor)
         QApplication::restoreOverrideCursor();
-    QMessageBox::StandardButton answer = QMessageBox::question(0, title, msg, QMessageBox::Yes|QMessageBox::No);
+    QMessageBox::StandardButton answer = QMessageBox::question(nullptr, title, msg, QMessageBox::Yes|QMessageBox::No);
     if (hasOverrideCursor)
         QApplication::setOverrideCursor(Qt::WaitCursor);
     return answer == QMessageBox::Yes;
@@ -554,7 +590,7 @@ void SynchronousProcess::slotTimeout()
         if (debug)
             qDebug() << Q_FUNC_INFO << "HANG detected, killing";
         d->m_waitingForUser = true;
-        const bool terminate = !d->m_timeOutMessageBoxEnabled || askToKill(d->m_binary);
+        const bool terminate = !d->m_timeOutMessageBoxEnabled || askToKill(d->m_binary.toString());
         d->m_waitingForUser = false;
         if (terminate) {
             SynchronousProcess::stopProcess(d->m_process);
@@ -615,7 +651,7 @@ void SynchronousProcess::processStdErr(bool emitSignals)
 
 QSharedPointer<QProcess> SynchronousProcess::createProcess(unsigned flags)
 {
-    TerminalControllingProcess *process = new TerminalControllingProcess;
+    auto process = new TerminalControllingProcess;
     process->setFlags(flags);
     return QSharedPointer<QProcess>(process);
 }

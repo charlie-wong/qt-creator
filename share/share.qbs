@@ -11,6 +11,7 @@ Product {
         qbs.installSourceBase: "qtcreator"
         prefix: "qtcreator/"
         files: [
+            "android/**/*",
             "cplusplus/**/*",
             "debugger/**/*",
             "designer/**/*",
@@ -21,11 +22,16 @@ Product {
             "qmlicons/**/*",
             "qml-type-descriptions/**/*",
             "schemes/**/*",
+            "scripts/**/*",
             "snippets/**/*",
             "styles/**/*",
             "templates/**/*",
             "themes/**/*",
             "welcomescreen/**/*"
+        ]
+        excludeFiles: [
+            "qml-type-descriptions/qbs-bundle.json",
+            "qml-type-descriptions/qbs.qmltypes",
         ]
     }
 
@@ -36,7 +42,7 @@ Product {
         qbs.installSourceBase: project.ide_source_tree + "/src/share/3rdparty"
         prefix: project.ide_source_tree + "/src/share/3rdparty/"
         files: [
-            "generic-highlighter/**/*"
+            "fonts/**/*"
         ]
     }
 
@@ -51,7 +57,6 @@ Product {
                 "lupdate.xml",
                 "qmlscene.xml",
                 "qmlviewer.xml",
-                "sort.xml",
             ]
             if (qbs.targetOS.contains("windows"))
                 list.push("notepad_win.xml");

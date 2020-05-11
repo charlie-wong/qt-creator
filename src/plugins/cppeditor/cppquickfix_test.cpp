@@ -23,6 +23,8 @@
 **
 ****************************************************************************/
 
+#include "cppeditor.h"
+#include "cppeditorwidget.h"
 #include "cppeditorplugin.h"
 #include "cppeditortestcase.h"
 #include "cppquickfixassistant.h"
@@ -46,6 +48,7 @@
 using namespace Core;
 using namespace CPlusPlus;
 using namespace CppEditor::Internal::Tests;
+using namespace CppTools;
 using namespace TextEditor;
 
 using CppTools::Tests::TestIncludePaths;
@@ -104,7 +107,7 @@ QList<QuickFixTestDocument::Ptr> singleDocument(const QByteArray &original,
 }
 
 BaseQuickFixTestCase::BaseQuickFixTestCase(const QList<QuickFixTestDocument::Ptr> &testDocuments,
-                                           const ProjectPartHeaderPaths &headerPaths)
+                                           const ProjectExplorer::HeaderPaths &headerPaths)
     : m_testDocuments(testDocuments)
     , m_cppCodeStylePreferences(0)
     , m_restoreHeaderPaths(false)
@@ -224,7 +227,7 @@ static QString &removeTrailingWhitespace(QString &input)
 
 QuickFixOperationTest::QuickFixOperationTest(const QList<QuickFixTestDocument::Ptr> &testDocuments,
                                              CppQuickFixFactory *factory,
-                                             const ProjectPartHeaderPaths &headerPaths,
+                                             const ProjectExplorer::HeaderPaths &headerPaths,
                                              int operationIndex,
                                              const QByteArray &expectedFailMessage)
     : BaseQuickFixTestCase(testDocuments, headerPaths)
@@ -236,7 +239,6 @@ QuickFixOperationTest::QuickFixOperationTest(const QList<QuickFixTestDocument::P
     QuickFixOperations operations;
     factory->match(quickFixInterface, operations);
     if (operations.isEmpty()) {
-        QEXPECT_FAIL("onBaseOfQualifiedClassName", "QTCREATORBUG-14499", Continue);
         QVERIFY(testDocuments.first()->m_expectedSource.isEmpty());
         return;
     }
@@ -267,15 +269,15 @@ void QuickFixOperationTest::run(const QList<QuickFixTestDocument::Ptr> &testDocu
                                 const QString &headerPath,
                                 int operationIndex)
 {
-    ProjectPartHeaderPaths headerPaths;
-    headerPaths += ProjectPartHeaderPath(headerPath, ProjectPartHeaderPath::IncludePath);
+    ProjectExplorer::HeaderPaths headerPaths;
+    headerPaths.push_back({headerPath, ProjectExplorer::HeaderPathType::User});
     QuickFixOperationTest(testDocuments, factory, headerPaths, operationIndex);
 }
 
 QuickFixOfferedOperationsTest::QuickFixOfferedOperationsTest(
         const QList<QuickFixTestDocument::Ptr> &testDocuments,
         CppQuickFixFactory *factory,
-        const ProjectPartHeaderPaths &headerPaths,
+        const ProjectExplorer::HeaderPaths &headerPaths,
         const QStringList &expectedOperations)
     : BaseQuickFixTestCase(testDocuments, headerPaths)
 {
@@ -1576,7 +1578,7 @@ void CppEditorPlugin::test_quickfix_data()
              "    f2(&str);\n"
              "}\n")
         << _("void foo() {\n"
-             "    QString *str;\n"
+             "    QString *str = new QString;\n"
              "    if (!str->isEmpty())\n"
              "        str->clear();\n"
              "    f1(*str);\n"
@@ -1610,7 +1612,7 @@ void CppEditorPlugin::test_quickfix_data()
              "        str->clear();\n"
              "}\n")
         << _("void foo() {\n"
-             "    QString str = QLatin1String(\"schnurz\");\n"
+             "    QString str(QLatin1String(\"schnurz\"));\n"
              "    if (!str.isEmpty())\n"
              "        str.clear();\n"
              "}\n");
@@ -1729,7 +1731,7 @@ void CppEditorPlugin::test_quickfix_data()
              "    f1(str);\n"
              "}\n")
         << _("void foo() {\n"
-             "    QString *str;\n"
+             "    QString *str = new QString;\n"
              "    str->clear();\n"
              "    {\n"
              "        QString str;\n"
@@ -1805,6 +1807,45 @@ void CppEditorPlugin::test_quickfix_data()
              "    int bar;\n"
              "    BAR = *foo;\n"
              "}\n");
+
+    QString testObjAndFunc = "struct Object\n"
+                             "{\n"
+                             "    Object(%1){}\n"
+                             "};\n"
+                             "void func()\n"
+                             "{\n"
+                             "    %2\n"
+                             "}\n";
+
+    QTest::newRow("ConvertToStack1_QTCREATORBUG23181")
+        << CppQuickFixFactoryPtr(new ConvertFromAndToPointer)
+        << _(testObjAndFunc.arg("int").arg("Object *@obj = new Object(0);").toUtf8())
+        << _(testObjAndFunc.arg("int").arg("Object obj(0);").toUtf8());
+
+    QTest::newRow("ConvertToStack2_QTCREATORBUG23181")
+        << CppQuickFixFactoryPtr(new ConvertFromAndToPointer)
+        << _(testObjAndFunc.arg("int").arg("Object *@obj = new Object{0};").toUtf8())
+        << _(testObjAndFunc.arg("int").arg("Object obj{0};").toUtf8());
+
+    QTest::newRow("ConvertToPointer1_QTCREATORBUG23181")
+        << CppQuickFixFactoryPtr(new ConvertFromAndToPointer)
+        << _(testObjAndFunc.arg("").arg("Object @obj;").toUtf8())
+        << _(testObjAndFunc.arg("").arg("Object *obj = new Object;").toUtf8());
+
+    QTest::newRow("ConvertToPointer2_QTCREATORBUG23181")
+        << CppQuickFixFactoryPtr(new ConvertFromAndToPointer)
+        << _(testObjAndFunc.arg("").arg("Object @obj();").toUtf8())
+        << _(testObjAndFunc.arg("").arg("Object *obj = new Object();").toUtf8());
+
+    QTest::newRow("ConvertToPointer3_QTCREATORBUG23181")
+        << CppQuickFixFactoryPtr(new ConvertFromAndToPointer)
+        << _(testObjAndFunc.arg("").arg("Object @obj{};").toUtf8())
+        << _(testObjAndFunc.arg("").arg("Object *obj = new Object{};").toUtf8());
+
+    QTest::newRow("ConvertToPointer4_QTCREATORBUG23181")
+        << CppQuickFixFactoryPtr(new ConvertFromAndToPointer)
+        << _(testObjAndFunc.arg("int").arg("Object @obj(0);").toUtf8())
+        << _(testObjAndFunc.arg("int").arg("Object *obj = new Object(0);").toUtf8());
 
     QTest::newRow("InsertQtPropertyMembers_noTriggerInvalidCode")
         << CppQuickFixFactoryPtr(new InsertQtPropertyMembers)
@@ -1910,7 +1951,7 @@ void CppEditorPlugin::test_quickfix_GenerateGetterSetter_onlyGetter()
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     GenerateGetterSetter factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), 1);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), 1);
 }
 
 /// Checks: Only generate setter
@@ -1947,7 +1988,7 @@ void CppEditorPlugin::test_quickfix_GenerateGetterSetter_onlySetter()
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     GenerateGetterSetter factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), 2);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), 2);
 }
 
 class CppCodeStyleSettingsChanger {
@@ -2026,7 +2067,7 @@ void CppEditorPlugin::test_quickfix_GenerateGetterSetter_onlyGetter_DontPreferGe
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     GenerateGetterSetter factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), 1);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), 1);
 }
 
 /// Checks: Offer a "generate getter" quick fix if there is a setter
@@ -2147,7 +2188,7 @@ void CppEditorPlugin::test_quickfix_InsertDefFromDecl_afterClass()
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     InsertDefFromDecl factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), 1);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), 1);
 }
 
 /// Check from header file: If there is a source file, insert the definition in the source file.
@@ -2333,7 +2374,7 @@ void CppEditorPlugin::test_quickfix_InsertDefFromDecl_insideClass()
         "};";
 
     InsertDefFromDecl factory;
-    QuickFixOperationTest(singleDocument(original, expected), &factory, ProjectPartHeaderPaths(),
+    QuickFixOperationTest(singleDocument(original, expected), &factory, ProjectExplorer::HeaderPaths(),
                           1);
 }
 
@@ -2347,7 +2388,7 @@ void CppEditorPlugin::test_quickfix_InsertDefFromDecl_notTriggeringWhenDefinitio
             "void Foo::bar() {}\n";
 
     InsertDefFromDecl factory;
-    QuickFixOperationTest(singleDocument(original, ""), &factory, ProjectPartHeaderPaths(), 1);
+    QuickFixOperationTest(singleDocument(original, ""), &factory, ProjectExplorer::HeaderPaths(), 1);
 }
 
 /// Find right implementation file.
@@ -2492,6 +2533,29 @@ void CppEditorPlugin::test_quickfix_InsertDefFromDecl_respectWsInOperatorNames2(
         "};\n"
         "\n"
         "Foo &Foo::operator=()\n"
+        "{\n"
+        "\n"
+        "}\n";
+
+    InsertDefFromDecl factory;
+    QuickFixOperationTest(singleDocument(original, expected), &factory);
+}
+
+/// Check that the noexcept exception specifier is transferred
+void CppEditorPlugin::test_quickfix_InsertDefFromDecl_noexcept_specifier()
+{
+    QByteArray original =
+        "class Foo\n"
+        "{\n"
+        "    void @foo() noexcept(false);\n"
+        "};\n";
+    QByteArray expected =
+        "class Foo\n"
+        "{\n"
+        "    void foo() noexcept(false);\n"
+        "};\n"
+        "\n"
+        "void Foo::foo() noexcept(false)\n"
         "{\n"
         "\n"
         "}\n";
@@ -2811,7 +2875,7 @@ void insertToSectionDeclFromDef(const QByteArray &section, int sectionIndex)
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     InsertDeclFromDef factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), sectionIndex);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), sectionIndex);
 }
 
 /// Check from source file: Insert in header file.
@@ -3025,6 +3089,37 @@ void CppEditorPlugin::test_quickfix_AddIncludeForUndefinedIdentifier_data()
         ;
     testDocuments << QuickFixTestDocument::create("afile.cpp", original, expected);
     QTest::newRow("onBaseOfQualifiedClassName")
+            << TestIncludePaths::globalIncludePath()
+            << testDocuments << firstRefactoringOperation << "";
+    testDocuments.clear();
+
+    // -------------------------------------------------------------------------------------------
+
+    // Header File
+    original = "template <typename T> class Foo { static void bar() {} };\n";
+    expected = original;
+    testDocuments << QuickFixTestDocument::create("afile.h", original, expected);
+
+    // Source File
+    original =
+        "#include \"header.h\"\n"
+        "\n"
+        "void f()\n"
+        "{\n"
+        "    @Foo<int>::bar();\n"
+        "}\n"
+        ;
+    expected =
+        "#include \"afile.h\"\n"
+        "#include \"header.h\"\n"
+        "\n"
+        "void f()\n"
+        "{\n"
+        "    Foo<int>::bar();\n"
+        "}\n"
+        ;
+    testDocuments << QuickFixTestDocument::create("afile.cpp", original, expected);
+    QTest::newRow("onBaseOfQualifiedTemplateClassName")
             << TestIncludePaths::globalIncludePath()
             << testDocuments << firstRefactoringOperation << "";
     testDocuments.clear();
@@ -3639,9 +3734,8 @@ void CppEditorPlugin::test_quickfix_AddIncludeForUndefinedIdentifier_noDoubleQtH
     original = expected = "@QDir dir;\n";
     testDocuments << QuickFixTestDocument::create(base + "/fileWantsToUseQDir.cpp", original, expected);
 
-    ProjectPartHeaderPaths headerPaths;
-    headerPaths += ProjectPartHeaderPath(TestIncludePaths::globalQtCoreIncludePath(),
-                                         ProjectPartHeaderPath::IncludePath);
+    ProjectExplorer::HeaderPaths headerPaths{{TestIncludePaths::globalQtCoreIncludePath(),
+                                              ProjectExplorer::HeaderPathType::User}};
 
     AddIncludeForUndefinedIdentifier factory;
     const QStringList expectedOperations = QStringList("Add #include <QDir>");
@@ -3809,7 +3903,7 @@ void CppEditorPlugin::test_quickfix_MoveFuncDefOutside_MemberFuncOutside2()
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     MoveFuncDefOutside factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), 1);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), 1);
 }
 
 /// Check: Move definition from header to cpp (with namespace).
@@ -4116,7 +4210,7 @@ void CppEditorPlugin::test_quickfix_MoveFuncDefOutside_afterClass()
     testDocuments << QuickFixTestDocument::create("file.cpp", original, expected);
 
     MoveFuncDefOutside factory;
-    QuickFixOperationTest(testDocuments, &factory, ProjectPartHeaderPaths(), 1);
+    QuickFixOperationTest(testDocuments, &factory, ProjectExplorer::HeaderPaths(), 1);
 }
 
 /// Check if whitespace is respected for operator functions
@@ -4191,7 +4285,7 @@ void CppEditorPlugin::test_quickfix_MoveFuncDefOutside_macroUses()
 
     MoveFuncDefOutside factory;
     QuickFixOperationTest(singleDocument(original, expected), &factory,
-                          ProjectPartHeaderPaths(), 0, "QTCREATORBUG-12314");
+                          ProjectExplorer::HeaderPaths(), 0, "QTCREATORBUG-12314");
 }
 
 void CppEditorPlugin::test_quickfix_MoveFuncDefOutside_template()
@@ -4542,7 +4636,7 @@ void CppEditorPlugin::test_quickfix_MoveFuncDefToDecl_macroUses()
 
     MoveFuncDefToDecl factory;
     QuickFixOperationTest(singleDocument(original, expected), &factory,
-                          ProjectPartHeaderPaths(), 0, "QTCREATORBUG-12314");
+                          ProjectExplorer::HeaderPaths(), 0, "QTCREATORBUG-12314");
 }
 
 void CppEditorPlugin::test_quickfix_MoveFuncDefToDecl_override()

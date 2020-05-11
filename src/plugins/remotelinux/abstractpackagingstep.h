@@ -30,7 +30,6 @@
 #include <projectexplorer/buildstep.h>
 
 namespace RemoteLinux {
-class RemoteLinuxDeployConfiguration;
 
 namespace Internal { class AbstractPackagingStepPrivate; }
 
@@ -39,16 +38,14 @@ class REMOTELINUX_EXPORT AbstractPackagingStep : public ProjectExplorer::BuildSt
     Q_OBJECT
 
 public:
-    AbstractPackagingStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
-    AbstractPackagingStep(ProjectExplorer::BuildStepList *bsl, AbstractPackagingStep *other);
+    explicit AbstractPackagingStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
     ~AbstractPackagingStep() override;
 
     QString packageFilePath() const;
     QString cachedPackageFilePath() const;
-    bool init(QList<const BuildStep *> &earlierSteps) override;
+    bool init() override;
 
 signals:
-    void packageFilePathChanged();
     void unmodifyDeploymentData();
 
 protected:
@@ -63,13 +60,10 @@ protected:
     virtual bool isPackagingNeeded() const;
 
 private:
-    void handleBuildConfigurationChanged();
     void setDeploymentDataUnmodified();
     void setDeploymentDataModified();
 
     virtual QString packageFileName() const = 0;
-
-    void ctor();
 
     Internal::AbstractPackagingStepPrivate *d;
 };

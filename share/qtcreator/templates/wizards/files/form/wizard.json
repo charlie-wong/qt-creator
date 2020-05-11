@@ -6,12 +6,13 @@
     "trDescription": "Creates a Qt Designer form that you can add to a Qt Widget Project. This is useful if you already have an existing class for the UI business logic.",
     "trDisplayName": "Qt Designer Form",
     "trDisplayCategory": "Qt",
-    "enabled": "%{JS: [ %{Plugins} ].indexOf('Designer') >= 0}",
+    "iconText": "ui",
+    "enabled": "%{JS: value('Plugins').indexOf('Designer') >= 0}",
 
     "options": [
-        { "key": "UiClass", "value": "%{JS: QtSupport.uiClassName([ %{FormContents} ].join('\\n'))}" },
+        { "key": "UiClass", "value": "%{JS: QtSupport.uiClassName(value('FormContents'))}" },
         { "key": "Extension", "value": "%{JS: Util.preferredSuffix('application/x-designer')}"},
-        { "key": "InitialFileName", "value": "%{JS: Cpp.classToFileName('%{UiClass}', '%{Extension}') }" }
+        { "key": "InitialFileName", "value": "%{JS: Cpp.classToFileName(value('UiClass'), value('Extension')) }" }
     ],
 
     "pages":
@@ -40,7 +41,7 @@
             "data":
             {
                 "source": "file.ui",
-                "target": "%{JS: Cpp.fileName('%{TargetPath}', '%{Extension}')}",
+                "target": "%{JS: Util.fileName(value('TargetPath'), value('Extension'))}",
                 "openInEditor": true
             }
         }

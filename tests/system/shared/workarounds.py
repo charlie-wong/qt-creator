@@ -24,34 +24,6 @@
 ############################################################################
 
 import urllib2
-import re
-
-############ functions not related to issues tracked inside jira ############
-
-def __checkWithoutWidget__(*args):
-    return className(args[0]) == 'QMenu' and args[0].visible
-
-def __checkWithWidget__(*args):
-    return (__checkWithoutWidget__(args[0])
-            and widgetContainsPoint(waitForObject(args[1]), args[0].mapToGlobal(QPoint(0 ,0))))
-
-# hack for activating context menus on Mac because of Squish5/Qt5.2 problems
-# param item a string holding the menu item to invoke (just the label)
-# param widget an object; if provided there will be an additional check if the menu's top left
-#              corner is placed on this widget
-def macHackActivateContextMenuItem(item, widget=None):
-    if widget:
-        func = __checkWithWidget__
-    else:
-        func = __checkWithoutWidget__
-    for obj in object.topLevelObjects():
-        try:
-            if func(obj, widget):
-                activateItem(waitForObjectItem(obj, item))
-                return True
-        except:
-            pass
-    return False
 
 ################ workarounds for issues tracked inside jira #################
 
@@ -59,13 +31,6 @@ JIRA_URL='https://bugreports.qt.io/browse'
 
 class JIRA:
     __instance__ = None
-
-    # internal exception to be used inside workaround functions (lack of having return values)
-    class JiraException(Exception):
-        def __init__(self, value):
-            self.value = value
-        def __str__(self):
-            return repr(self.value)
 
     # Helper class
     class Bug:
@@ -94,44 +59,11 @@ class JIRA:
     def __setattr__(self, attr, value):
         return setattr(self.__instance__, attr, value)
 
-    # function to get an instance of the singleton
-    @staticmethod
-    def getInstance():
-        if '_JIRA__instance__' in JIRA.__dict__:
-            return JIRA.__instance__
-        else:
-            return JIRA.__impl(0, Bug.CREATOR)
-
     # function to check if the given bug is open or not
     @staticmethod
     def isBugStillOpen(number, bugType=Bug.CREATOR):
         tmpJIRA = JIRA(number, bugType)
         return tmpJIRA.isOpen()
-
-    # function that performs the workaround (function) for the given bug
-    # if the function needs additional arguments pass them as 3rd parameter
-    @staticmethod
-    def performWorkaroundForBug(number, bugType=Bug.CREATOR, *args):
-        if not JIRA.isBugStillOpen(number, bugType):
-            test.warning("Bug %s-%d is closed for version %s." %
-                         (bugType, number, JIRA(number, bugType)._fix),
-                         "You should probably remove potential code inside workarounds.py")
-        functionToCall = JIRA.getInstance().__bugs__.get("%s-%d" % (bugType, number), None)
-        if functionToCall:
-            test.warning("Using workaround for %s-%d" % (bugType, number))
-            try:
-                functionToCall(*args)
-            except:
-                t, v = sys.exc_info()[0:2]
-                if t == JIRA.JiraException:
-                    raise JIRA.JiraException(v)
-                else:
-                    test.warning("Exception caught while executing workaround function.",
-                                 "%s (%s)" % (str(t), str(v)))
-            return True
-        else:
-            JIRA.getInstance()._exitFatal_(bugType, number)
-            return False
 
     # implementation of JIRA singleton
     class __impl:
@@ -140,8 +72,6 @@ class JIRA:
             self._number = number
             self._bugType = bugType
             self._fix = None
-            self._localOnly = os.getenv("SYSTEST_JIRA_NO_LOOKUP")=="1"
-            self.__initBugDict__()
             self._fetchResults_ = {}
             self.__fetchResolutionFromJira__()
 
@@ -155,7 +85,7 @@ class JIRA:
                 test.warning("Resolution of bug is '%s' - assuming 'Open' for now." % self._resolution,
                              "Please check the bugreport manually and update this test.")
                 return True
-            return self._resolution != 'Done'
+            return self._resolution not in ('Done', 'Fixed')
 
         # this function tries to fetch the resolution from JIRA for the given bug
         # if this isn't possible or the lookup is disabled it does only check the internal
@@ -170,30 +100,23 @@ class JIRA:
                 return
             data = None
             proxy = os.getenv("SYSTEST_PROXY", None)
-            if not self._localOnly:
-                try:
-                    if proxy:
-                        proxy = urllib2.ProxyHandler({'https': proxy})
-                        opener = urllib2.build_opener(proxy)
-                        urllib2.install_opener(opener)
-                    bugReport = urllib2.urlopen('%s/%s' % (JIRA_URL, bug))
-                    data = bugReport.read()
-                except:
-                    data = self.__tryExternalTools__(proxy)
-                    if data == None:
-                        test.warning("Sorry, ssl module missing - cannot fetch data via HTTPS",
-                                     "Try to install the ssl module by yourself, or set the python "
-                                     "path inside SQUISHDIR/etc/paths.ini to use a python version with "
-                                     "ssl support OR install wget or curl to get rid of this warning!")
-                        self._localOnly = True
+            try:
+                if proxy:
+                    proxy = urllib2.ProxyHandler({'https': proxy})
+                    opener = urllib2.build_opener(proxy)
+                    urllib2.install_opener(opener)
+                bugReport = urllib2.urlopen('%s/%s' % (JIRA_URL, bug))
+                data = bugReport.read()
+            except:
+                data = self.__tryExternalTools__(proxy)
+                if data == None:
+                    test.warning("Sorry, ssl module missing - cannot fetch data via HTTPS",
+                                 "Try to install the ssl module by yourself, or set the python "
+                                 "path inside SQUISHDIR/etc/paths.ini to use a python version with "
+                                 "ssl support OR install wget or curl to get rid of this warning!")
             if data == None:
-                if bug in self.__bugs__:
-                    test.warning("Using internal dict - bug status could have changed already",
-                                 "Please check manually!")
-                    self._resolution = None
-                else:
-                    test.fatal("No workaround function deposited for %s" % bug)
-                    self._resolution = 'Done'
+                test.fatal("No resolution info for %s" % bug)
+                self._resolution = 'Done'
             else:
                 data = data.replace("\r", "").replace("\n", "")
                 resPattern = re.compile('<span\s+id="resolution-val".*?>(?P<resolution>.*?)</span>')
@@ -250,14 +173,3 @@ class JIRA:
                          "%s[...]" % fetched[:200])
             else:
                 test.log("Fetched and cropped data: [...]%s[...]" % fetched[resoInd-20:resoInd+100])
-
-        # this function initializes the bug dict for localOnly usage and
-        # for later lookup which function to call for which bug
-        # ALWAYS update this dict when adding a new function for a workaround!
-        def __initBugDict__(self):
-            self.__bugs__= {}
-        # helper function - will be called if no workaround for the requested bug is deposited
-        def _exitFatal_(self, bugType, number):
-            test.fatal("No workaround found for bug %s-%d" % (bugType, number))
-
-############### functions that hold workarounds #################################

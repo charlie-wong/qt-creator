@@ -58,7 +58,7 @@ public:
     QList<QmlObjectNode> allAffectedNodes() const;
     QString name() const;
     void setName(const QString &name);
-    bool isValid() const;
+    bool isValid() const override;
     static bool isValidQmlModelState(const ModelNode &modelNode);
     void destroy();
 
@@ -69,10 +69,12 @@ public:
 
     static ModelNode createQmlState(AbstractView *view, const PropertyListType &propertyList);
 
+    void setAsDefault();
+    bool isDefault() const;
+
 protected:
     void addChangeSetIfNotExists(const ModelNode &node);
     static QmlModelState createBaseState(const AbstractView *view);
-
 };
 
 } //QmlDesigner

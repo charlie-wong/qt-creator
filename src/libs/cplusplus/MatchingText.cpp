@@ -34,6 +34,9 @@
 #include <QChar>
 #include <QDebug>
 
+#include <utils/algorithm.h>
+#include <utils/optional.h>
+
 using namespace CPlusPlus;
 
 enum { MAX_NUM_LINES = 20 };
@@ -95,7 +98,7 @@ static bool insertQuote(const QChar ch, const BackwardsScanner &tk)
         return true;
 
     // Insert a matching quote after an operator.
-    if (token.isOperator())
+    if (token.isPunctuationOrOperator())
         return true;
 
     if (token.isKeyword())
@@ -125,7 +128,7 @@ static int countSkippedChars(const QString &blockText, const QString &textToProc
     return skippedChars;
 }
 
-static const Token tokenAtPosition(const Tokens &tokens, const unsigned pos)
+static const Token tokenAtPosition(const Tokens &tokens, const int pos)
 {
     for (int i = tokens.size() - 1; i >= 0; --i) {
         const Token tk = tokens.at(i);
@@ -135,17 +138,300 @@ static const Token tokenAtPosition(const Tokens &tokens, const unsigned pos)
     return Token();
 }
 
+static LanguageFeatures languageFeatures()
+{
+    LanguageFeatures features;
+    features.qtEnabled = false;
+    features.qtKeywordsEnabled = false;
+    features.qtMocRunEnabled = false;
+    features.cxx11Enabled = true;
+    features.cxx14Enabled = true;
+    features.cxxEnabled = true;
+    features.c99Enabled = true;
+    features.objCEnabled = true;
+
+    return features;
+}
+
+static Tokens getTokens(const QTextCursor &cursor, int &prevState)
+{
+    SimpleLexer tokenize;
+    tokenize.setLanguageFeatures(languageFeatures());
+
+    prevState = BackwardsScanner::previousBlockState(cursor.block()) & 0xFF;
+    return tokenize(cursor.block().text(), prevState);
+}
+
+static int isEmptyOrWhitespace(const QString &text)
+{
+    return Utils::allOf(text, [](const QChar &c) {return c.isSpace(); });
+}
+
+static bool isCursorAtEndOfLineButMaybeBeforeComment(const QTextCursor &cursor)
+{
+    const QString textAfterCursor = cursor.block().text().mid(cursor.positionInBlock());
+    if (isEmptyOrWhitespace(textAfterCursor))
+        return true;
+
+    SimpleLexer tokenize;
+    tokenize.setLanguageFeatures(languageFeatures());
+    const Tokens tokens = tokenize(textAfterCursor);
+    return Utils::allOf(tokens, [](const Token &token) { return token.isComment(); });
+}
+
+using TokenIndexResult = Utils::optional<int>;
+
+// 10.6.1 Attribute syntax and semantics
+// This does not handle alignas() since it is not needed for the namespace case.
+static TokenIndexResult skipAttributeSpecifierSequence(const BackwardsScanner &tokens, int index)
+{
+    if (tokens[index].is(T_EOF_SYMBOL))
+        return {};
+
+    // [[ attribute-using-prefixopt attribute-list ]]
+    if (tokens[index].is(T_RBRACKET) && tokens[index - 1].is(T_RBRACKET)) {
+        // Skip everything within [[ ]]
+        for (int i = index - 2; !tokens[i].is(T_EOF_SYMBOL); --i) {
+            if (tokens[i].is(T_LBRACKET) && tokens[i - 1].is(T_LBRACKET))
+                return i - 2;
+        }
+
+        return {};
+    }
+
+    return index;
+}
+
+static TokenIndexResult skipNamespaceName(const BackwardsScanner &tokens, int index)
+{
+    if (tokens[index].is(T_EOF_SYMBOL))
+        return {};
+
+    if (!tokens[index].is(T_IDENTIFIER))
+        return index;
+
+    // Accept
+    //  SomeName
+    //  Some::Nested::Name
+    bool expectIdentifier = false;
+    for (int i = index - 1; !tokens[i].is(T_EOF_SYMBOL); --i) {
+        if (expectIdentifier) {
+            if (tokens[i].is(T_IDENTIFIER))
+                expectIdentifier = false;
+            else
+                return {};
+        } else if (tokens[i].is(T_COLON_COLON)) {
+            expectIdentifier = true;
+        } else {
+            return i;
+        }
+    }
+
+    return index;
+}
+
+// 10.3.1 Namespace definition
+static bool isAfterNamespaceDefinition(const BackwardsScanner &tokens, int index)
+{
+    if (tokens[index].is(T_EOF_SYMBOL))
+        return false;
+
+    // Handle optional name
+    TokenIndexResult newIndex = skipNamespaceName(tokens, index);
+    if (!newIndex)
+        return false;
+
+    // Handle optional attribute specifier sequence
+    newIndex = skipAttributeSpecifierSequence(tokens, newIndex.value());
+    if (!newIndex)
+        return false;
+
+    return tokens[newIndex.value()].is(T_NAMESPACE);
+}
+
+static QTextBlock previousNonEmptyBlock(const QTextBlock &currentBlock)
+{
+    QTextBlock block = currentBlock.previous();
+    forever {
+        if (!block.isValid() || !isEmptyOrWhitespace(block.text()))
+            return block;
+        block = block.previous();
+    }
+}
+
+static QTextBlock nextNonEmptyBlock(const QTextBlock &currentBlock)
+{
+    QTextBlock block = currentBlock.next();
+    forever {
+        if (!block.isValid() || !isEmptyOrWhitespace(block.text()))
+            return block;
+        block = block.next();
+    }
+}
+
+static bool allowAutoClosingBraceAtEmptyLine(
+        const QTextBlock &block,
+        MatchingText::IsNextBlockDeeperIndented isNextDeeperIndented)
+{
+    QTextBlock previousBlock = previousNonEmptyBlock(block);
+    if (!previousBlock.isValid())
+        return false; // Nothing before
+
+    QTextBlock nextBlock = nextNonEmptyBlock(block);
+    if (!nextBlock.isValid())
+        return true; // Nothing behind
+
+    if (isNextDeeperIndented && isNextDeeperIndented(previousBlock))
+        return false; // Before indented
+
+    const QString trimmedText = previousBlock.text().trimmed();
+    return !trimmedText.endsWith(';')
+        && !trimmedText.endsWith('{')
+        && !trimmedText.endsWith('}');
+}
+
+static QChar firstNonSpace(const QTextCursor &cursor)
+{
+    int position = cursor.position();
+    QChar ch = cursor.document()->characterAt(position);
+    while (ch.isSpace())
+        ch = cursor.document()->characterAt(++position);
+
+    return ch;
+}
+
+static bool allowAutoClosingBraceByLookahead(const QTextCursor &cursor)
+{
+    const QChar lookAhead = firstNonSpace(cursor);
+    if (lookAhead.isNull())
+        return true;
+
+    switch (lookAhead.unicode()) {
+    case ';': case ',':
+    case ')': case '}': case ']':
+        return true;
+    }
+
+    return false;
+}
+
+static bool isRecordLikeToken(const Token &token)
+{
+    return token.is(T_CLASS)
+        || token.is(T_STRUCT)
+        || token.is(T_UNION)
+        || token.is(T_ENUM);
+}
+
+static bool isRecordLikeToken(const BackwardsScanner &tokens, int index)
+{
+    if (index + tokens.offset() < tokens.size() - 1)
+        return isRecordLikeToken(tokens[index]);
+    return false;
+}
+
+static bool recordLikeHasToFollowToken(const Token &token)
+{
+    return token.is(T_SEMICOLON)
+        || token.is(T_LBRACE) // e.g. class X {
+        || token.is(T_RBRACE) // e.g. function definition
+        || token.is(T_EOF_SYMBOL);
+}
+
+static bool recordLikeMightFollowToken(const Token &token)
+{
+    return token.is(T_IDENTIFIER) // e.g. macro like QT_END_NAMESPACE
+        || token.is(T_ANGLE_STRING_LITERAL) // e.g. #include directive
+        || token.is(T_STRING_LITERAL) // e.g. #include directive
+        || token.isComment();
+}
+
+static bool isAfterRecordLikeDefinition(const BackwardsScanner &tokens, int index)
+{
+    for (;; --index) {
+        if (recordLikeHasToFollowToken(tokens[index]))
+            return isRecordLikeToken(tokens, index + 1);
+
+        if (recordLikeMightFollowToken(tokens[index]) && isRecordLikeToken(tokens, index + 1))
+            return true;
+    }
+
+    return false;
+}
+
+static bool isControlFlowKeywordRequiringParentheses(const Token &token)
+{
+    return token.is(T_IF)
+        || token.is(T_WHILE)
+        || token.is(T_FOR)
+        || token.is(T_SWITCH)
+        || token.is(T_CATCH);
+}
+
+static bool isAfterControlFlow(const BackwardsScanner &tokens, int index)
+{
+    const Token &token = tokens[index];
+    if (token.is(T_DO) || token.is(T_ELSE) || token.is(T_TRY))
+        return true;
+
+    if (token.is(T_RPAREN)) {
+        const int startIndex = index + 1;
+        const int matchingBraceIndex = tokens.startOfMatchingBrace(startIndex);
+        if (matchingBraceIndex == startIndex)
+            return false; // No matching paren found.
+        return isControlFlowKeywordRequiringParentheses(tokens[matchingBraceIndex - 1]);
+    }
+
+    return false;
+}
+
+static bool allowAutoClosingBrace(const QTextCursor &cursor,
+                                  MatchingText::IsNextBlockDeeperIndented isNextIndented)
+{
+    if (MatchingText::isInCommentHelper(cursor))
+        return false;
+
+    BackwardsScanner tokens(cursor, languageFeatures(), /*maxBlockCount=*/ 5);
+    const int index = tokens.startToken() - 1;
+
+    if (tokens[index].isStringLiteral())
+        return false;
+
+    if (isAfterControlFlow(tokens, index))
+        return false;
+
+    if (isAfterNamespaceDefinition(tokens, index))
+        return false;
+
+    if (isAfterRecordLikeDefinition(tokens, index))
+        return false;
+
+    const QTextBlock block = cursor.block();
+    if (isEmptyOrWhitespace(block.text()))
+        return allowAutoClosingBraceAtEmptyLine(cursor.block(), isNextIndented);
+
+    if (isCursorAtEndOfLineButMaybeBeforeComment(cursor))
+        return !(isNextIndented && isNextIndented(block));
+
+    return allowAutoClosingBraceByLookahead(cursor);
+}
+
 bool MatchingText::contextAllowsAutoParentheses(const QTextCursor &cursor,
-                                                const QString &textToInsert)
+                                                const QString &textToInsert,
+                                                IsNextBlockDeeperIndented isNextIndented)
 {
     QChar ch;
 
     if (!textToInsert.isEmpty())
         ch = textToInsert.at(0);
 
+    if (ch == QLatin1Char('{'))
+        return allowAutoClosingBrace(cursor, isNextIndented);
+
     if (!shouldInsertMatchingText(cursor) && ch != QLatin1Char('\'') && ch != QLatin1Char('"'))
         return false;
-    else if (isInCommentHelper(cursor))
+
+    if (isInCommentHelper(cursor))
         return false;
 
     return true;
@@ -164,7 +450,7 @@ bool MatchingText::contextAllowsElectricCharacters(const QTextCursor &cursor)
         return false;
 
     if (token.isStringLiteral() || token.isCharLiteral()) {
-        const unsigned pos = cursor.selectionEnd() - cursor.block().position();
+        const int pos = cursor.selectionEnd() - cursor.block().position();
         if (pos <= token.utf16charsEnd())
             return false;
     }
@@ -194,30 +480,12 @@ bool MatchingText::shouldInsertMatchingText(QChar lookAhead)
     } // switch
 }
 
-static Tokens getTokens(const QTextCursor &cursor, int &prevState)
-{
-    LanguageFeatures features;
-    features.qtEnabled = false;
-    features.qtKeywordsEnabled = false;
-    features.qtMocRunEnabled = false;
-    features.cxx11Enabled = true;
-    features.cxxEnabled = true;
-    features.c99Enabled = true;
-    features.objCEnabled = true;
-
-    SimpleLexer tokenize;
-    tokenize.setLanguageFeatures(features);
-
-    prevState = BackwardsScanner::previousBlockState(cursor.block()) & 0xFF;
-    return tokenize(cursor.block().text(), prevState);
-}
-
 bool MatchingText::isInCommentHelper(const QTextCursor &cursor, Token *retToken)
 {
     int prevState = 0;
     const Tokens tokens = getTokens(cursor, prevState);
 
-    const unsigned pos = cursor.selectionEnd() - cursor.block().position();
+    const int pos = cursor.selectionEnd() - cursor.block().position();
 
     if (tokens.isEmpty() || pos < tokens.first().utf16charsBegin())
         return prevState > 0;
@@ -242,7 +510,7 @@ Kind MatchingText::stringKindAtCursor(const QTextCursor &cursor)
     int prevState = 0;
     const Tokens tokens = getTokens(cursor, prevState);
 
-    const unsigned pos = cursor.selectionEnd() - cursor.block().position();
+    const int pos = cursor.selectionEnd() - cursor.block().position();
 
     if (tokens.isEmpty() || pos <= tokens.first().utf16charsBegin())
         return T_EOF_SYMBOL;
@@ -364,7 +632,7 @@ QString MatchingText::insertParagraphSeparator(const QTextCursor &cursor)
             if (current.is(T_EOF_SYMBOL))
                 break;
 
-            if (current.is(T_CLASS) || current.is(T_STRUCT) || current.is(T_UNION) || current.is(T_ENUM)) {
+            if (isRecordLikeToken(current)) {
                 // found a class key.
                 QString str = QLatin1String("};");
 

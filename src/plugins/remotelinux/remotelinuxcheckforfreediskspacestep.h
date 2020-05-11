@@ -28,39 +28,17 @@
 #include "abstractremotelinuxdeploystep.h"
 
 namespace RemoteLinux {
-namespace Internal { class RemoteLinuxCheckForFreeDiskSpaceStepPrivate; }
 
 class REMOTELINUX_EXPORT RemoteLinuxCheckForFreeDiskSpaceStep : public AbstractRemoteLinuxDeployStep
 {
     Q_OBJECT
+
 public:
-    explicit RemoteLinuxCheckForFreeDiskSpaceStep(ProjectExplorer::BuildStepList *bsl,
-            Core::Id id = stepId());
-    RemoteLinuxCheckForFreeDiskSpaceStep(ProjectExplorer::BuildStepList *bsl,
-            RemoteLinuxCheckForFreeDiskSpaceStep *other);
+    RemoteLinuxCheckForFreeDiskSpaceStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
     ~RemoteLinuxCheckForFreeDiskSpaceStep() override;
 
-    void setPathToCheck(const QString &path);
-    QString pathToCheck() const;
-
-    void setRequiredSpaceInBytes(quint64 space);
-    quint64 requiredSpaceInBytes() const;
-
     static Core::Id stepId();
-    static QString stepDisplayName();
-
-protected:
-    bool fromMap(const QVariantMap &map) override;
-    QVariantMap toMap() const override;
-    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
-
-    bool initInternal(QString *error) override;
-    AbstractRemoteLinuxDeployService *deployService() const override;
-
-private:
-    void ctor();
-
-    Internal::RemoteLinuxCheckForFreeDiskSpaceStepPrivate *d;
+    static QString displayName();
 };
 
 } // namespace RemoteLinux

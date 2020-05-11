@@ -24,9 +24,8 @@
 ****************************************************************************/
 
 #include "argumentscollector.h"
-#include "../kdepasteprotocol.h"
-#include "../pastebindotcaprotocol.h"
 #include "../pastebindotcomprotocol.h"
+#include "../pastecodedotxyzprotocol.h"
 
 #include <QFile>
 #include <QObject>
@@ -46,12 +45,10 @@ class PasteReceiver : public QObject
 public:
     PasteReceiver(const QString &protocol, const QString &filePath) : m_filePath(filePath)
     {
-        if (protocol == KdePasteProtocol::protocolName().toLower())
-            m_protocol.reset(new KdePasteProtocol);
-        else if (protocol == PasteBinDotCaProtocol::protocolName().toLower())
-            m_protocol.reset(new PasteBinDotCaProtocol);
-        else if (protocol == PasteBinDotComProtocol::protocolName().toLower())
+        if (protocol == PasteBinDotComProtocol::protocolName().toLower())
             m_protocol.reset(new PasteBinDotComProtocol);
+        else if (protocol == PasteCodeDotXyzProtocol::protocolName().toLower())
+            m_protocol.reset(new PasteCodeDotXyzProtocol);
         else
             qFatal("Internal error: Invalid protocol.");
     }
@@ -91,9 +88,8 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    const QStringList protocols = {KdePasteProtocol::protocolName().toLower(),
-                                   PasteBinDotCaProtocol::protocolName().toLower(),
-                                   PasteBinDotComProtocol::protocolName().toLower()};
+    const QStringList protocols = {PasteBinDotComProtocol::protocolName().toLower(),
+                                   PasteCodeDotXyzProtocol::protocolName().toLower()};
     ArgumentsCollector argsCollector(protocols);
     QStringList arguments = QCoreApplication::arguments();
     arguments.removeFirst();

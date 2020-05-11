@@ -42,12 +42,12 @@ class GenericProjectWizardDialog : public Core::BaseFileWizard
     Q_OBJECT
 
 public:
-    explicit GenericProjectWizardDialog(const Core::BaseFileWizardFactory *factory, QWidget *parent = 0);
+    explicit GenericProjectWizardDialog(const Core::BaseFileWizardFactory *factory, QWidget *parent = nullptr);
 
     QString path() const;
     void setPath(const QString &path);
-    Utils::FileNameList selectedFiles() const;
-    Utils::FileNameList selectedPaths() const;
+    Utils::FilePaths selectedFiles() const;
+    Utils::FilePaths selectedPaths() const;
 
     QString projectName() const;
 

@@ -27,6 +27,7 @@
 #include "projectexplorer.h"
 #include "session.h"
 #include "projectnodes.h"
+#include "projecttree.h"
 #include "projectwizardpage.h"
 
 #include <utils/algorithm.h>
@@ -34,14 +35,15 @@
 #include <utils/stringutils.h>
 
 #include <coreplugin/icore.h>
-#include <texteditor/texteditorsettings.h>
+#include <projectexplorer/editorconfiguration.h>
+#include <projectexplorer/project.h>
+#include <projectexplorer/projecttree.h>
 #include <texteditor/icodestylepreferences.h>
 #include <texteditor/icodestylepreferencesfactory.h>
-#include <texteditor/normalindenter.h>
-#include <texteditor/tabsettings.h>
 #include <texteditor/storagesettings.h>
-#include <projectexplorer/project.h>
-#include <projectexplorer/editorconfiguration.h>
+#include <texteditor/tabsettings.h>
+#include <texteditor/texteditorsettings.h>
+#include <texteditor/textindenter.h>
 #include <utils/mimetypes/mimedatabase.h>
 #
 #include <QPointer>
@@ -120,7 +122,8 @@ void ProjectFileWizardExtension::firstExtensionPageShown(
 
     QStringList filePaths;
     ProjectAction projectAction;
-    if (m_context->wizard->kind()== IWizardFactory::ProjectWizard) {
+    const IWizardFactory::WizardKind kind = m_context->wizard->kind();
+    if (kind == IWizardFactory::ProjectWizard) {
         projectAction = AddSubProject;
         filePaths << generatedProjectFilePath(files);
     } else {
@@ -128,11 +131,36 @@ void ProjectFileWizardExtension::firstExtensionPageShown(
         filePaths = Utils::transform(files, &GeneratedFile::path);
     }
 
-    Node *contextNode = extraValues.value(QLatin1String(Constants::PREFERRED_PROJECT_NODE)).value<Node *>();
+    // Static cast from void * to avoid qobject_cast (which needs a valid object) in value().
+    auto contextNode = static_cast<Node *>(extraValues.value(QLatin1String(Constants::PREFERRED_PROJECT_NODE)).value<void *>());
+    auto project = static_cast<Project *>(extraValues.value(Constants::PROJECT_POINTER).value<void *>());
+    const QString path = extraValues.value(Constants::PREFERRED_PROJECT_NODE_PATH).toString();
 
-    m_context->page->initializeProjectTree(contextNode, filePaths, m_context->wizard->kind(),
+    m_context->page->initializeProjectTree(findWizardContextNode(contextNode, project, path),
+                                           filePaths, m_context->wizard->kind(),
                                            projectAction);
+    // Refresh combobox on project tree changes:
+    connect(ProjectTree::instance(), &ProjectTree::treeChanged,
+            m_context->page, [this, project, path, filePaths, kind, projectAction]() {
+        m_context->page->initializeProjectTree(
+                    findWizardContextNode(m_context->page->currentNode(), project, path), filePaths,
+                    kind, projectAction);
+    });
+
     m_context->page->initializeVersionControls();
+}
+
+Node *ProjectFileWizardExtension::findWizardContextNode(Node *contextNode, Project *project,
+                                                        const QString &path)
+{
+    if (contextNode && !ProjectTree::hasNode(contextNode)) {
+        if (SessionManager::projects().contains(project) && project->rootProjectNode()) {
+            contextNode = project->rootProjectNode()->findNode([path](const Node *n) {
+                return path == n->filePath().toString();
+            });
+        }
+    }
+    return contextNode;
 }
 
 QList<QWizardPage *> ProjectFileWizardExtension::extensionPages(const IWizardFactory *wizard)
@@ -144,7 +172,7 @@ QList<QWizardPage *> ProjectFileWizardExtension::extensionPages(const IWizardFac
     // Init context with page and projects
     m_context->page = new ProjectWizardPage;
     m_context->wizard = wizard;
-    return QList<QWizardPage *>() << m_context->page;
+    return {m_context->page};
 }
 
 bool ProjectFileWizardExtension::processFiles(
@@ -220,22 +248,27 @@ void ProjectFileWizardExtension::applyCodeStyle(GeneratedFile *file) const
         return; // don't modify files like *.ui *.pro
 
     FolderNode *folder = m_context->page->currentNode();
-    Project *baseProject = SessionManager::projectForNode(folder);
+    Project *baseProject = ProjectTree::projectForNode(folder);
 
     ICodeStylePreferencesFactory *factory = TextEditorSettings::codeStyleFactory(languageId);
 
+    QTextDocument doc(file->contents());
     Indenter *indenter = nullptr;
-    if (factory)
-        indenter = factory->createIndenter();
+    if (factory) {
+        indenter = factory->createIndenter(&doc);
+        indenter->setFileName(Utils::FilePath::fromString(file->path()));
+    }
     if (!indenter)
-        indenter = new NormalIndenter();
+        indenter = new TextIndenter(&doc);
 
     ICodeStylePreferences *codeStylePrefs = codeStylePreferences(baseProject, languageId);
     indenter->setCodeStylePreferences(codeStylePrefs);
-    QTextDocument doc(file->contents());
+
     QTextCursor cursor(&doc);
     cursor.select(QTextCursor::Document);
-    indenter->indent(&doc, cursor, QChar::Null, codeStylePrefs->currentTabSettings());
+    indenter->indent(cursor,
+                     QChar::Null,
+                     codeStylePrefs->currentTabSettings());
     delete indenter;
     if (TextEditorSettings::storageSettings().m_cleanWhitespace) {
         QTextBlock block = doc.firstBlock();

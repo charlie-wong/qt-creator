@@ -39,7 +39,7 @@
 #include "devicesupport/deviceprocess.h"
 #include "projectexplorer.h"
 #include "projectexplorersettings.h"
-#include "runnables.h"
+#include "runcontrol.h"
 
 #include <QTextCodec>
 #include <QTimer>
@@ -57,18 +57,19 @@
 */
 
 using namespace Utils;
-using namespace ProjectExplorer::Internal;
 
 namespace ProjectExplorer {
-namespace Internal {
 
-enum State { Inactive, Run };
+using namespace Internal;
+
+namespace Internal {
 
 class ApplicationLauncherPrivate : public QObject
 {
 public:
+    enum State { Inactive, Run };
     explicit ApplicationLauncherPrivate(ApplicationLauncher *parent);
-    ~ApplicationLauncherPrivate() { setFinished(); }
+    ~ApplicationLauncherPrivate() override { setFinished(); }
 
     void start(const Runnable &runnable, const IDevice::ConstPtr &device, bool local);
     void stop();
@@ -85,6 +86,7 @@ public:
     void bringToForeground();
     qint64 applicationPID() const;
     bool isRunning() const;
+    bool isRemoteRunning() const;
 
     // Remote
     void doReportError(const QString &message);
@@ -102,7 +104,7 @@ public:
     // Local
     QtcProcess m_guiProcess;
     ConsoleProcess m_consoleProcess;
-    ApplicationLauncher::Mode m_currentMode = ApplicationLauncher::Gui;
+    bool m_useTerminal = false;
     // Keep track whether we need to emit a finished signal
     bool m_processRunning = false;
 
@@ -124,10 +126,10 @@ public:
 ApplicationLauncherPrivate::ApplicationLauncherPrivate(ApplicationLauncher *parent)
     : q(parent), m_outputCodec(QTextCodec::codecForLocale())
 {
-    if (ProjectExplorerPlugin::projectExplorerSettings().mergeStdErrAndStdOut){
-        m_guiProcess.setReadChannelMode(QProcess::MergedChannels);
+    if (ProjectExplorerPlugin::appOutputSettings().mergeChannels) {
+        m_guiProcess.setProcessChannelMode(QProcess::MergedChannels);
     } else {
-        m_guiProcess.setReadChannelMode(QProcess::SeparateChannels);
+        m_guiProcess.setProcessChannelMode(QProcess::SeparateChannels);
         connect(&m_guiProcess, &QProcess::readyReadStandardError,
                 this, &ApplicationLauncherPrivate::readLocalStandardError);
     }
@@ -135,7 +137,7 @@ ApplicationLauncherPrivate::ApplicationLauncherPrivate(ApplicationLauncher *pare
             this, &ApplicationLauncherPrivate::readLocalStandardOutput);
     connect(&m_guiProcess, &QProcess::errorOccurred,
             this, &ApplicationLauncherPrivate::localGuiProcessError);
-    connect(&m_guiProcess, static_cast<void (QProcess::*)(int,QProcess::ExitStatus)>(&QProcess::finished),
+    connect(&m_guiProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &ApplicationLauncherPrivate::localProcessDone);
     connect(&m_guiProcess, &QProcess::started,
             this, &ApplicationLauncherPrivate::handleProcessStarted);
@@ -150,31 +152,31 @@ ApplicationLauncherPrivate::ApplicationLauncherPrivate(ApplicationLauncher *pare
             this, &ApplicationLauncherPrivate::localConsoleProcessError);
     connect(&m_consoleProcess, &ConsoleProcess::processStopped,
             this, &ApplicationLauncherPrivate::localProcessDone);
-    connect(&m_consoleProcess,
-            static_cast<void (ConsoleProcess::*)(QProcess::ProcessError)>(&ConsoleProcess::error),
+    connect(&m_consoleProcess, QOverload<QProcess::ProcessError>::of(&ConsoleProcess::error),
             q, &ApplicationLauncher::error);
 
 #ifdef Q_OS_WIN
     connect(WinDebugInterface::instance(), &WinDebugInterface::cannotRetrieveDebugOutput,
             this, &ApplicationLauncherPrivate::cannotRetrieveLocalDebugOutput);
     connect(WinDebugInterface::instance(), &WinDebugInterface::debugOutput,
-            this, &ApplicationLauncherPrivate::checkLocalDebugOutput, Qt::BlockingQueuedConnection);
+            this, &ApplicationLauncherPrivate::checkLocalDebugOutput);
 #endif
 }
 
 ApplicationLauncher::ApplicationLauncher(QObject *parent) : QObject(parent),
-    d(new ApplicationLauncherPrivate(this))
-{
-}
+    d(std::make_unique<ApplicationLauncherPrivate>(this))
+{ }
 
-ApplicationLauncher::~ApplicationLauncher()
-{
-    delete d;
-}
+ApplicationLauncher::~ApplicationLauncher() = default;
 
 void ApplicationLauncher::setProcessChannelMode(QProcess::ProcessChannelMode mode)
 {
     d->m_guiProcess.setProcessChannelMode(mode);
+}
+
+void ApplicationLauncher::setUseTerminal(bool on)
+{
+    d->m_useTerminal = on;
 }
 
 void ApplicationLauncher::stop()
@@ -187,15 +189,15 @@ void ApplicationLauncherPrivate::stop()
     if (m_isLocal) {
         if (!isRunning())
             return;
-        if (m_currentMode == ApplicationLauncher::Gui) {
+        if (m_useTerminal) {
+            m_consoleProcess.stop();
+            localProcessDone(0, QProcess::CrashExit);
+        } else {
             m_guiProcess.terminate();
             if (!m_guiProcess.waitForFinished(1000) && m_guiProcess.state() == QProcess::Running) { // This is blocking, so be fast.
                 m_guiProcess.kill();
                 m_guiProcess.waitForFinished();
             }
-        } else {
-            m_consoleProcess.stop();
-            localProcessDone(0, QProcess::CrashExit);
         }
     } else {
         if (m_stopRequested)
@@ -218,11 +220,21 @@ bool ApplicationLauncher::isRunning() const
     return d->isRunning();
 }
 
+bool ApplicationLauncher::isRemoteRunning() const
+{
+    return d->isRemoteRunning();
+}
+
 bool ApplicationLauncherPrivate::isRunning() const
 {
-    if (m_currentMode == ApplicationLauncher::Gui)
-        return m_guiProcess.state() != QProcess::NotRunning;
-    return m_consoleProcess.isRunning();
+    if (m_useTerminal)
+        return m_consoleProcess.isRunning();
+    return m_guiProcess.state() != QProcess::NotRunning;
+}
+
+bool ApplicationLauncherPrivate::isRemoteRunning() const
+{
+    return m_isLocal ? false : m_deviceProcess->state() == QProcess::Running;
 }
 
 ProcessHandle ApplicationLauncher::applicationPID() const
@@ -235,7 +247,7 @@ qint64 ApplicationLauncherPrivate::applicationPID() const
     if (!isRunning())
         return 0;
 
-    if (m_currentMode == ApplicationLauncher::Console)
+    if (m_useTerminal)
         return m_consoleProcess.applicationPID();
 
     return m_guiProcess.processId();
@@ -243,18 +255,18 @@ qint64 ApplicationLauncherPrivate::applicationPID() const
 
 QString ApplicationLauncher::errorString() const
 {
-    if (d->m_currentMode == Gui)
-        return d->m_guiProcess.errorString();
-    else
+    if (d->m_useTerminal)
         return d->m_consoleProcess.errorString();
+    else
+        return d->m_guiProcess.errorString();
 }
 
 QProcess::ProcessError ApplicationLauncher::processError() const
 {
-    if (d->m_currentMode == Gui)
-        return d->m_guiProcess.error();
-    else
+    if (d->m_useTerminal)
         return d->m_consoleProcess.error();
+    else
+        return d->m_guiProcess.error();
 }
 
 void ApplicationLauncherPrivate::localGuiProcessError()
@@ -272,7 +284,7 @@ void ApplicationLauncherPrivate::localGuiProcessError()
     default:
         error = ApplicationLauncher::tr("Some error has occurred while running the program.");
     }
-    emit q->appendMessage(error + QLatin1Char('\n'), ErrorMessageFormat);
+    emit q->appendMessage(error, ErrorMessageFormat);
     if (m_processRunning && !isRunning()) {
         m_processRunning = false;
         emit q->processExited(-1, status);
@@ -281,7 +293,7 @@ void ApplicationLauncherPrivate::localGuiProcessError()
 
 void ApplicationLauncherPrivate::localConsoleProcessError(const QString &error)
 {
-    emit q->appendMessage(error + QLatin1Char('\n'), ErrorMessageFormat);
+    emit q->appendMessage(error, ErrorMessageFormat);
     if (m_processRunning && m_consoleProcess.applicationPID() == 0) {
         m_processRunning = false;
         emit q->processExited(-1, QProcess::NormalExit);
@@ -293,7 +305,7 @@ void ApplicationLauncherPrivate::readLocalStandardOutput()
     QByteArray data = m_guiProcess.readAllStandardOutput();
     QString msg = m_outputCodec->toUnicode(
             data.constData(), data.length(), &m_outputCodecState);
-    emit q->appendMessage(msg, StdOutFormatSameLine);
+    emit q->appendMessage(msg, StdOutFormat, false);
 }
 
 void ApplicationLauncherPrivate::readLocalStandardError()
@@ -301,13 +313,13 @@ void ApplicationLauncherPrivate::readLocalStandardError()
     QByteArray data = m_guiProcess.readAllStandardError();
     QString msg = m_outputCodec->toUnicode(
             data.constData(), data.length(), &m_errorCodecState);
-    emit q->appendMessage(msg, StdErrFormatSameLine);
+    emit q->appendMessage(msg, StdErrFormat, false);
 }
 
 void ApplicationLauncherPrivate::cannotRetrieveLocalDebugOutput()
 {
 #ifdef Q_OS_WIN
-    disconnect(WinDebugInterface::instance(), 0, this, 0);
+    disconnect(WinDebugInterface::instance(), nullptr, this, nullptr);
     emit q->appendMessage(ApplicationLauncher::msgWinCannotRetrieveDebuggingOutput(), ErrorMessageFormat);
 #endif
 }
@@ -352,15 +364,12 @@ void ApplicationLauncherPrivate::start(const Runnable &runnable, const IDevice::
     m_isLocal = local;
 
     if (m_isLocal) {
-        QTC_ASSERT(runnable.is<StandardRunnable>(), return);
-        StandardRunnable stdRunnable = runnable.as<StandardRunnable>();
-
         // Work around QTBUG-17529 (QtDeclarative fails with 'File name case mismatch' ...)
-        const QString fixedPath = FileUtils::normalizePathName(stdRunnable.workingDirectory);
+        const QString fixedPath = FileUtils::normalizePathName(runnable.workingDirectory);
         m_guiProcess.setWorkingDirectory(fixedPath);
         m_consoleProcess.setWorkingDirectory(fixedPath);
-        m_guiProcess.setEnvironment(stdRunnable.environment);
-        m_consoleProcess.setEnvironment(stdRunnable.environment);
+        m_guiProcess.setEnvironment(runnable.environment);
+        m_consoleProcess.setEnvironment(runnable.environment);
 
         m_processRunning = true;
     #ifdef Q_OS_WIN
@@ -368,12 +377,13 @@ void ApplicationLauncherPrivate::start(const Runnable &runnable, const IDevice::
             WinDebugInterface::instance()->start(); // Try to start listener again...
     #endif
 
-        m_currentMode = stdRunnable.runMode;
-        if (m_currentMode == ApplicationLauncher::Gui) {
-            m_guiProcess.setCommand(stdRunnable.executable, stdRunnable.commandLineArguments);
+        if (!m_useTerminal) {
+            m_guiProcess.setCommand(runnable.commandLine());
+            m_guiProcess.closeWriteChannel();
             m_guiProcess.start();
         } else {
-            m_consoleProcess.start(stdRunnable.executable, stdRunnable.commandLineArguments);
+            m_consoleProcess.setCommand(runnable.commandLine());
+            m_consoleProcess.start();
         }
     } else {
         QTC_ASSERT(m_state == Inactive, return);
@@ -391,7 +401,7 @@ void ApplicationLauncherPrivate::start(const Runnable &runnable, const IDevice::
             return;
         }
 
-        if (runnable.is<StandardRunnable>() && runnable.as<StandardRunnable>().executable.isEmpty()) {
+        if (runnable.executable.isEmpty()) {
             doReportError(ApplicationLauncher::tr("Cannot run: No command given."));
             setFinished();
             return;
@@ -401,6 +411,7 @@ void ApplicationLauncherPrivate::start(const Runnable &runnable, const IDevice::
         m_success = true;
 
         m_deviceProcess = device->createProcess(this);
+        m_deviceProcess->setRunInTerminal(m_useTerminal);
         connect(m_deviceProcess, &DeviceProcess::started,
                 q, &ApplicationLauncher::remoteProcessStarted);
         connect(m_deviceProcess, &DeviceProcess::readyReadStandardOutput,
@@ -432,7 +443,7 @@ void ApplicationLauncherPrivate::setFinished()
     if (m_deviceProcess) {
         m_deviceProcess->disconnect(this);
         m_deviceProcess->deleteLater();
-        m_deviceProcess = 0;
+        m_deviceProcess = nullptr;
     }
 
     m_state = Inactive;
@@ -459,13 +470,15 @@ void ApplicationLauncherPrivate::handleApplicationFinished()
 void ApplicationLauncherPrivate::handleRemoteStdout()
 {
     QTC_ASSERT(m_state == Run, return);
-    emit q->remoteStdout(m_deviceProcess->readAllStandardOutput());
+    const QByteArray output = m_deviceProcess->readAllStandardOutput();
+    emit q->remoteStdout(QString::fromUtf8(output));
 }
 
 void ApplicationLauncherPrivate::handleRemoteStderr()
 {
     QTC_ASSERT(m_state == Run, return);
-    emit q->remoteStderr(m_deviceProcess->readAllStandardError());
+    const QByteArray output = m_deviceProcess->readAllStandardError();
+    emit q->remoteStderr(QString::fromUtf8(output));
 }
 
 void ApplicationLauncherPrivate::doReportError(const QString &message)

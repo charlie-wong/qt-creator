@@ -33,7 +33,6 @@
 #include "cpptoolsreuse.h"
 #include "cppworkingcopy.h"
 
-#include <texteditor/convenience.h>
 #include <texteditor/fontsettings.h>
 #include <texteditor/refactoroverlay.h>
 #include <texteditor/texteditorsettings.h>
@@ -41,13 +40,14 @@
 #include <cplusplus/CppDocument.h>
 #include <cplusplus/SimpleLexer.h>
 
+#include <utils/textutils.h>
 #include <utils/qtcassert.h>
 #include <utils/runextensions.h>
 
 #include <QLoggingCategory>
 #include <QTextBlock>
 
-static Q_LOGGING_CATEGORY(log, "qtc.cpptools.builtineditordocumentprocessor")
+static Q_LOGGING_CATEGORY(log, "qtc.cpptools.builtineditordocumentprocessor", QtWarningMsg)
 
 namespace {
 
@@ -71,7 +71,7 @@ QList<QTextEdit::ExtraSelection> toTextEditorSelections(
         QTextCursor c(textDocument->findBlockByNumber(m.line() - 1));
         const QString text = c.block().text();
         const int startPos = m.column() > 0 ? m.column() - 1 : 0;
-        if (m.length() > 0 && startPos + m.length() <= (unsigned)text.size()) {
+        if (m.length() > 0 && startPos + m.length() <= text.size()) {
             c.setPosition(c.position() + startPos);
             c.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor, m.length());
         } else {
@@ -95,24 +95,23 @@ CppTools::CheckSymbols *createHighlighter(const CPlusPlus::Document::Ptr &doc,
                                           const CPlusPlus::Snapshot &snapshot,
                                           QTextDocument *textDocument)
 {
-    QTC_ASSERT(doc, return 0);
-    QTC_ASSERT(doc->translationUnit(), return 0);
-    QTC_ASSERT(doc->translationUnit()->ast(), return 0);
-    QTC_ASSERT(textDocument, return 0);
+    QTC_ASSERT(doc, return nullptr);
+    QTC_ASSERT(doc->translationUnit(), return nullptr);
+    QTC_ASSERT(doc->translationUnit()->ast(), return nullptr);
+    QTC_ASSERT(textDocument, return nullptr);
 
     using namespace CPlusPlus;
     using namespace CppTools;
-    typedef TextEditor::HighlightingResult Result;
+    using Result = TextEditor::HighlightingResult;
     QList<Result> macroUses;
 
-    using TextEditor::Convenience::convertPosition;
+    using Utils::Text::convertPosition;
 
     // Get macro definitions
     foreach (const CPlusPlus::Macro& macro, doc->definedMacros()) {
         int line, column;
         convertPosition(textDocument, macro.utf16CharOffset(), &line, &column);
 
-        ++column; //Highlighting starts at (column-1) --> compensate here
         Result use(line, column, macro.nameToQString().size(), SemanticHighlighter::MacroUse);
         macroUses.append(use);
     }
@@ -132,12 +131,12 @@ CppTools::CheckSymbols *createHighlighter(const CPlusPlus::Document::Ptr &doc,
 
         // Filter out C++ keywords
         const Tokens tokens = tokenize(name);
-        if (tokens.length() && (tokens.at(0).isKeyword() || tokens.at(0).isObjCAtKeyword()))
+        if (!tokens.isEmpty() && (tokens.at(0).isKeyword() || tokens.at(0).isObjCAtKeyword()))
             continue;
 
         int line, column;
         convertPosition(textDocument, macro.utf16charsBegin(), &line, &column);
-        ++column; //Highlighting starts at (column-1) --> compensate here
+
         Result use(line, column, name.size(), SemanticHighlighter::MacroUse);
         macroUses.append(use);
     }
@@ -164,15 +163,16 @@ BuiltinEditorDocumentProcessor::BuiltinEditorDocumentProcessor(
         TextEditor::TextDocument *document,
         bool enableSemanticHighlighter)
     : BaseEditorDocumentProcessor(document->document(), document->filePath().toString())
-    , m_parser(new BuiltinEditorDocumentParser(document->filePath().toString()))
+    , m_parser(new BuiltinEditorDocumentParser(document->filePath().toString(),
+                                               indexerFileSizeLimitInMb()))
     , m_codeWarningsUpdated(false)
     , m_semanticHighlighter(enableSemanticHighlighter
                             ? new CppTools::SemanticHighlighter(document)
-                            : 0)
+                            : nullptr)
 {
     using namespace Internal;
 
-    QSharedPointer<CppCodeModelSettings> cms = CppToolsPlugin::instance()->codeModelSettings();
+    const CppCodeModelSettings *cms = CppToolsPlugin::instance()->codeModelSettings();
 
     BaseEditorDocumentParser::Configuration config = m_parser->configuration();
     config.usePrecompiledHeaders = cms->pchUsage() != CppCodeModelSettings::PchUse_None;
@@ -257,7 +257,25 @@ bool BuiltinEditorDocumentProcessor::isParserRunning() const
 QFuture<CursorInfo>
 BuiltinEditorDocumentProcessor::cursorInfo(const CursorInfoParams &params)
 {
-    return Internal::BuiltinCursorInfo::run(params);
+    return BuiltinCursorInfo::run(params);
+}
+
+QFuture<CursorInfo> BuiltinEditorDocumentProcessor::requestLocalReferences(const QTextCursor &)
+{
+    QFutureInterface<CppTools::CursorInfo> futureInterface;
+    futureInterface.reportResult(CppTools::CursorInfo());
+    futureInterface.reportFinished();
+
+    return futureInterface.future();
+}
+
+QFuture<SymbolInfo> BuiltinEditorDocumentProcessor::requestFollowSymbol(int, int)
+{
+    QFutureInterface<CppTools::SymbolInfo> futureInterface;
+    futureInterface.reportResult(CppTools::SymbolInfo());
+    futureInterface.reportFinished();
+
+    return futureInterface.future();
 }
 
 void BuiltinEditorDocumentProcessor::onParserFinished(CPlusPlus::Document::Ptr document,

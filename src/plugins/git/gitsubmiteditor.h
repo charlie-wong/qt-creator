@@ -37,7 +37,6 @@ namespace VcsBase { class SubmitFileModel; }
 namespace Git {
 namespace Internal {
 
-class GitClient;
 class GitSubmitEditorWidget;
 class GitSubmitEditorPanelData;
 
@@ -56,17 +55,17 @@ class GitSubmitEditor : public VcsBase::VcsBaseSubmitEditor
     Q_OBJECT
 
 public:
-    explicit GitSubmitEditor(const VcsBase::VcsBaseSubmitEditorParameters *parameters);
+    GitSubmitEditor();
     ~GitSubmitEditor() override;
 
     void setCommitData(const CommitData &);
     GitSubmitEditorPanelData panelData() const;
     CommitType commitType() const { return m_commitType; }
     QString amendSHA1() const;
+    void updateFileModel() override;
 
 protected:
     QByteArray fileContents() const override;
-    void updateFileModel() override;
     void forceUpdateFileModel();
 
 private:

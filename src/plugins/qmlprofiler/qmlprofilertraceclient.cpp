@@ -36,6 +36,27 @@
 
 namespace QmlProfiler {
 
+inline uint qHash(const QmlEventType &type)
+{
+    return qHash(type.location())
+            ^ (((type.message() << 12) & 0xf000)             // 4 bits of message
+               | ((type.rangeType() << 24) & 0xf000000)      // 4 bits of rangeType
+               | ((type.detailType() << 28) & 0xf0000000));  // 4 bits of detailType
+}
+
+inline bool operator==(const QmlEventType &type1, const QmlEventType &type2)
+{
+    return type1.message() == type2.message() && type1.rangeType() == type2.rangeType()
+            && type1.detailType() == type2.detailType() && type1.location() == type2.location();
+}
+
+inline bool operator!=(const QmlEventType &type1, const QmlEventType &type2)
+{
+    return !(type1 == type2);
+}
+
+struct ObjectDeleteLater { void operator()(QObject *o) { o->deleteLater(); } };
+
 class QmlProfilerTraceClientPrivate {
 public:
     QmlProfilerTraceClientPrivate(QmlProfilerTraceClient *q,
@@ -43,7 +64,7 @@ public:
                                   QmlProfilerModelManager *modelManager)
         : q(q)
         , modelManager(modelManager)
-        , engineControl(connection)
+        , engineControl(new QmlDebug::QmlEngineControlClient(connection))
         , maximumTime(0)
         , recording(false)
         , requestedFeatures(0)
@@ -53,15 +74,23 @@ public:
     }
 
     void sendRecordingStatus(int engineId);
-    bool updateFeatures(ProfileFeature feature);
+    bool updateFeatures(quint8 feature);
     int resolveType(const QmlTypedEvent &type);
     int resolveStackTop();
+    void forwardEvents(QmlEvent &&last);
     void processCurrentEvent();
+    void finalize();
 
     QmlProfilerTraceClient *q;
     QmlProfilerModelManager *modelManager;
-    QmlDebug::QmlEngineControlClient engineControl;
-    QScopedPointer<QmlDebug::QDebugMessageClient> messageClient;
+
+    // Use deleteLater here. The connection will call stateChanged() on all clients that are
+    // alive when it gets disconnected. One way to notice a disconnection is failing to send the
+    // plugin advertisement when a client unregisters. If one of the other clients is
+    // half-destructed at that point, we get invalid memory accesses. Therefore, we cannot nest the
+    // dtor calls.
+    std::unique_ptr<QmlDebug::QmlEngineControlClient, ObjectDeleteLater> engineControl;
+    std::unique_ptr<QmlDebug::QDebugMessageClient, ObjectDeleteLater> messageClient;
     qint64 maximumTime;
     bool recording;
     quint64 requestedFeatures;
@@ -74,6 +103,9 @@ public:
     QHash<qint64, int> serverTypeIds;
     QStack<QmlTypedEvent> rangesInProgress;
     QQueue<QmlEvent> pendingMessages;
+    QQueue<QmlEvent> pendingDebugMessages;
+
+    QList<int> trackedEngines;
 };
 
 int QmlProfilerTraceClientPrivate::resolveType(const QmlTypedEvent &event)
@@ -85,8 +117,9 @@ int QmlProfilerTraceClientPrivate::resolveType(const QmlTypedEvent &event)
         if (it != serverTypeIds.constEnd()) {
             typeIndex = it.value();
         } else {
-            typeIndex = modelManager->numLoadedEventTypes();
-            modelManager->addEventType(event.type);
+            // We can potentially move the type away here, as we don't need to access it anymore,
+            // but that requires some more refactoring.
+            typeIndex = modelManager->appendEventType(QmlEventType(event.type));
             serverTypeIds[event.serverTypeId] = typeIndex;
         }
     } else {
@@ -95,8 +128,7 @@ int QmlProfilerTraceClientPrivate::resolveType(const QmlTypedEvent &event)
         if (it != eventTypeIds.constEnd()) {
             typeIndex = it.value();
         } else {
-            typeIndex = modelManager->numLoadedEventTypes();
-            modelManager->addEventType(event.type);
+            typeIndex = modelManager->appendEventType(QmlEventType(event.type));
             eventTypeIds[event.type] = typeIndex;
         }
     }
@@ -117,10 +149,19 @@ int QmlProfilerTraceClientPrivate::resolveStackTop()
     typedEvent.event.setTypeIndex(typeIndex);
     while (!pendingMessages.isEmpty()
            && pendingMessages.head().timestamp() < typedEvent.event.timestamp()) {
-        modelManager->addEvent(pendingMessages.dequeue());
+        forwardEvents(pendingMessages.dequeue());
     }
-    modelManager->addEvent(typedEvent.event);
+    forwardEvents(QmlEvent(typedEvent.event));
     return typeIndex;
+}
+
+void QmlProfilerTraceClientPrivate::forwardEvents(QmlEvent &&last)
+{
+    while (!pendingDebugMessages.isEmpty()
+           && pendingDebugMessages.front().timestamp() <= last.timestamp()) {
+         modelManager->appendEvent(pendingDebugMessages.dequeue());
+    }
+    modelManager->appendEvent(std::move(last));
 }
 
 void QmlProfilerTraceClientPrivate::processCurrentEvent()
@@ -138,25 +179,32 @@ void QmlProfilerTraceClientPrivate::processCurrentEvent()
         break;
     case RangeEnd: {
         int typeIndex = resolveStackTop();
-        QTC_ASSERT(typeIndex != -1, break);
+        if (typeIndex == -1)
+            break;
         currentEvent.event.setTypeIndex(typeIndex);
         while (!pendingMessages.isEmpty())
-            modelManager->addEvent(pendingMessages.dequeue());
-        modelManager->addEvent(currentEvent.event);
+            forwardEvents(pendingMessages.dequeue());
+        forwardEvents(QmlEvent(currentEvent.event));
         rangesInProgress.pop();
         break;
     }
     case RangeData:
-        rangesInProgress.top().type.setData(currentEvent.type.data());
+        if (!rangesInProgress.isEmpty())
+            rangesInProgress.top().type.setData(currentEvent.type.data());
         break;
     case RangeLocation:
-        rangesInProgress.top().type.setLocation(currentEvent.type.location());
+        if (!rangesInProgress.isEmpty())
+            rangesInProgress.top().type.setLocation(currentEvent.type.location());
+        break;
+    case DebugMessage:
+        currentEvent.event.setTypeIndex(resolveType(currentEvent));
+        pendingDebugMessages.enqueue(currentEvent.event);
         break;
     default: {
         int typeIndex = resolveType(currentEvent);
         currentEvent.event.setTypeIndex(typeIndex);
         if (rangesInProgress.isEmpty())
-            modelManager->addEvent(currentEvent.event);
+            forwardEvents(QmlEvent(currentEvent.event));
         else
             pendingMessages.enqueue(currentEvent.event);
         break;
@@ -164,9 +212,22 @@ void QmlProfilerTraceClientPrivate::processCurrentEvent()
     }
 }
 
+void QmlProfilerTraceClientPrivate::finalize()
+{
+    while (!rangesInProgress.isEmpty()) {
+        currentEvent = rangesInProgress.top();
+        currentEvent.event.setRangeStage(RangeEnd);
+        currentEvent.event.setTimestamp(maximumTime);
+        processCurrentEvent();
+    }
+    QTC_CHECK(pendingMessages.isEmpty());
+    while (!pendingDebugMessages.isEmpty())
+        modelManager->appendEvent(pendingDebugMessages.dequeue());
+}
+
 void QmlProfilerTraceClientPrivate::sendRecordingStatus(int engineId)
 {
-    QmlDebug::QPacket stream(q->connection()->currentDataStreamVersion());
+    QmlDebug::QPacket stream(q->dataStreamVersion());
     stream << recording << engineId; // engineId -1 is OK. It means "all of them"
     if (recording) {
         stream << requestedFeatures << flushInterval;
@@ -182,8 +243,24 @@ QmlProfilerTraceClient::QmlProfilerTraceClient(QmlDebug::QmlDebugConnection *cli
     , d(new QmlProfilerTraceClientPrivate(this, client, modelManager))
 {
     setRequestedFeatures(features);
-    connect(&d->engineControl, &QmlDebug::QmlEngineControlClient::engineAboutToBeAdded,
+    connect(d->engineControl.get(), &QmlDebug::QmlEngineControlClient::engineAboutToBeAdded,
             this, &QmlProfilerTraceClient::sendRecordingStatus);
+    connect(d->engineControl.get(), &QmlDebug::QmlEngineControlClient::engineAboutToBeRemoved,
+            this, [this](int engineId) {
+        // We may already be done with that engine. Then we don't need to block it.
+        if (d->trackedEngines.contains(engineId))
+            d->engineControl->blockEngine(engineId);
+    });
+    connect(this, &QmlProfilerTraceClient::traceFinished,
+            d->engineControl.get(), [this](qint64 timestamp, const QList<int> &engineIds) {
+        Q_UNUSED(timestamp)
+        // The engines might not be blocked because the trace can get finished before engine control
+        // sees them.
+        for (int blocked : d->engineControl->blockedEngines()) {
+            if (engineIds.contains(blocked))
+                d->engineControl->releaseEngine(blocked);
+        }
+    });
 }
 
 QmlProfilerTraceClient::~QmlProfilerTraceClient()
@@ -195,15 +272,24 @@ QmlProfilerTraceClient::~QmlProfilerTraceClient()
     delete d;
 }
 
-void QmlProfilerTraceClient::clearData()
+void QmlProfilerTraceClient::clearEvents()
 {
-    d->eventTypeIds.clear();
     d->rangesInProgress.clear();
+    d->pendingMessages.clear();
+    d->pendingDebugMessages.clear();
     if (d->recordedFeatures != 0) {
         d->recordedFeatures = 0;
         emit recordedFeaturesChanged(0);
     }
     emit cleared();
+}
+
+void QmlProfilerTraceClient::clear()
+{
+    d->eventTypeIds.clear();
+    d->serverTypeIds.clear();
+    d->trackedEngines.clear();
+    clearEvents();
 }
 
 void QmlProfilerTraceClient::sendRecordingStatus(int engineId)
@@ -239,12 +325,12 @@ void QmlProfilerTraceClient::setRequestedFeatures(quint64 features)
     d->requestedFeatures = features;
     if (features & static_cast<quint64>(1) << ProfileDebugMessages) {
         d->messageClient.reset(new QmlDebug::QDebugMessageClient(connection()));
-        connect(d->messageClient.data(), &QmlDebug::QDebugMessageClient::message, this,
+        connect(d->messageClient.get(), &QmlDebug::QDebugMessageClient::message, this,
                 [this](QtMsgType type, const QString &text,
                        const QmlDebug::QDebugContextInfo &context)
         {
-            d->updateFeatures(ProfileDebugMessages);
-            d->currentEvent.event.setTimestamp(context.timestamp);
+            QTC_ASSERT(d->updateFeatures(ProfileDebugMessages), return);
+            d->currentEvent.event.setTimestamp(context.timestamp > 0 ? context.timestamp : 0);
             d->currentEvent.event.setTypeIndex(-1);
             d->currentEvent.event.setString(text);
             d->currentEvent.type = QmlEventType(DebugMessage, MaximumRangeType, type,
@@ -262,7 +348,7 @@ void QmlProfilerTraceClient::setFlushInterval(quint32 flushInterval)
     d->flushInterval = flushInterval;
 }
 
-bool QmlProfilerTraceClientPrivate::updateFeatures(ProfileFeature feature)
+bool QmlProfilerTraceClientPrivate::updateFeatures(quint8 feature)
 {
     quint64 flag = 1ULL << feature;
     if (!(requestedFeatures & flag))
@@ -278,31 +364,31 @@ void QmlProfilerTraceClient::stateChanged(State status)
 {
     if (status == Enabled)
         sendRecordingStatus(-1);
+    else
+        d->finalize();
 }
 
 void QmlProfilerTraceClient::messageReceived(const QByteArray &data)
 {
-    QmlDebug::QPacket stream(connection()->currentDataStreamVersion(), data);
+    QmlDebug::QPacket stream(dataStreamVersion(), data);
 
     stream >> d->currentEvent;
 
     d->maximumTime = qMax(d->currentEvent.event.timestamp(), d->maximumTime);
     if (d->currentEvent.type.message() == Complete) {
-        while (!d->rangesInProgress.isEmpty()) {
-            d->currentEvent = d->rangesInProgress.top();
-            d->currentEvent.event.setRangeStage(RangeEnd);
-            d->currentEvent.event.setTimestamp(d->maximumTime);
-            d->processCurrentEvent();
-        }
+        d->finalize();
         emit complete(d->maximumTime);
     } else if (d->currentEvent.type.message() == Event
                && d->currentEvent.type.detailType() == StartTrace) {
-        emit traceStarted(d->currentEvent.event.timestamp(),
-                          d->currentEvent.event.numbers<QList<int>, qint32>());
+        const QList<int> engineIds = d->currentEvent.event.numbers<QList<int>, qint32>();
+        d->trackedEngines.append(engineIds);
+        emit traceStarted(d->currentEvent.event.timestamp(), engineIds);
     } else if (d->currentEvent.type.message() == Event
                && d->currentEvent.type.detailType() == EndTrace) {
-        emit traceFinished(d->currentEvent.event.timestamp(),
-                           d->currentEvent.event.numbers<QList<int>, qint32>());
+        const QList<int> engineIds = d->currentEvent.event.numbers<QList<int>, qint32>();
+        for (int engineId : engineIds)
+            d->trackedEngines.removeAll(engineId);
+        emit traceFinished(d->currentEvent.event.timestamp(), engineIds);
     } else if (d->updateFeatures(d->currentEvent.type.feature())) {
         d->processCurrentEvent();
     }

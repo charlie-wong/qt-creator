@@ -37,14 +37,8 @@ namespace Internal { class KitOptionsPageWidget; }
 
 class Kit;
 
-// --------------------------------------------------------------------------
-// KitOptionsPage:
-// --------------------------------------------------------------------------
-
 class PROJECTEXPLORER_EXPORT KitOptionsPage : public Core::IOptionsPage
 {
-    Q_OBJECT
-
 public:
     KitOptionsPage();
 
@@ -53,6 +47,7 @@ public:
     void finish() override;
 
     void showKit(Kit *k);
+    static KitOptionsPage *instance();
 
 private:
     QPointer<Internal::KitOptionsPageWidget> m_widget;

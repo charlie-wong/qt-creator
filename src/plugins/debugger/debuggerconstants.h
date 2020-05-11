@@ -33,81 +33,18 @@ namespace Constants {
 // Debug mode
 const char MODE_DEBUG[]             = "Mode.Debug";
 
-// Contexts
+// Debug mode context
 const char C_DEBUGMODE[]            = "Debugger.DebugMode";
-const char C_CPPDEBUGGER[]          = "Gdb Debugger";
-const char C_QMLDEBUGGER[]          = "Qml/JavaScript Debugger";
 
-const char CppPerspectiveId[]       = "Debugger.Perspective.Cpp";
-const char QmlPerspectiveId[]       = "Debugger.Perspective.Qml";
+// Common debugger constants.
+const char kPeripheralDescriptionFile[] = "PeripheralDescriptionFile";
 
-// Menu Groups
-const char G_GENERAL[]              = "Debugger.Group.General";
-const char G_SPECIAL[]              = "Debugger.Group.Special";
-const char G_START_QML[]            = "Debugger.Group.Start.Qml";
-
-// Common actions
-const char INTERRUPT[]              = "Debugger.Interrupt";
-const char CONTINUE[]               = "Debugger.Continue";
-const char STOP[]                   = "Debugger.Stop";
-const char HIDDEN_STOP[]            = "Debugger.HiddenStop";
-const char ABORT[]                  = "Debugger.Abort";
-const char STEP[]                   = "Debugger.StepLine";
-const char STEPOUT[]                = "Debugger.StepOut";
-const char NEXT[]                   = "Debugger.NextLine";
-const char REVERSE[]                = "Debugger.ReverseDirection";
-const char RESET[]                  = "Debugger.Reset";
-const char OPERATE_BY_INSTRUCTION[] = "Debugger.OperateByInstruction";
-const char QML_SHOW_APP_ON_TOP[]    = "Debugger.QmlShowAppOnTop";
-const char QML_SELECTTOOL[]         = "Debugger.QmlSelectTool";
-const char QML_ZOOMTOOL[]           = "Debugger.QmlZoomTool";
-
-const char TASK_CATEGORY_DEBUGGER_DEBUGINFO[] = "Debuginfo";
-const char TASK_CATEGORY_DEBUGGER_RUNTIME[]   = "DebugRuntime";
-
-const char TEXT_MARK_CATEGORY_BREAKPOINT[] = "Debugger.Mark.Breakpoint";
-const char TEXT_MARK_CATEGORY_LOCATION[] = "Debugger.Mark.Location";
-
-// Run Configuration Aspect defaults:
-const int QML_DEFAULT_DEBUG_SERVER_PORT = 3768;
+// UVSC-specific debugger constants.
+const char kUVisionProjectFilePath[] = "UVisionProjectFilePath";
+const char kUVisionOptionsFilePath[] = "UVisionOptionsFilePath";
+const char kUVisionSimulator[] = "UVisionSimulator";
 
 } // namespace Constants
-
-enum DebuggerState
-{
-    DebuggerNotReady,          // Debugger not started
-
-    EngineSetupRequested,      // Engine starts
-    EngineSetupFailed,
-    EngineSetupOk,
-
-    InferiorSetupRequested,
-    InferiorSetupFailed,
-    InferiorSetupOk,
-
-    EngineRunRequested,
-    EngineRunFailed,
-
-    InferiorUnrunnable,        // Used in the core dump adapter
-
-    InferiorRunRequested,      // Debuggee requested to run
-    InferiorRunOk,             // Debuggee running
-    InferiorRunFailed,         // Debuggee running
-
-    InferiorStopRequested,     // Debuggee running, stop requested
-    InferiorStopOk,            // Debuggee stopped
-    InferiorStopFailed,        // Debuggee not stopped, will kill debugger
-
-    InferiorShutdownRequested,
-    InferiorShutdownFailed,
-    InferiorShutdownOk,
-
-    EngineShutdownRequested,
-    EngineShutdownFailed,
-    EngineShutdownOk,
-
-    DebuggerFinished
-};
 
 // Keep in sync with dumper.py
 enum DebuggerStartMode
@@ -120,6 +57,7 @@ enum DebuggerStartMode
     AttachCore,            // Attach to a core file
     AttachToRemoteServer,  // Attach to a running gdbserver
     AttachToRemoteProcess, // Attach to a running remote process
+    AttachToQmlServer,     // Attach to a running QmlServer
     StartRemoteProcess     // Start and attach to a remote process
 };
 
@@ -161,7 +99,7 @@ enum DebuggerCapabilities
     WatchComplexExpressionsCapability = 1 << 26, // Used to filter out challenges for cdb.
     AdditionalQmlStackCapability      = 1 << 27, //!< C++ debugger engine is able to retrieve QML stack as well.
     ResetInferiorCapability           = 1 << 28, //!< restart program while debugging
-    NativeMixedCapability             = 1 << 29
+    BreakIndividualLocationsCapability= 1 << 29  //!< Allows to enable/disable individual location for multi-location bps
 };
 
 enum LogChannel
@@ -190,15 +128,8 @@ enum DebuggerEngineType
     GdbEngineType     = 0x001,
     CdbEngineType     = 0x004,
     PdbEngineType     = 0x008,
-    QmlEngineType     = 0x020,
-    QmlCppEngineType  = 0x040,
     LldbEngineType    = 0x100,
-    AllEngineTypes = GdbEngineType
-        | CdbEngineType
-        | PdbEngineType
-        | QmlEngineType
-        | QmlCppEngineType
-        | LldbEngineType
+    UvscEngineType    = 0x1000
 };
 
 enum DebuggerLanguage

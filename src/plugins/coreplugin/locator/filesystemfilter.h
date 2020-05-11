@@ -28,10 +28,10 @@
 #include "ilocatorfilter.h"
 #include "ui_filesystemfilter.h"
 
-#include <QString>
-#include <QList>
 #include <QByteArray>
 #include <QFutureInterface>
+#include <QList>
+#include <QString>
 
 namespace Core {
 namespace Internal {
@@ -53,6 +53,8 @@ public:
     void refresh(QFutureInterface<void> &) override {}
 
 private:
+    MatchLevel matchLevelFor(const QRegularExpressionMatch &match, const QString &matchText) const;
+
     bool m_includeHidden = true;
     QString m_currentDocumentDirectory;
 };

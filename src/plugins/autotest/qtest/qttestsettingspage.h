@@ -25,44 +25,17 @@
 
 #pragma once
 
-#include "ui_qttestsettingspage.h"
-
-#include "../itestsettingspage.h"
-
-#include <QPointer>
+#include <coreplugin/dialogs/ioptionspage.h>
 
 namespace Autotest {
 namespace Internal {
 
-class IFrameworkSettings;
 class QtTestSettings;
 
-class QtTestSettingsWidget : public QWidget
+class QtTestSettingsPage final : public Core::IOptionsPage
 {
-    Q_OBJECT
 public:
-    explicit QtTestSettingsWidget(QWidget *parent = 0);
-
-    void setSettings(const QtTestSettings &settings);
-    QtTestSettings settings() const;
-
-private:
-    Ui::QtTestSettingsPage m_ui;
-};
-
-class QtTestSettingsPage : public ITestSettingsPage
-{
-    Q_OBJECT
-public:
-    QtTestSettingsPage(QSharedPointer<IFrameworkSettings> settings, const ITestFramework *framework);
-
-    QWidget *widget() override;
-    void apply() override;
-    void finish() override { }
-
-private:
-    QSharedPointer<QtTestSettings> m_settings;
-    QPointer<QtTestSettingsWidget> m_widget;
+    QtTestSettingsPage(QtTestSettings *settings, Core::Id settingsId);
 };
 
 } // namespace Internal

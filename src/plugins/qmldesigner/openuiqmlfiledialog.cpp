@@ -36,7 +36,6 @@ OpenUiQmlFileDialog::OpenUiQmlFileDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::OpenUiQmlFileDialog)
 {
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     ui->setupUi(this);
 
     connect(ui->cancelButton, &QPushButton::clicked, this, &QDialog::close);
@@ -55,7 +54,7 @@ OpenUiQmlFileDialog::OpenUiQmlFileDialog(QWidget *parent) :
         }
         close();
     });
-    connect(ui->checkBox, &QCheckBox::toggled, [this](bool b){
+    connect(ui->checkBox, &QCheckBox::toggled, this, [](bool b){
         DesignerSettings settings = QmlDesignerPlugin::instance()->settings();
         settings.insert(DesignerSettingsKey::WARNING_FOR_QML_FILES_INSTEAD_OF_UIQML_FILES, !b);
         QmlDesignerPlugin::instance()->setSettings(settings);

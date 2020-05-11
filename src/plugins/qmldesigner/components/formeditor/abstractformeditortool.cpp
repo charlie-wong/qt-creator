@@ -42,11 +42,7 @@ AbstractFormEditorTool::AbstractFormEditorTool(FormEditorView *editorView) : m_v
 {
 }
 
-
-AbstractFormEditorTool::~AbstractFormEditorTool()
-{
-
-}
+AbstractFormEditorTool::~AbstractFormEditorTool() = default;
 
 FormEditorView* AbstractFormEditorTool::view() const
 {
@@ -79,7 +75,7 @@ QList<FormEditorItem *> AbstractFormEditorTool::toFormEditorItemList(const QList
     QList<FormEditorItem *> formEditorItemList;
 
     foreach (QGraphicsItem *graphicsItem, itemList) {
-        FormEditorItem *formEditorItem = qgraphicsitem_cast<FormEditorItem*>(graphicsItem);
+        auto formEditorItem = qgraphicsitem_cast<FormEditorItem*>(graphicsItem);
         if (formEditorItem)
             formEditorItemList.append(formEditorItem);
     }
@@ -90,13 +86,13 @@ QList<FormEditorItem *> AbstractFormEditorTool::toFormEditorItemList(const QList
 bool AbstractFormEditorTool::topItemIsMovable(const QList<QGraphicsItem*> & itemList)
 {
     QGraphicsItem *firstSelectableItem = topMovableGraphicsItem(itemList);
-    if (firstSelectableItem == 0)
+    if (firstSelectableItem == nullptr)
         return false;
 
     FormEditorItem *formEditorItem = FormEditorItem::fromQGraphicsItem(firstSelectableItem);
     QList<ModelNode> selectedNodes = view()->selectedModelNodes();
 
-    if (formEditorItem != 0
+    if (formEditorItem != nullptr
        && selectedNodes.contains(formEditorItem->qmlItemNode()))
         return true;
 
@@ -131,7 +127,32 @@ bool AbstractFormEditorTool::topSelectedItemIsMovable(const QList<QGraphicsItem*
     }
 
     return false;
+}
 
+bool AbstractFormEditorTool::selectedItemCursorInMovableArea(const QPointF &pos)
+{
+    if (!view()->hasSingleSelectedModelNode())
+        return false;
+
+    const ModelNode selectedNode = view()->singleSelectedModelNode();
+
+    FormEditorItem *item = scene()->itemForQmlItemNode(selectedNode);
+
+    if (!item)
+        return false;
+
+     if (!topSelectedItemIsMovable({item}))
+         return false;
+
+    const QPolygonF boundingRectInSceneSpace(item->mapToScene(item->qmlItemNode().instanceBoundingRect()));
+    QRectF boundingRect = boundingRectInSceneSpace.boundingRect();
+    QRectF innerRect = boundingRect;
+
+    innerRect.adjust(2, 2, -2, -2);
+    const int heightOffset = -20 / scene()->formLayerItem()->viewportTransform().m11();
+    boundingRect.adjust(-2, heightOffset, 2, 2);
+
+    return !innerRect.contains(pos) && boundingRect.contains(pos);
 }
 
 bool AbstractFormEditorTool::topItemIsResizeHandle(const QList<QGraphicsItem*> &/*itemList*/)
@@ -146,7 +167,7 @@ QGraphicsItem *AbstractFormEditorTool::topMovableGraphicsItem(const QList<QGraph
             return item;
     }
 
-    return 0;
+    return nullptr;
 }
 
 FormEditorItem *AbstractFormEditorTool::topMovableFormEditorItem(const QList<QGraphicsItem*> &itemList, bool selectOnlyContentItems)
@@ -162,14 +183,17 @@ FormEditorItem *AbstractFormEditorTool::topMovableFormEditorItem(const QList<QGr
             return formEditorItem;
     }
 
-    return 0;
+    return nullptr;
 }
 
 FormEditorItem* AbstractFormEditorTool::nearestFormEditorItem(const QPointF &point, const QList<QGraphicsItem*> & itemList)
 {
-    FormEditorItem* nearestItem = 0;
+    FormEditorItem* nearestItem = nullptr;
     foreach (QGraphicsItem *item, itemList) {
         FormEditorItem *formEditorItem = FormEditorItem::fromQGraphicsItem(item);
+
+        if (formEditorItem && formEditorItem->flowHitTest(point))
+            return formEditorItem;
 
         if (!formEditorItem || !formEditorItem->qmlItemNode().isValid())
             continue;
@@ -241,7 +265,7 @@ void AbstractFormEditorTool::mouseReleaseEvent(const QList<QGraphicsItem*> & ite
         QmlItemNode currentSelectedNode;
 
         if (view()->selectedModelNodes().count() == 1) {
-            currentSelectedNode = view()->selectedModelNodes().first();
+            currentSelectedNode = view()->selectedModelNodes().constFirst();
 
             if (!containsItemNode(itemList, currentSelectedNode)) {
                 QmlItemNode selectedNode;
@@ -321,11 +345,16 @@ FormEditorItem *AbstractFormEditorTool::containerFormEditorItem(const QList<QGra
             return formEditorItem;
     }
 
-    return 0;
+    return nullptr;
 }
 
 void AbstractFormEditorTool::clear()
 {
     m_itemList.clear();
+}
+
+void AbstractFormEditorTool::start()
+{
+
 }
 }

@@ -25,13 +25,10 @@
 
 #pragma once
 
-#include <texteditor/codeassist/completionassistprovider.h>
 #include <texteditor/codeassist/keywordscompletionassist.h>
 
 namespace CMakeProjectManager {
 namespace Internal {
-
-class CMakeSettingsPage;
 
 class CMakeFileCompletionAssist : public TextEditor::KeywordsCompletionAssistProcessor
 {
@@ -47,7 +44,6 @@ class CMakeFileCompletionAssistProvider : public TextEditor::CompletionAssistPro
     Q_OBJECT
 
 public:
-    bool supportsEditor(Core::Id editorId) const override;
     TextEditor::IAssistProcessor *createProcessor() const override;
 };
 

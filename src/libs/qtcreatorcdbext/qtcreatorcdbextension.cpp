@@ -160,7 +160,7 @@ static const CommandDescription commandDescriptions[] = {
 {"assign","Assigns a value to a variable in current symbol group.",
  "[-t token] [-h] <iname=value>\n"
  "-h    Data are hex-encoded, binary data\n"
- "-u    Data are hex-encoded, UTF16 data"
+ "-e    iname is an hex-encoded expression to be evaluated "
 },
 {"threads","Lists threads in GDBMI format.","[-t token]"},
 {"registers","Lists registers in GDBMI format","[-t token]"},
@@ -190,6 +190,12 @@ static inline bool isOption(const std::string &opt)
 {
     return opt.size() == 2 && opt.at(0) == '-' && opt != "--";
 }
+
+struct CommandToken
+{
+    int majorPart = 0;
+    int minorPart = 0;
+};
 
 // Helper for commandTokens() below:
 // Simple splitting of command lines allowing for '"'-quoted tokens
@@ -251,6 +257,38 @@ static inline void splitCommand(PCSTR args, Inserter it)
     }
 }
 
+// check whether arguments start with a "-t 23.1" or "-t 3" token identifier
+CommandToken extractToken(PCSTR args, PCSTR *afterToken)
+{
+    CommandToken token;
+    while (*args == ' ') // skip whitespace
+        ++args;
+    if (*args != '-')
+        return {};
+    if (*(++args) != 't')
+        return {};
+    ++args;
+    while (*args == ' ') // skip whitespace
+        ++args;
+    PSTR end = nullptr;
+    token.majorPart = strtol(args, &end, 10);
+    if (args >= end)
+        return {};
+    args = end;
+    if (*args == '.') {
+        ++args;
+        end = nullptr;
+        token.minorPart = strtol(args, &end, 10);
+        if (args >= end)
+            return {};
+        args = end;
+    }
+    while (*args == ' ') // skip whitespace
+        ++args;
+    *afterToken = args;
+    return token;
+}
+
 // Split & Parse the arguments of a command and extract the
 // optional first integer token argument ('command -t <number> remaining arguments')
 // Each command takes the 'token' argument and includes it in its output
@@ -259,18 +297,25 @@ static inline void splitCommand(PCSTR args, Inserter it)
 template<class StringContainer>
 static inline StringContainer commandTokens(PCSTR args, int *token = 0)
 {
-    typedef typename StringContainer::iterator ContainerIterator;
+    static std::map<int, std::string> s_commandBuffer;
 
     if (token)
         *token = -1; // Handled as 'display' in engine, so that user can type commands
+
     StringContainer tokens;
-    splitCommand(args, std::back_inserter(tokens));
-    // Check for token
-    ContainerIterator it = tokens.begin();
-    if (it != tokens.end() && *it == "-t" && ++it != tokens.end()) {
-        if (token)
-            std::istringstream(*it) >> *token;
-        tokens.erase(tokens.begin(), ++it);
+    CommandToken commandToken = extractToken(args, &args);
+    if (commandToken.majorPart != 0) {
+        s_commandBuffer[commandToken.majorPart].append(args);
+        if (commandToken.minorPart == 0) {
+            DebugPrint() << commandToken.majorPart << ':' << s_commandBuffer[commandToken.majorPart];
+            splitCommand(s_commandBuffer[commandToken.majorPart].data(), std::back_inserter(tokens));
+            if (token)
+                *token = commandToken.majorPart;
+        } else if (token) {
+            *token = 0;
+        }
+    } else {
+        splitCommand(args, std::back_inserter(tokens));
     }
     return tokens;
 }
@@ -283,6 +328,8 @@ extern "C" HRESULT CALLBACK pid(CIDebugClient *client, PCSTR args)
 
     int token;
     commandTokens<StringList>(args, &token);
+    if (token == 0) // partial message
+        return S_OK;
     dprintf("Qt Creator CDB extension version 4.3 %d bit.\n",
             sizeof(void *) * 8);
     if (const ULONG pid = currentProcessId(client))
@@ -304,6 +351,9 @@ extern "C" HRESULT CALLBACK expandlocals(CIDebugClient *client, PCSTR args)
 
     int token;
     StringList tokens = commandTokens<StringList>(args, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     StringVector inames;
     bool runComplexDumpers = false;
     do {
@@ -423,10 +473,12 @@ static std::string commandLocals(ExtensionCommandContext &commandExtCtx,PCSTR ar
     typedef InameExpressionMap::value_type InameExpressionMapEntry;
 
     // Parse the command
+    StringList tokens = commandTokens<StringList>(args, token);
+    if (token == 0) // partial arguments
+        return {};
     ExtensionContext &extCtx = ExtensionContext::instance();
     DumpCommandParameters parameters;
     std::string iname;
-    StringList tokens = commandTokens<StringList>(args, token);
     StringVector expandedInames;
     StringVector uninitializedInames;
     InameExpressionMap watcherInameExpressionMap;
@@ -577,8 +629,11 @@ extern "C" HRESULT CALLBACK script(CIDebugClient *client, PCSTR argsIn)
     ExtensionCommandContext exc(client);
     int token;
 #ifdef WITH_PYTHON
+    const StringList args = commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial arguments
+        return {};
     std::stringstream command;
-    for (std::string arg : commandTokens<StringList>(argsIn, &token))
+    for (std::string arg : args)
         command << arg << ' ';
 
     PyObject *ptype      = NULL;
@@ -594,6 +649,8 @@ extern "C" HRESULT CALLBACK script(CIDebugClient *client, PCSTR argsIn)
     PyErr_Restore(ptype, pvalue, ptraceback);
 #else
     commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial arguments
+        return {};
     ExtensionContext::instance().report('N', token, 0, "script",
             "Python is not supported in this CDB extension.\n"
             "You need to define PYTHON_INSTALL_DIR in your creator build environment "
@@ -608,6 +665,8 @@ extern "C" HRESULT CALLBACK locals(CIDebugClient *client, PCSTR args)
     std::string errorMessage;
     int token;
     const std::string output = commandLocals(exc, args, &token, &errorMessage);
+    if (token == 0) // partial message
+        return S_OK;
     SymbolGroupValue::verbose = 0;
     if (output.empty())
         ExtensionContext::instance().report('N', token, 0, "locals", errorMessage.c_str());
@@ -625,6 +684,9 @@ static std::string commmandWatches(ExtensionCommandContext &exc, PCSTR args, int
     // Parse the command
     DumpCommandParameters parameters;
     StringList tokens = commandTokens<StringList>(args, token);
+    if (token == 0) // partial message
+        return {};
+
     // Parse away options
     for (bool optionLeft = true;  optionLeft && !tokens.empty(); ) {
         switch (parameters.parseOption(&tokens)) {
@@ -662,6 +724,9 @@ extern "C" HRESULT CALLBACK watches(CIDebugClient *client, PCSTR args)
     std::string errorMessage = "e";
     int token = 0;
     const std::string output = commmandWatches(exc, args, &token, &errorMessage);
+    if (token == 0) // partial message
+        return S_OK;
+
     SymbolGroupValue::verbose = 0;
     if (output.empty())
         ExtensionContext::instance().report('N', token, 0, "locals", errorMessage.c_str());
@@ -677,6 +742,9 @@ static std::string dumplocalHelper(ExtensionCommandContext &exc,PCSTR args, int 
 {
     // Parse the command
     StringList tokens = commandTokens<StringList>(args, token);
+    if (token == 0) // partial message
+        return {};
+
     // Frame and iname
     unsigned frame;
     if (tokens.empty() || integerFromString(tokens.front(), &frame)) {
@@ -700,7 +768,8 @@ static std::string dumplocalHelper(ExtensionCommandContext &exc,PCSTR args, int 
         return std::string();
     }
     std::wstring value;
-    if (!dumpSimpleType(n->asSymbolGroupNode(), SymbolGroupValueContext(exc.dataSpaces(), exc.symbols()), &value, &std::string())) {
+    std::string tmp;
+    if (!dumpSimpleType(n->asSymbolGroupNode(), SymbolGroupValueContext(exc.dataSpaces(), exc.symbols()), &value, &tmp)) {
         *errorMessage = "Cannot dump " + iname;
         return std::string();
     }
@@ -713,6 +782,9 @@ extern "C" HRESULT CALLBACK dumplocal(CIDebugClient *client, PCSTR  argsIn)
     std::string errorMessage;
     int token = 0;
     const std::string value = dumplocalHelper(exc,argsIn, &token, &errorMessage);
+    if (token == 0) // partial message
+        return S_OK;
+
     if (value.empty())
         ExtensionContext::instance().report('N', token, 0, "dumplocal", errorMessage.c_str());
     else
@@ -732,6 +804,9 @@ extern "C" HRESULT CALLBACK typecast(CIDebugClient *client, PCSTR args)
 
     int token;
     const StringVector tokens = commandTokens<StringVector>(args, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     std::string iname;
     std::string desiredType;
     if (tokens.size() == 3u && integerFromString(tokens.front(), &frame)) {
@@ -760,6 +835,9 @@ extern "C" HRESULT CALLBACK addsymbol(CIDebugClient *client, PCSTR args)
 
     int token;
     const StringVector tokens = commandTokens<StringVector>(args, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     std::string name;
     std::string iname;
     if (tokens.size() >= 2u && integerFromString(tokens.front(), &frame)) {
@@ -789,6 +867,9 @@ extern "C" HRESULT CALLBACK addwatch(CIDebugClient *client, PCSTR argsIn)
     bool success = false;
     do {
         StringList tokens = commandTokens<StringList>(argsIn, &token);
+        if (token == 0) // partial message
+            return S_OK;
+
         if (tokens.size() != 2) {
             errorMessage = singleLineUsage(commandDescriptions[CmdAddWatch]);
             break;
@@ -818,60 +899,77 @@ extern "C" HRESULT CALLBACK assign(CIDebugClient *client, PCSTR argsIn)
     ExtensionCommandContext exc(client);
 
     std::string errorMessage;
-    bool success = false;
-    AssignEncoding enc = AssignPlainValue;
+    bool encoded = false;
+    bool evaluateExpression = false;
     int token = 0;
-    do {
-        StringList tokens = commandTokens<StringList>(argsIn, &token);
-        if (tokens.empty()) {
-            errorMessage = singleLineUsage(commandDescriptions[CmdAssign]);
-            break;
-        }
-
+    StringList tokens = commandTokens<StringList>(argsIn, &token);
+    while (!tokens.empty()) {
         if (tokens.front() == "-h") {
-            enc = AssignHexEncoded;
+            encoded = true;
             tokens.pop_front();
-        } else if (tokens.front() == "-u") {
-            enc = AssignHexEncodedUtf16;
-            tokens.pop_front();
+            continue;
         }
 
-        if (tokens.empty()) {
-            errorMessage = singleLineUsage(commandDescriptions[CmdAssign]);
-            break;
+        if (tokens.front() == "-e") {
+            evaluateExpression = true;
+            tokens.pop_front();
+            continue;
         }
+        break;
+    };
 
-        // Parse 'assign locals.x=5'
-        const std::string::size_type equalsPos = tokens.front().find('=');
-        if (equalsPos == std::string::npos) {
-            errorMessage = singleLineUsage(commandDescriptions[CmdAssign]);
-            break;
-        }
-        const std::string iname = tokens.front().substr(0, equalsPos);
-        const std::string value = tokens.front().substr(equalsPos + 1, tokens.front().size() - equalsPos - 1);
-        // get the symbolgroup
-        int currentFrame = ExtensionContext::instance().symbolGroupFrame();
-        if (currentFrame < 0) {
-            CIDebugControl *control = ExtensionCommandContext::instance()->control();
-            DEBUG_STACK_FRAME frame;
-            if (FAILED(control->GetStackTrace(0, 0, 0, &frame, 1, NULL))) {
-                errorMessage = "No current frame.";
-                break;
+    // Parse 'assign locals.x=5'
+    const std::string::size_type equalsPos = tokens.empty() ? std::string::npos
+                                                            : tokens.front().find('=');
+    if (equalsPos == std::string::npos) {
+        errorMessage = singleLineUsage(commandDescriptions[CmdAssign]);
+    } else {
+        std::string iname = tokens.front().substr(0, equalsPos);
+        const std::string value = tokens.front().substr(equalsPos + 1,
+                                                        tokens.front().size() - equalsPos - 1);
+        SymbolGroup *symGroup = nullptr;
+        if (evaluateExpression) {
+            WatchesSymbolGroup *watchesSymGroup
+                = ExtensionContext::instance().watchesSymbolGroup(exc.symbols(), &errorMessage);
+            std::string tempAssignIname = "watch.tmpassign";
+            if (watchesSymGroup) {
+                if (watchesSymGroup->addWatch(exc.symbols(),
+                                              tempAssignIname,
+                                              stringFromHex(iname),
+                                              &errorMessage)) {
+                    iname = tempAssignIname;
+                    symGroup = watchesSymGroup;
+                }
             }
-            currentFrame = frame.FrameNumber;
+        } else {
+            // get the symbolgroup
+            int currentFrame = ExtensionContext::instance().symbolGroupFrame();
+            if (currentFrame < 0) {
+                CIDebugControl *control = ExtensionCommandContext::instance()->control();
+                DEBUG_STACK_FRAME frame;
+                if (FAILED(control->GetStackTrace(0, 0, 0, &frame, 1, NULL)))
+                    errorMessage = "No current frame.";
+                else
+                    currentFrame = frame.FrameNumber;
+            }
+            if (currentFrame >= 0) {
+                symGroup = ExtensionContext::instance().symbolGroup(exc.symbols(),
+                                                                    exc.threadId(),
+                                                                    currentFrame,
+                                                                    &errorMessage);
+            }
         }
-        SymbolGroup *symGroup = ExtensionContext::instance().symbolGroup(exc.symbols(), exc.threadId(), currentFrame, &errorMessage);
-        if (!symGroup)
-            break;
-        success = symGroup->assign(iname, enc, value,
-                                   SymbolGroupValueContext(exc.dataSpaces(), exc.symbols()),
-                                   &errorMessage);
-    } while (false);
+        if (symGroup
+            && symGroup->assign(iname,
+                                encoded ? stringFromHex(value) : value,
+                                SymbolGroupValueContext(exc.dataSpaces(), exc.symbols()),
+                                &errorMessage)) {
+            ExtensionContext::instance().report('R', token, 0, "assign", "Ok");
+            return S_OK;
+        }
+    }
 
-    if (success)
-        ExtensionContext::instance().report('R', token, 0, "assign", "Ok");
-    else
-        ExtensionContext::instance().report('N', token, 0, "assign", errorMessage.c_str());
+    ExtensionContext::instance().report('N', token, 0, "assign", errorMessage.c_str());
     return S_OK;
 }
 
@@ -885,6 +983,8 @@ extern "C" HRESULT CALLBACK threads(CIDebugClient *client, PCSTR  argsIn)
 
     int token;
     commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
 
     const std::string gdbmi = gdbmiThreadList(exc.systemObjects(),
                                               exc.symbols(),
@@ -908,6 +1008,9 @@ extern "C" HRESULT CALLBACK registers(CIDebugClient *Client, PCSTR argsIn)
 
     int token;
     const StringList tokens = commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     const bool humanReadable = !tokens.empty() && tokens.front() == "-h";
     const std::string regs = gdbmiRegisters(exc.registers(), exc.control(), humanReadable, IncludePseudoRegisters, &errorMessage);
     if (regs.empty())
@@ -927,6 +1030,9 @@ extern "C" HRESULT CALLBACK modules(CIDebugClient *Client, PCSTR argsIn)
 
     int token;
     const StringList tokens = commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     const bool humanReadable = !tokens.empty() && tokens.front() == "-h";
     const std::string modules = gdbmiModules(exc.symbols(), humanReadable, &errorMessage);
     if (modules.empty())
@@ -951,6 +1057,9 @@ extern "C" HRESULT CALLBACK setparameter(CIDebugClient *, PCSTR args)
 {
     int token;
     StringVector tokens = commandTokens<StringVector>(args, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     const size_t count = tokens.size();
     size_t success = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -963,6 +1072,12 @@ extern "C" HRESULT CALLBACK setparameter(CIDebugClient *, PCSTR args)
                     ++success;
             } else if (!token.compare(0, equalsPos, "maxArraySize")) {
                 if (integerFromString(value, &ExtensionContext::instance().parameters().maxArraySize))
+                    ++success;
+            } else if (!token.compare(0, equalsPos, "firstChance")) {
+                if (integerFromString(value, &ExtensionContext::instance().parameters().firstChanceException))
+                    ++success;
+            } else if (!token.compare(0, equalsPos, "secondChance")) {
+                if (integerFromString(value, &ExtensionContext::instance().parameters().secondChanceException))
                     ++success;
             } else if (!token.compare(0, equalsPos, "maxStackDepth")) {
                 if (integerFromString(value, &ExtensionContext::instance().parameters().maxStackDepth))
@@ -1010,6 +1125,9 @@ extern "C" HRESULT CALLBACK memory(CIDebugClient *Client, PCSTR argsIn)
     ULONG length = 0;
 
     const StringVector tokens = commandTokens<StringVector>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     if (tokens.size()  == 2
             && integerFromString(tokens.front(), &address)
             && integerFromString(tokens.at(1), &length)) {
@@ -1037,6 +1155,9 @@ extern "C" HRESULT CALLBACK expression(CIDebugClient *Client, PCSTR argsIn)
 
     do {
         const StringVector tokens = commandTokens<StringVector>(argsIn, &token);
+        if (token == 0) // partial message
+            return S_OK;
+
         if (tokens.size()  != 1) {
 
             errorMessage = singleLineUsage(commandDescriptions[CmdExpression]);
@@ -1066,6 +1187,9 @@ extern "C" HRESULT CALLBACK stack(CIDebugClient *Client, PCSTR argsIn)
     unsigned maxFrames = ExtensionContext::instance().parameters().maxStackDepth;
 
     StringList tokens = commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     if (!tokens.empty() && tokens.front() == "-h") {
          humanReadable = true;
          tokens.pop_front();
@@ -1102,6 +1226,9 @@ extern "C" HRESULT CALLBACK qmlstack(CIDebugClient *client, PCSTR argsIn)
 
     do {
         StringList tokens = commandTokens<StringList>(argsIn, &token);
+        if (token == 0) // partial message
+            return S_OK;
+
         if (!tokens.empty() && tokens.front() == "-h") {
              humanReadable = true;
              tokens.pop_front();
@@ -1166,6 +1293,9 @@ extern "C" HRESULT CALLBACK widgetat(CIDebugClient *client, PCSTR argsIn)
         int y = -1;
 
         const StringVector tokens = commandTokens<StringVector>(argsIn, &token);
+        if (token == 0) // partial message
+            return S_OK;
+
         if (tokens.size() != 2) {
             errorMessage = singleLineUsage(commandDescriptions[CmdWidgetAt]);
             break;
@@ -1193,6 +1323,9 @@ extern "C" HRESULT CALLBACK breakpoints(CIDebugClient *client, PCSTR argsIn)
     bool humanReadable = false;
     unsigned verbose = 0;
     StringList tokens = commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     while (!tokens.empty() && tokens.front().size() == 2 && tokens.front().at(0) == '-') {
         switch (tokens.front().at(1)) {
         case 'h':
@@ -1222,6 +1355,9 @@ extern "C" HRESULT CALLBACK test(CIDebugClient *client, PCSTR argsIn)
     Mode mode = Invalid;
     int token = 0;
     StringList tokens = commandTokens<StringList>(argsIn, &token);
+    if (token == 0) // partial message
+        return S_OK;
+
     // Parse away options
     while (!tokens.empty() && tokens.front().size() == 2 && tokens.front().at(0) == '-') {
         const char option = tokens.front().at(1);

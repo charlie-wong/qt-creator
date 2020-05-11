@@ -36,32 +36,30 @@ OsParser::OsParser()
     setObjectName(QLatin1String("OsParser"));
 }
 
-void OsParser::stdError(const QString &line)
+Utils::OutputLineParser::Result OsParser::handleLine(const QString &line, Utils::OutputFormat type)
 {
+    if (type == Utils::StdOutFormat) {
+        if (Utils::HostOsInfo::isWindowsHost()) {
+            const QString trimmed = line.trimmed();
+            if (trimmed == QLatin1String("The process cannot access the file because it is "
+                                         "being used by another process.")) {
+                scheduleTask(CompileTask(Task::Error, tr(
+                       "The process cannot access the file because it is being used "
+                       "by another process.\n"
+                       "Please close all running instances of your application before "
+                       "starting a build.")), 1);
+                m_hasFatalError = true;
+                return Status::Done;
+            }
+        }
+        return Status::NotHandled;
+    }
     if (Utils::HostOsInfo::isLinuxHost()) {
         const QString trimmed = line.trimmed();
         if (trimmed.contains(QLatin1String(": error while loading shared libraries:"))) {
-            addTask(Task(Task::Error, trimmed, Utils::FileName(), -1, Constants::TASK_CATEGORY_COMPILE));
+            scheduleTask(CompileTask(Task::Error, trimmed), 1);
+            return Status::Done;
         }
     }
-    IOutputParser::stdError(line);
-}
-
-void OsParser::stdOutput(const QString &line)
-{
-    if (Utils::HostOsInfo::isWindowsHost()) {
-        const QString trimmed = line.trimmed();
-        if (trimmed == QLatin1String("The process cannot access the file because it is being used by another process.")) {
-            addTask(Task(Task::Error, tr("The process can not access the file because it is being used by another process.\n"
-                                         "Please close all running instances of your application before starting a build."),
-                         Utils::FileName(), -1, Constants::TASK_CATEGORY_COMPILE));
-            m_hasFatalError = true;
-        }
-    }
-    IOutputParser::stdOutput(line);
-}
-
-bool OsParser::hasFatalErrors() const
-{
-    return m_hasFatalError || IOutputParser::hasFatalErrors();
+    return Status::NotHandled;
 }

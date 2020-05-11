@@ -46,6 +46,7 @@ private slots:
     void testCompleteMembers();
     void testCompleteFunctions();
     void testCompleteConstructor();
+    void testCompleteClassAndConstructor();
 
     void testCompleteWithDotToArrowCorrection();
     void testDontCompleteWithDotToArrowCorrectionForFloats();
@@ -53,13 +54,6 @@ private slots:
     void testCompleteProjectDependingCode();
     void testCompleteProjectDependingCodeAfterChangingProject();
     void testCompleteProjectDependingCodeInGeneratedUiFile();
-
-    void testCompleteAfterModifyingIncludedHeaderInOtherEditor();
-    void testCompleteAfterModifyingIncludedHeaderByRefactoringActions();
-    void testCompleteAfterChangingIncludedAndOpenHeaderExternally();
-    void testCompleteAfterChangingIncludedAndNotOpenHeaderExternally();
-
-    void testUpdateBackendAfterRestart();
 };
 
 } // namespace Tests

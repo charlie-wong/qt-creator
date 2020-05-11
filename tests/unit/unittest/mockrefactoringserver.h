@@ -35,22 +35,57 @@ public:
     MOCK_METHOD0(end,
                  void());
 
-    MOCK_METHOD1(requestSourceLocationsForRenamingMessage,
-                 void (const ClangBackEnd::RequestSourceLocationsForRenamingMessage&));
-
     MOCK_METHOD1(requestSourceRangesAndDiagnosticsForQueryMessage,
                  void (const ClangBackEnd::RequestSourceRangesAndDiagnosticsForQueryMessage&));
 
-    MOCK_METHOD0(cancel,
-                 void ());
+    MOCK_METHOD1(requestSourceRangesForQueryMessage,
+                 void (const ClangBackEnd::RequestSourceRangesForQueryMessage&));
 
-    void requestSourceLocationsForRenamingMessage(ClangBackEnd::RequestSourceLocationsForRenamingMessage &&message) override
-    {
-        requestSourceLocationsForRenamingMessage(message);
-    }
+    MOCK_METHOD1(updateProjectParts,
+                 void (const ClangBackEnd::UpdateProjectPartsMessage&));
+
+    MOCK_METHOD1(updateGeneratedFiles,
+                 void (const ClangBackEnd::UpdateGeneratedFilesMessage&));
+
+    MOCK_METHOD1(removeProjectParts,
+                 void (const ClangBackEnd::RemoveProjectPartsMessage&));
+
+    MOCK_METHOD1(removeGeneratedFiles,
+                 void (const ClangBackEnd::RemoveGeneratedFilesMessage&));
+
+    MOCK_METHOD0(cancel,
+                 void());
+
+    MOCK_METHOD2(setProgress,
+                 void(int, int));
 
     void requestSourceRangesAndDiagnosticsForQueryMessage(ClangBackEnd::RequestSourceRangesAndDiagnosticsForQueryMessage &&message) override
     {
         requestSourceRangesAndDiagnosticsForQueryMessage(message);
+    }
+
+    void requestSourceRangesForQueryMessage(ClangBackEnd::RequestSourceRangesForQueryMessage &&message) override
+    {
+        requestSourceRangesForQueryMessage(message);
+    }
+
+    void updateProjectParts(ClangBackEnd::UpdateProjectPartsMessage &&message) override
+    {
+        updateProjectParts(message);
+    }
+
+    void updateGeneratedFiles(ClangBackEnd::UpdateGeneratedFilesMessage &&message) override
+    {
+        updateGeneratedFiles(message);
+    }
+
+    void removeProjectParts(ClangBackEnd::RemoveProjectPartsMessage &&message) override
+    {
+        removeProjectParts(message);
+    }
+
+    void removeGeneratedFiles(ClangBackEnd::RemoveGeneratedFilesMessage &&message) override
+    {
+        removeGeneratedFiles(message);
     }
 };

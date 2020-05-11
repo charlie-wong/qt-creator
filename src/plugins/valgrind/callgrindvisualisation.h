@@ -29,7 +29,6 @@
 
 QT_BEGIN_NAMESPACE
 class QAbstractItemModel;
-class QModelIndex;
 QT_END_NAMESPACE
 
 namespace Valgrind {
@@ -39,13 +38,13 @@ namespace Callgrind { class Function; }
 namespace Valgrind {
 namespace Internal {
 
-class Visualisation : public QGraphicsView
+class Visualization : public QGraphicsView
 {
     Q_OBJECT
 
 public:
-    explicit Visualisation(QWidget *parent = 0);
-    virtual ~Visualisation();
+    explicit Visualization(QWidget *parent = nullptr);
+    ~Visualization() override;
 
     void setModel(QAbstractItemModel *model);
 
@@ -65,9 +64,9 @@ signals:
 
 protected:
     void populateScene();
-    void mousePressEvent(QMouseEvent *event);
-    void mouseDoubleClickEvent(QMouseEvent *event);
-    void resizeEvent(QResizeEvent *event);
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     class Private;

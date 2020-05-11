@@ -48,7 +48,7 @@ class ResourceEditorDocument
     Q_PROPERTY(QString plainText READ plainText STORED false) // For access by code pasters
 
 public:
-    ResourceEditorDocument(QObject *parent = 0);
+    ResourceEditorDocument(QObject *parent = nullptr);
 
     //IDocument
     OpenResult open(QString *errorString, const QString &fileName,
@@ -61,7 +61,7 @@ public:
     bool isModified() const override;
     bool isSaveAsAllowed() const override;
     bool reload(QString *errorString, ReloadFlag flag, ChangeType type) override;
-    void setFilePath(const Utils::FileName &newName) override;
+    void setFilePath(const Utils::FilePath &newName) override;
     void setBlockDirtyChanged(bool value);
 
     RelativeResourceModel *model() const;
@@ -85,11 +85,13 @@ class ResourceEditorW : public Core::IEditor
 public:
     ResourceEditorW(const Core::Context &context,
                    ResourceEditorPlugin *plugin,
-                   QWidget *parent = 0);
+                   QWidget *parent = nullptr);
     ~ResourceEditorW() override;
 
     // IEditor
-    Core::IDocument *document() override { return m_resourceDocument; }
+    Core::IDocument *document() const override { return m_resourceDocument; }
+    QByteArray saveState() const override;
+    bool restoreState(const QByteArray &state) override;
     QWidget *toolBar() override;
 
 private:
@@ -99,6 +101,7 @@ private:
     void openFile(const QString &fileName);
     void renameCurrentFile();
     void copyCurrentResourcePath();
+    void orderList();
 
     const QString m_extension;
     const QString m_fileFilter;
@@ -112,6 +115,7 @@ private:
     QToolBar *m_toolBar;
     QAction *m_renameAction;
     QAction *m_copyFileNameAction;
+    QAction *m_orderList;
 
 public:
     void onRefresh();

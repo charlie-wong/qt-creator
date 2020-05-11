@@ -27,9 +27,11 @@
 
 #include "baseeditordocumentparser.h"
 #include "cppcursorinfo.h"
+#include "cppsymbolinfo.h"
 #include "cppsemanticinfo.h"
 #include "cpptools_global.h"
 
+#include <coreplugin/helpitem.h>
 #include <texteditor/codeassist/assistinterface.h>
 #include <texteditor/quickfix.h>
 #include <texteditor/texteditor.h>
@@ -47,13 +49,25 @@ class TextDocument;
 
 namespace CppTools {
 
+// For clang code model only, move?
+struct CPPTOOLS_EXPORT ToolTipInfo {
+    QString text;
+    QString briefComment;
+
+    QStringList qDocIdCandidates;
+    QString qDocMark;
+    Core::HelpItem::Category qDocCategory;
+
+    QString sizeInBytes;
+};
+
 class CPPTOOLS_EXPORT BaseEditorDocumentProcessor : public QObject
 {
     Q_OBJECT
 
 public:
     BaseEditorDocumentProcessor(QTextDocument *textDocument, const QString &filePath);
-    virtual ~BaseEditorDocumentProcessor();
+    ~BaseEditorDocumentProcessor() override;
 
     void run(bool projectsUpdated = false);
     virtual void semanticRehighlight() = 0;
@@ -66,14 +80,18 @@ public:
     virtual TextEditor::QuickFixOperations
     extraRefactoringOperations(const TextEditor::AssistInterface &assistInterface);
 
-    virtual bool hasDiagnosticsAt(uint line, uint column) const;
-    virtual void addDiagnosticToolTipToLayout(uint line, uint column, QLayout *layout) const;
+    virtual void invalidateDiagnostics();
 
     virtual void editorDocumentTimerRestarted();
 
-    virtual void setParserConfig(const BaseEditorDocumentParser::Configuration config);
+    virtual void setParserConfig(const BaseEditorDocumentParser::Configuration &config);
 
     virtual QFuture<CursorInfo> cursorInfo(const CursorInfoParams &params) = 0;
+    virtual QFuture<CursorInfo> requestLocalReferences(const QTextCursor &cursor) = 0;
+    virtual QFuture<SymbolInfo> requestFollowSymbol(int line, int column) = 0;
+    virtual QFuture<ToolTipInfo> toolTipInfo(const QByteArray &codecName, int line, int column);
+
+    QString filePath() const { return m_filePath; }
 
 public:
     using HeaderErrorDiagnosticWidgetCreator = std::function<QWidget*()>;
@@ -83,12 +101,12 @@ signals:
     void projectPartInfoUpdated(const CppTools::ProjectPartInfo &projectPartInfo);
 
     void codeWarningsUpdated(unsigned revision,
-                             const QList<QTextEdit::ExtraSelection> selections,
+                             const QList<QTextEdit::ExtraSelection> &selections,
                              const HeaderErrorDiagnosticWidgetCreator &creator,
                              const TextEditor::RefactorMarkers &refactorMarkers);
 
     void ifdefedOutBlocksUpdated(unsigned revision,
-                                 const QList<TextEditor::BlockRange> ifdefedOutBlocks);
+                                 const QList<TextEditor::BlockRange> &ifdefedOutBlocks);
 
     void cppDocumentUpdated(const CPlusPlus::Document::Ptr document);    // TODO: Remove me
     void semanticInfoUpdated(const CppTools::SemanticInfo semanticInfo); // TODO: Remove me
@@ -99,7 +117,6 @@ protected:
                           BaseEditorDocumentParser::UpdateParams updateParams);
 
     // Convenience
-    QString filePath() const { return m_filePath; }
     unsigned revision() const { return static_cast<unsigned>(m_textDocument->revision()); }
     QTextDocument *textDocument() const { return m_textDocument; }
 

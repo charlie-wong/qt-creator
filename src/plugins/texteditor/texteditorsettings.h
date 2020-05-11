@@ -39,7 +39,6 @@ QT_END_NAMESPACE
 namespace TextEditor {
 
 class FontSettings;
-class TabSettings;
 class TypingSettings;
 class StorageSettings;
 class BehaviorSettings;
@@ -63,8 +62,8 @@ class TEXTEDITOR_EXPORT TextEditorSettings : public QObject
     Q_OBJECT
 
 public:
-    explicit TextEditorSettings(QObject *parent);
-    ~TextEditorSettings();
+    TextEditorSettings();
+    ~TextEditorSettings() override;
 
     static TextEditorSettings *instance();
 
@@ -80,7 +79,7 @@ public:
     static const CommentsSettings &commentsSettings();
 
     static ICodeStylePreferencesFactory *codeStyleFactory(Core::Id languageId);
-    static QMap<Core::Id, ICodeStylePreferencesFactory *> codeStyleFactories();
+    static const QMap<Core::Id, ICodeStylePreferencesFactory *> &codeStyleFactories();
     static void registerCodeStyleFactory(ICodeStylePreferencesFactory *codeStyleFactory);
     static void unregisterCodeStyleFactory(Core::Id languageId);
 

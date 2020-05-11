@@ -72,8 +72,8 @@ public:
     DebuggerEngineType engineType() const { return m_engineType; }
     void setEngineType(const DebuggerEngineType &engineType);
 
-    Utils::FileName command() const { return m_command; }
-    void setCommand(const Utils::FileName &command);
+    Utils::FilePath command() const { return m_command; }
+    void setCommand(const Utils::FilePath &command);
 
     bool isAutoDetected() const { return m_isAutoDetected; }
     void setAutoDetected(bool isAutoDetected);
@@ -81,14 +81,11 @@ public:
     QString version() const;
     void setVersion(const QString &version);
 
-    QString autoDetectionSource() const { return m_autoDetectionSource; }
-    void setAutoDetectionSource(const QString &autoDetectionSource);
-
-    QList<ProjectExplorer::Abi> abis() const { return m_abis; }
-    void setAbis(const QList<ProjectExplorer::Abi> &abis);
+    const ProjectExplorer::Abis &abis() const { return m_abis; }
+    void setAbis(const ProjectExplorer::Abis &abis);
     void setAbi(const ProjectExplorer::Abi &abi);
 
-    enum MatchLevel { DoesNotMatch, MatchesSomewhat, MatchesWell, MatchesPerfectly };
+    enum MatchLevel { DoesNotMatch, MatchesSomewhat, MatchesWell, MatchesPerfectly, MatchesPerfectlyInPath };
     MatchLevel matchTarget(const ProjectExplorer::Abi &targetAbi) const;
 
     QStringList abiNames() const;
@@ -102,8 +99,8 @@ public:
 
     void reinitializeFromFile();
 
-    Utils::FileName workingDirectory() const { return m_workingDirectory; }
-    void setWorkingDirectory(const Utils::FileName &workingPath) { m_workingDirectory = workingPath; }
+    Utils::FilePath workingDirectory() const { return m_workingDirectory; }
+    void setWorkingDirectory(const Utils::FilePath &workingPath) { m_workingDirectory = workingPath; }
 
 private:
     DebuggerItem(const QVariant &id);
@@ -111,13 +108,12 @@ private:
 
     QVariant m_id;
     QString m_unexpandedDisplayName;
-    DebuggerEngineType m_engineType;
-    Utils::FileName m_command;
-    Utils::FileName m_workingDirectory;
-    bool m_isAutoDetected;
-    QString m_autoDetectionSource;
+    DebuggerEngineType m_engineType = NoEngineType;
+    Utils::FilePath m_command;
+    Utils::FilePath m_workingDirectory;
+    bool m_isAutoDetected = false;
     QString m_version;
-    QList<ProjectExplorer::Abi> m_abis;
+    ProjectExplorer::Abis m_abis;
     QDateTime m_lastModified;
 
     friend class Internal::DebuggerConfigWidget;

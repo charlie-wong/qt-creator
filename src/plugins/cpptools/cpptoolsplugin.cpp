@@ -23,47 +23,43 @@
 **
 ****************************************************************************/
 
-#include "cpptoolsconstants.h"
 #include "cpptoolsplugin.h"
-#include "cppfilesettingspage.h"
 #include "cppcodemodelsettingspage.h"
 #include "cppcodestylesettingspage.h"
-#include "cppclassesfilter.h"
-#include "cppfunctionsfilter.h"
-#include "cppcurrentdocumentfilter.h"
+#include "cppfilesettingspage.h"
 #include "cppmodelmanager.h"
-#include "cpplocatorfilter.h"
-#include "symbolsfindfilter.h"
-#include "cpptoolsjsextension.h"
-#include "cpptoolssettings.h"
-#include "cpptoolsreuse.h"
 #include "cppprojectfile.h"
-#include "cpplocatordata.h"
-#include "cppincludesfilter.h"
+#include "cppprojectupdater.h"
 #include "cpptoolsbridge.h"
-#include "projectinfo.h"
 #include "cpptoolsbridgeqtcreatorimplementation.h"
+#include "cpptoolsconstants.h"
+#include "cpptoolsjsextension.h"
+#include "cpptoolsreuse.h"
+#include "cpptoolssettings.h"
+#include "projectinfo.h"
+#include "stringtable.h"
 
 #include <coreplugin/actionmanager/actioncontainer.h>
 #include <coreplugin/actionmanager/actionmanager.h>
-#include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/coreconstants.h>
 #include <coreplugin/documentmanager.h>
+#include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/icore.h>
 #include <coreplugin/idocument.h>
 #include <coreplugin/jsexpander.h>
 #include <coreplugin/vcsmanager.h>
 #include <cppeditor/cppeditorconstants.h>
+#include <extensionsystem/pluginmanager.h>
 #include <projectexplorer/project.h>
 #include <projectexplorer/projecttree.h>
 
+#include <utils/algorithm.h>
 #include <utils/fileutils.h>
 #include <utils/hostosinfo.h>
 #include <utils/macroexpander.h>
 #include <utils/mimetypes/mimedatabase.h>
 #include <utils/qtcassert.h>
 
-#include <QtPlugin>
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>
@@ -78,21 +74,43 @@ namespace Internal {
 
 enum { debug = 0 };
 
-static CppToolsPlugin *m_instance = 0;
+static CppToolsPlugin *m_instance = nullptr;
 static QHash<QString, QString> m_headerSourceMapping;
 
+class CppToolsPluginPrivate
+{
+public:
+    CppToolsPluginPrivate() {}
+
+    void initialize() { m_codeModelSettings.fromSettings(ICore::settings()); }
+
+    ~CppToolsPluginPrivate()
+    {
+        ExtensionSystem::PluginManager::removeObject(&m_cppProjectUpdaterFactory);
+    }
+
+    StringTable stringTable;
+    CppModelManager modelManager;
+    CppCodeModelSettings m_codeModelSettings;
+    CppToolsSettings settings;
+    CppFileSettings m_fileSettings;
+    CppFileSettingsPage m_cppFileSettingsPage{&m_fileSettings};
+    CppCodeModelSettingsPage m_cppCodeModelSettingsPage{&m_codeModelSettings};
+    CppCodeStyleSettingsPage m_cppCodeStyleSettingsPage;
+    CppProjectUpdaterFactory m_cppProjectUpdaterFactory;
+};
+
 CppToolsPlugin::CppToolsPlugin()
-    : m_fileSettings(new CppFileSettings)
-    , m_codeModelSettings(new CppCodeModelSettings)
 {
     m_instance = this;
-    auto bridgeImplementation = std::unique_ptr<CppToolsBridgeQtCreatorImplementation>(new CppToolsBridgeQtCreatorImplementation);
-    CppToolsBridge::setCppToolsBridgeImplementation(std::move(bridgeImplementation));
+    CppToolsBridge::setCppToolsBridgeImplementation(std::make_unique<CppToolsBridgeQtCreatorImplementation>());
 }
 
 CppToolsPlugin::~CppToolsPlugin()
 {
-    m_instance = 0;
+    delete d;
+    d = nullptr;
+    m_instance = nullptr;
 }
 
 CppToolsPlugin *CppToolsPlugin::instance()
@@ -105,34 +123,39 @@ void CppToolsPlugin::clearHeaderSourceCache()
     m_headerSourceMapping.clear();
 }
 
-Utils::FileName CppToolsPlugin::licenseTemplatePath()
+Utils::FilePath CppToolsPlugin::licenseTemplatePath()
 {
-    return Utils::FileName::fromString(m_instance->m_fileSettings->licenseTemplatePath);
+    return Utils::FilePath::fromString(m_instance->d->m_fileSettings.licenseTemplatePath);
 }
 
 QString CppToolsPlugin::licenseTemplate()
 {
-    return m_instance->m_fileSettings->licenseTemplate();
+    return m_instance->d->m_fileSettings.licenseTemplate();
+}
+
+bool CppToolsPlugin::usePragmaOnce()
+{
+    return m_instance->d->m_fileSettings.headerPragmaOnce;
 }
 
 const QStringList &CppToolsPlugin::headerSearchPaths()
 {
-    return m_instance->m_fileSettings->headerSearchPaths;
+    return m_instance->d->m_fileSettings.headerSearchPaths;
 }
 
 const QStringList &CppToolsPlugin::sourceSearchPaths()
 {
-    return m_instance->m_fileSettings->sourceSearchPaths;
+    return m_instance->d->m_fileSettings.sourceSearchPaths;
 }
 
 const QStringList &CppToolsPlugin::headerPrefixes()
 {
-    return m_instance->m_fileSettings->headerPrefixes;
+    return m_instance->d->m_fileSettings.headerPrefixes;
 }
 
 const QStringList &CppToolsPlugin::sourcePrefixes()
 {
-    return m_instance->m_fileSettings->sourcePrefixes;
+    return m_instance->d->m_fileSettings.sourcePrefixes;
 }
 
 bool CppToolsPlugin::initialize(const QStringList &arguments, QString *error)
@@ -140,40 +163,11 @@ bool CppToolsPlugin::initialize(const QStringList &arguments, QString *error)
     Q_UNUSED(arguments)
     Q_UNUSED(error)
 
-    CppModelManager::instance()->setParent(this);
+    d = new CppToolsPluginPrivate;
+    d->initialize();
 
-    m_settings = new CppToolsSettings(this); // force registration of cpp tools settings
-
-    // Objects
-    CppModelManager *modelManager = CppModelManager::instance();
-    connect(VcsManager::instance(), &VcsManager::repositoryChanged,
-            modelManager, &CppModelManager::updateModifiedSourceFiles);
-    connect(DocumentManager::instance(), &DocumentManager::filesChangedInternally,
-            [=](const QStringList &files) {
-        modelManager->updateSourceFiles(files.toSet());
-    });
-
-    m_codeModelSettings->fromSettings(ICore::settings());
-
-    JsExpander::registerQObjectForJs(QLatin1String("Cpp"), new CppToolsJsExtension);
-
-    CppLocatorData *locatorData = new CppLocatorData;
-    connect(modelManager, &CppModelManager::documentUpdated,
-            locatorData, &CppLocatorData::onDocumentUpdated);
-
-    connect(modelManager, &CppModelManager::aboutToRemoveFiles,
-            locatorData, &CppLocatorData::onAboutToRemoveFiles);
-
-    addAutoReleasedObject(locatorData);
-    addAutoReleasedObject(new CppLocatorFilter(locatorData));
-    addAutoReleasedObject(new CppClassesFilter(locatorData));
-    addAutoReleasedObject(new CppIncludesFilter);
-    addAutoReleasedObject(new CppFunctionsFilter(locatorData));
-    addAutoReleasedObject(new CppCurrentDocumentFilter(modelManager, m_stringTable));
-    addAutoReleasedObject(new CppFileSettingsPage(m_fileSettings));
-    addAutoReleasedObject(new CppCodeModelSettingsPage(m_codeModelSettings));
-    addAutoReleasedObject(new SymbolsFindFilter(modelManager));
-    addAutoReleasedObject(new CppCodeStyleSettingsPage);
+    JsExpander::registerGlobalObject<CppToolsJsExtension>("Cpp");
+    ExtensionSystem::PluginManager::addObject(&d->m_cppProjectUpdaterFactory);
 
     // Menus
     ActionContainer *mtools = ActionManager::actionContainer(Core::Constants::M_TOOLS);
@@ -205,10 +199,15 @@ bool CppToolsPlugin::initialize(const QStringList &arguments, QString *error)
     Utils::MacroExpander *expander = Utils::globalMacroExpander();
     expander->registerVariable("Cpp:LicenseTemplate",
                                tr("The license template."),
-                               [this]() { return CppToolsPlugin::licenseTemplate(); });
+                               []() { return CppToolsPlugin::licenseTemplate(); });
     expander->registerFileVariables("Cpp:LicenseTemplatePath",
                                     tr("The configured path to the license template"),
-                                    [this]() { return CppToolsPlugin::licenseTemplatePath().toString(); });
+                                    []() { return CppToolsPlugin::licenseTemplatePath().toString(); });
+
+    expander->registerVariable(
+                "Cpp:PragmaOnce",
+                tr("Insert \"#pragma once\" instead of \"#ifndef\" include guards into header file"),
+                [] { return usePragmaOnce() ? QString("true") : QString(); });
 
     return true;
 }
@@ -217,24 +216,19 @@ void CppToolsPlugin::extensionsInitialized()
 {
     // The Cpp editor plugin, which is loaded later on, registers the Cpp mime types,
     // so, apply settings here
-    m_fileSettings->fromSettings(ICore::settings());
-    if (!m_fileSettings->applySuffixesToMimeDB())
+    d->m_fileSettings.fromSettings(ICore::settings());
+    if (!d->m_fileSettings.applySuffixesToMimeDB())
         qWarning("Unable to apply cpp suffixes to mime database (cpp mime types not found).\n");
 }
 
-ExtensionSystem::IPlugin::ShutdownFlag CppToolsPlugin::aboutToShutdown()
+CppCodeModelSettings *CppToolsPlugin::codeModelSettings()
 {
-    return SynchronousShutdown;
+    return &d->m_codeModelSettings;
 }
 
-QSharedPointer<CppCodeModelSettings> CppToolsPlugin::codeModelSettings() const
+CppFileSettings *CppToolsPlugin::fileSettings()
 {
-    return m_codeModelSettings;
-}
-
-StringTable &CppToolsPlugin::stringTable()
-{
-    return instance()->m_stringTable;
+    return &d->m_fileSettings;
 }
 
 void CppToolsPlugin::switchHeaderSource()
@@ -261,7 +255,8 @@ static QStringList findFilesInProject(const QString &name,
 
     QString pattern = QString(1, QLatin1Char('/'));
     pattern += name;
-    const QStringList projectFiles = project->files(ProjectExplorer::Project::AllFiles);
+    const QStringList projectFiles
+            = Utils::transform(project->files(ProjectExplorer::Project::AllFiles), &Utils::FilePath::toString);
     const QStringList::const_iterator pcend = projectFiles.constEnd();
     QStringList candidateList;
     for (QStringList::const_iterator it = projectFiles.constBegin(); it != pcend; ++it) {
@@ -357,7 +352,8 @@ static int commonFilePathLength(const QString &s1, const QString &s2)
 
 static QString correspondingHeaderOrSourceInProject(const QFileInfo &fileInfo,
                                                     const QStringList &candidateFileNames,
-                                                    const ProjectExplorer::Project *project)
+                                                    const ProjectExplorer::Project *project,
+                                                    CacheUsage cacheUsage)
 {
     QString bestFileName;
     int compareValue = 0;
@@ -376,8 +372,10 @@ static QString correspondingHeaderOrSourceInProject(const QFileInfo &fileInfo,
     if (!bestFileName.isEmpty()) {
         const QFileInfo candidateFi(bestFileName);
         QTC_ASSERT(candidateFi.isFile(), return QString());
-        m_headerSourceMapping[fileInfo.absoluteFilePath()] = candidateFi.absoluteFilePath();
-        m_headerSourceMapping[candidateFi.absoluteFilePath()] = fileInfo.absoluteFilePath();
+        if (cacheUsage == CacheUsage::ReadWrite) {
+            m_headerSourceMapping[fileInfo.absoluteFilePath()] = candidateFi.absoluteFilePath();
+            m_headerSourceMapping[candidateFi.absoluteFilePath()] = fileInfo.absoluteFilePath();
+        }
         return candidateFi.absoluteFilePath();
     }
 
@@ -386,7 +384,7 @@ static QString correspondingHeaderOrSourceInProject(const QFileInfo &fileInfo,
 
 } // namespace Internal
 
-QString correspondingHeaderOrSource(const QString &fileName, bool *wasHeader)
+QString correspondingHeaderOrSource(const QString &fileName, bool *wasHeader, CacheUsage cacheUsage)
 {
     using namespace Internal;
 
@@ -437,9 +435,11 @@ QString correspondingHeaderOrSource(const QString &fileName, bool *wasHeader)
             const QString normalized = Utils::FileUtils::normalizePathName(candidateFilePath);
             const QFileInfo candidateFi(normalized);
             if (candidateFi.isFile()) {
-                m_headerSourceMapping[fi.absoluteFilePath()] = candidateFi.absoluteFilePath();
-                if (!isHeader || !baseName.endsWith(privateHeaderSuffix))
-                    m_headerSourceMapping[candidateFi.absoluteFilePath()] = fi.absoluteFilePath();
+                if (cacheUsage == CacheUsage::ReadWrite) {
+                    m_headerSourceMapping[fi.absoluteFilePath()] = candidateFi.absoluteFilePath();
+                    if (!isHeader || !baseName.endsWith(privateHeaderSuffix))
+                        m_headerSourceMapping[candidateFi.absoluteFilePath()] = fi.absoluteFilePath();
+                }
                 return candidateFi.absoluteFilePath();
             }
         }
@@ -449,7 +449,7 @@ QString correspondingHeaderOrSource(const QString &fileName, bool *wasHeader)
     ProjectExplorer::Project *currentProject = ProjectExplorer::ProjectTree::currentProject();
     if (currentProject) {
         const QString path = correspondingHeaderOrSourceInProject(fi, candidateFileNames,
-                                                                  currentProject);
+                                                                  currentProject, cacheUsage);
         if (!path.isEmpty())
             return path;
 
@@ -462,7 +462,8 @@ QString correspondingHeaderOrSource(const QString &fileName, bool *wasHeader)
             if (project == currentProject)
                 continue; // We have already checked the current project.
 
-            const QString path = correspondingHeaderOrSourceInProject(fi, candidateFileNames, project);
+            const QString path = correspondingHeaderOrSourceInProject(fi, candidateFileNames,
+                                                                      project, cacheUsage);
             if (!path.isEmpty())
                 return path;
         }

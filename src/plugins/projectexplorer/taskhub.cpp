@@ -28,8 +28,14 @@
 
 #include <coreplugin/coreicons.h>
 #include <coreplugin/ioutputpane.h>
+#include <texteditor/textmark.h>
 #include <utils/qtcassert.h>
 #include <utils/theme/theme.h>
+#include <utils/utilsicons.h>
+
+#include <QApplication>
+
+using namespace Utils;
 
 namespace ProjectExplorer {
 
@@ -55,20 +61,33 @@ static Core::Id categoryForType(Task::TaskType type)
 class TaskMark : public TextEditor::TextMark
 {
 public:
-    TaskMark(unsigned int id, const QString &fileName, int lineNumber,
-             Task::TaskType type, bool visible) :
-        TextMark(fileName, lineNumber, categoryForType(type)),
-        m_id(id)
+    TaskMark(const Task &task) :
+        TextMark(task.file, task.line, categoryForType(task.type)),
+        m_id(task.taskId)
     {
-        setVisible(visible);
+        setColor(task.type == Task::Error ? Utils::Theme::ProjectExplorer_TaskError_TextMarkColor
+                                          : Utils::Theme::ProjectExplorer_TaskWarn_TextMarkColor);
+        setDefaultToolTip(task.type == Task::Error ? QApplication::translate("TaskHub", "Error")
+                                                   : QApplication::translate("TaskHub", "Warning"));
+        setPriority(task.type == Task::Error ? TextEditor::TextMark::NormalPriority
+                                             : TextEditor::TextMark::LowPriority);
+        if (task.category == Constants::TASK_CATEGORY_COMPILE) {
+            setToolTip("<html><body><b>" + QApplication::translate("TaskHub", "Build Issue")
+                       + "</b><br/><code style=\"white-space:pre;font-family:monospace\">"
+                       + task.description.toHtmlEscaped() + "</code></body></html>");
+        } else {
+            setToolTip(task.description);
+        }
+        setIcon(task.icon);
+        setVisible(!task.icon.isNull());
     }
 
-    bool isClickable() const;
-    void clicked();
+    bool isClickable() const override;
+    void clicked() override;
 
-    void updateFileName(const QString &fileName);
-    void updateLineNumber(int lineNumber);
-    void removedFromEditor();
+    void updateFileName(const FilePath &fileName) override;
+    void updateLineNumber(int lineNumber) override;
+    void removedFromEditor() override;
 private:
     unsigned int m_id;
 };
@@ -79,10 +98,10 @@ void TaskMark::updateLineNumber(int lineNumber)
     TextMark::updateLineNumber(lineNumber);
 }
 
-void TaskMark::updateFileName(const QString &fileName)
+void TaskMark::updateFileName(const FilePath &fileName)
 {
-    TaskHub::updateTaskFileName(m_id, fileName);
-    TextMark::updateFileName(fileName);
+    TaskHub::updateTaskFileName(m_id, fileName.toString());
+    TextMark::updateFileName(FilePath::fromString(fileName.toString()));
 }
 
 void TaskMark::removedFromEditor()
@@ -104,13 +123,7 @@ TaskHub::TaskHub()
 {
     m_instance = this;
     qRegisterMetaType<ProjectExplorer::Task>("ProjectExplorer::Task");
-    qRegisterMetaType<QList<ProjectExplorer::Task> >("QList<ProjectExplorer::Task>");
-    TaskMark::setCategoryColor(TASK_MARK_ERROR,
-                               Utils::Theme::ProjectExplorer_TaskError_TextMarkColor);
-    TaskMark::setCategoryColor(TASK_MARK_WARNING,
-                               Utils::Theme::ProjectExplorer_TaskWarn_TextMarkColor);
-    TaskMark::setDefaultToolTip(TASK_MARK_ERROR, tr("Error"));
-    TaskMark::setDefaultToolTip(TASK_MARK_WARNING, tr("Warning"));
+    qRegisterMetaType<Tasks >("Tasks");
 }
 
 TaskHub::~TaskHub()
@@ -131,9 +144,9 @@ TaskHub *TaskHub::instance()
     return m_instance;
 }
 
-void TaskHub::addTask(Task::TaskType type, const QString &description, Core::Id category, const Utils::FileName &file, int line)
+void TaskHub::addTask(Task::TaskType type, const QString &description, Core::Id category)
 {
-    addTask(Task(type, description, file, line, category));
+    addTask(Task(type, description, {}, -1, category));
 }
 
 void TaskHub::addTask(Task task)
@@ -147,13 +160,8 @@ void TaskHub::addTask(Task task)
         task.line = -1;
     task.movedLine = task.line;
 
-    if (task.line != -1) {
-        auto mark = new TaskMark(task.taskId, task.file.toString(), task.line, task.type, !task.icon.isNull());
-        mark->setIcon(task.icon);
-        mark->setPriority(TextEditor::TextMark::LowPriority);
-        mark->setToolTip(task.description);
-        task.setMark(mark);
-    }
+    if ((task.options & Task::AddTextMark) && task.line != -1 && task.type != Task::Unknown)
+        task.setMark(new TaskMark(task));
     emit m_instance->taskAdded(task);
 }
 

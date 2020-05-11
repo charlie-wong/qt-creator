@@ -25,11 +25,13 @@
 
 #pragma once
 
-#include "coreplugin/core_global.h"
+#include "core_global.h"
 
 QT_BEGIN_NAMESPACE
 class QWidget;
 QT_END_NAMESPACE
+
+namespace Utils { class Environment; }
 
 namespace Core {
 
@@ -38,10 +40,12 @@ struct CORE_EXPORT FileUtils
     // Helpers for common directory browser options.
     static void showInGraphicalShell(QWidget *parent, const QString &path);
     static void openTerminal(const QString &path);
+    static void openTerminal(const QString &path, const Utils::Environment &env);
     static QString msgFindInDirectory();
     // Platform-dependent action descriptions
     static QString msgGraphicalShellAction();
-    static QString msgTerminalAction();
+    static QString msgTerminalHereAction();
+    static QString msgTerminalWithAction();
     // File operations aware of version control and file system case-insensitiveness
     static void removeFile(const QString &filePath, bool deleteFromFS);
     static bool renameFile(const QString &from, const QString &to);

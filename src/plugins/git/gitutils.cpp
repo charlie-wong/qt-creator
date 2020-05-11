@@ -69,12 +69,11 @@ bool Stash::parseStashLine(const QString &l)
 bool inputText(QWidget *parent, const QString &title, const QString &prompt, QString *s)
 {
     QInputDialog dialog(parent);
-    dialog.setWindowFlags(dialog.windowFlags() & ~Qt::WindowContextHelpButtonHint);
     dialog.setWindowTitle(title);
     dialog.setLabelText(prompt);
     dialog.setTextValue(*s);
     // Nasty hack:
-    if (QLineEdit *le = dialog.findChild<QLineEdit*>())
+    if (auto le = dialog.findChild<QLineEdit*>())
         le->setMinimumWidth(500);
     if (dialog.exec() != QDialog::Accepted)
         return false;

@@ -62,12 +62,13 @@ public:
     virtual bool hasSettings() const;
     virtual Core::IOptionsPage *settingsPage() const;
 
-    virtual bool checkConfiguration(QString *errorMessage = 0);
+    virtual bool checkConfiguration(QString *errorMessage = nullptr);
     virtual void fetch(const QString &id) = 0;
     virtual void list();
     virtual void paste(const QString &text,
                        ContentType ct = Text,
                        int expiryDays = 1,
+                       bool publicPaste = false,
                        const QString &username = QString(),
                        const QString &comment = QString(),
                        const QString &description = QString()) = 0;
@@ -79,11 +80,11 @@ public:
     // Return true when settings changed.
     static bool showConfigurationError(const Protocol *p,
                                        const QString &message,
-                                       QWidget *parent = 0,
+                                       QWidget *parent = nullptr,
                                        bool showConfig = true);
     // Ensure configuration is correct
     static bool ensureConfiguration(Protocol *p,
-                                    QWidget *parent = 0);
+                                    QWidget *parent = nullptr);
 
 signals:
     void pasteDone(const QString &link);
@@ -107,6 +108,8 @@ class NetworkProtocol : public Protocol
     Q_OBJECT
 
 public:
+    NetworkProtocol() = default;
+
     ~NetworkProtocol() override;
 
 protected:

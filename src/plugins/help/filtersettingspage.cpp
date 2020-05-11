@@ -24,28 +24,41 @@
 ****************************************************************************/
 
 #include "filtersettingspage.h"
-
 #include "helpconstants.h"
+
+#ifndef HELP_NEW_FILTER_ENGINE
+
+#include "helpmanager.h"
 
 #include <filternamedialog.h>
 
 #include <coreplugin/helpmanager.h>
 
+#include <utils/algorithm.h>
+
 #include <QCoreApplication>
 #include <QFileDialog>
 #include <QMessageBox>
 
+#else
+
+#include <QtCore/QVersionNumber>
+#include <QtHelp/QHelpFilterEngine>
+#include <QtHelp/QHelpFilterSettingsWidget>
+#include "localhelpmanager.h"
+
+#endif
+
 using namespace Help::Internal;
-using namespace Core;
 
 FilterSettingsPage::FilterSettingsPage()
 {
     setId("D.Filters");
     setDisplayName(tr("Filters"));
     setCategory(Help::Constants::HELP_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("Help", Help::Constants::HELP_TR_CATEGORY));
-    setCategoryIcon(Utils::Icon(Help::Constants::HELP_CATEGORY_ICON));
 }
+
+#ifndef HELP_NEW_FILTER_ENGINE
 
 QWidget *FilterSettingsPage::widget()
 {
@@ -63,8 +76,10 @@ QWidget *FilterSettingsPage::widget()
                 this, &FilterSettingsPage::addFilter);
         connect(m_ui.filterRemoveButton, &QPushButton::clicked,
                 this, &FilterSettingsPage::removeFilter);
-        connect(HelpManager::instance(), &HelpManager::documentationChanged,
-                this, &FilterSettingsPage::updateFilterPage);
+        connect(Core::HelpManager::Signals::instance(),
+                &Core::HelpManager::Signals::documentationChanged,
+                this,
+                &FilterSettingsPage::updateFilterPage);
     }
     return m_widget;
 }
@@ -99,12 +114,12 @@ void FilterSettingsPage::updateFilterPage()
     QSet<QString> attributes;
     filters = HelpManager::filters();
     for (it = filters.constBegin(); it != filters.constEnd(); ++it)
-        attributes += it.value().toSet();
+        attributes += Utils::toSet(it.value());
 
     foreach (const QString &attribute, attributes)
         new QTreeWidgetItem(m_ui.attributeWidget, QStringList(attribute));
 
-    if (!m_filterMap.keys().isEmpty()) {
+    if (!m_filterMap.isEmpty()) {
         m_ui.filterWidget->setCurrentRow(0);
         updateAttributes(m_ui.filterWidget->currentItem());
     }
@@ -221,14 +236,16 @@ void FilterSettingsPage::apply()
 
 void FilterSettingsPage::finish()
 {
-    disconnect(HelpManager::instance(), &HelpManager::documentationChanged,
-               this, &FilterSettingsPage::updateFilterPage);
+    disconnect(Core::HelpManager::Signals::instance(),
+               &Core::HelpManager::Signals::documentationChanged,
+               this,
+               &FilterSettingsPage::updateFilterPage);
     delete m_widget;
 }
 
 QString FilterSettingsPage::msgFilterLabel(const QString &filter) const
 {
-    if (m_filterMap.keys().isEmpty())
+    if (m_filterMap.isEmpty())
         return tr("No user defined filters available or no filter selected.");
 
     const QStringList &checkedList = m_filterMap.value(filter);
@@ -250,3 +267,48 @@ void FilterSettingsPage::updateFilterDescription(const QString &filter)
 {
     m_ui.label->setText(msgFilterLabel(filter));
 }
+
+#else
+
+QWidget *FilterSettingsPage::widget()
+{
+    if (!m_widget) {
+        LocalHelpManager::setupGuiHelpEngine();
+        m_widget = new QHelpFilterSettingsWidget(nullptr);
+        m_widget->readSettings(LocalHelpManager::filterEngine());
+
+        connect(Core::HelpManager::Signals::instance(),
+                &Core::HelpManager::Signals::documentationChanged,
+                this,
+                &FilterSettingsPage::updateFilterPage);
+
+        updateFilterPage();
+    }
+    return m_widget;
+}
+
+void FilterSettingsPage::apply()
+{
+    if (m_widget->applySettings(LocalHelpManager::filterEngine()))
+        emit filtersChanged();
+
+    m_widget->readSettings(LocalHelpManager::filterEngine());
+}
+
+void FilterSettingsPage::finish()
+{
+    disconnect(Core::HelpManager::Signals::instance(),
+               &Core::HelpManager::Signals::documentationChanged,
+               this,
+               &FilterSettingsPage::updateFilterPage);
+    delete m_widget;
+}
+
+void FilterSettingsPage::updateFilterPage()
+{
+    m_widget->setAvailableComponents(LocalHelpManager::filterEngine()->availableComponents());
+    m_widget->setAvailableVersions(LocalHelpManager::filterEngine()->availableVersions());
+}
+
+#endif
+

@@ -30,7 +30,7 @@ def main():
     if not projects:
         return
     sessionName = "SampleSession"
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
     createAndSwitchToSession(sessionName)
@@ -39,8 +39,8 @@ def main():
                 "Verifying window title contains created session name.")
     checkWelcomePage(sessionName, True)
     for project in projects:
-        openQmakeProject(project, [Targets.DESKTOP_531_DEFAULT])
-    progressBarWait(20000)
+        openQmakeProject(project, [Targets.DESKTOP_5_14_1_DEFAULT])
+    waitForProjectParsing()
     checkNavigator(52, "Verifying whether all projects have been opened.")
     openDocument("animation.Resources.animation\\.qrc./animation.basics.animators\\.qml")
     openDocument("keyinteraction.Sources.main\\.cpp")
@@ -54,11 +54,12 @@ def main():
     checkNavigator(0, "Verifying that no more project is opened.")
     checkOpenDocuments(0, "Verifying whether all files have been closed.")
     switchSession(sessionName)
+    waitForProjectParsing()
     test.verify(waitFor("sessionName in str(mainWindow.windowTitle)", 2000),
                 "Verifying window title contains created session name.")
     checkNavigator(52, "Verifying whether all projects have been re-opened.")
     checkOpenDocuments(2, "Verifying whether 2 files have been re-opened.")
-    if test.verify("main.cpp" in str(mainWindow.windowTitle),
+    if test.verify(str(mainWindow.windowTitle).startswith("main.cpp "),
                    "Verifying whether utility.h has been opened."):
         current = str(waitForObject(":Qt Creator_CppEditor::Internal::CPPEditorWidget").plainText)
         test.verify(originalText == current, "Verifying that same file has been opened.")
@@ -66,9 +67,9 @@ def main():
     invokeMenuItem("File", "Exit")
 
 def prepareTestExamples():
-    examples = [os.path.join(Qt5Path.examplesPath(Targets.DESKTOP_561_DEFAULT),
+    examples = [os.path.join(Qt5Path.examplesPath(Targets.DESKTOP_5_14_1_DEFAULT),
                              "quick", "animation", "animation.pro"),
-                os.path.join(Qt5Path.examplesPath(Targets.DESKTOP_561_DEFAULT),
+                os.path.join(Qt5Path.examplesPath(Targets.DESKTOP_5_14_1_DEFAULT),
                              "quick", "keyinteraction", "keyinteraction.pro")
                 ]
     projects = []
@@ -83,18 +84,18 @@ def prepareTestExamples():
 
 def switchSession(toSession):
     test.log("Switching to session '%s'" % toSession)
-    invokeMenuItem("File", "Session Manager...")
-    clickItem(waitForObject("{name='sessionView' type='ProjectExplorer::Internal::SessionView' visible='1' "
-                            "window=':Session Manager_ProjectExplorer::Internal::SessionDialog'}"),
-                            toSession, 5, 5, 0, Qt.LeftButton)
-    clickButton(waitForObject("{name='btSwitch' text='Switch to' type='QPushButton' visible='1' "
+    invokeMenuItem("File", "Sessions", "Manage...")
+    sessionView = ("{name='sessionView' type='ProjectExplorer::Internal::SessionView' visible='1' "
+                   "window=':Session Manager_ProjectExplorer::Internal::SessionDialog'}")
+    mouseClick(waitForObjectItem(sessionView, toSession))
+    clickButton(waitForObject("{name='btSwitch' type='QPushButton' visible='1' "
                               "window=':Session Manager_ProjectExplorer::Internal::SessionDialog'}"))
 
 def createAndSwitchToSession(toSession):
     sessionInputDialog = ("{type='ProjectExplorer::Internal::SessionNameInputDialog' unnamed='1' "
                           "visible='1' windowTitle='New Session Name'}")
     test.log("Switching to session '%s' after creating it." % toSession)
-    invokeMenuItem("File", "Session Manager...")
+    invokeMenuItem("File", "Sessions", "Manage...")
     clickButton(waitForObject("{name='btCreateNew' text='New' type='QPushButton' visible='1' "
                               "window=':Session Manager_ProjectExplorer::Internal::SessionDialog'}"))
     lineEdit = waitForObject("{type='QLineEdit' unnamed='1' visible='1' window=%s}"
@@ -148,6 +149,3 @@ def checkForSessionFile(sessionName, proFiles):
                 proFile = proFile.replace('\\', '/')
             test.verify(proFile in content, "Verifying whether expected .pro file (%s) is listed "
                         "inside session file." % proFile)
-
-def init():
-    removeQmlDebugFolderIfExists()

@@ -36,7 +36,7 @@ InternalNodeProperty::InternalNodeProperty(const PropertyName &name, const Inter
 
 InternalNodeProperty::Pointer InternalNodeProperty::create(const PropertyName &name, const InternalNode::Pointer &propertyOwner)
 {
-    InternalNodeProperty *newPointer = new InternalNodeProperty(name, propertyOwner);
+    auto newPointer = new InternalNodeProperty(name, propertyOwner);
     InternalNodeProperty::Pointer smartPointer(newPointer);
 
     newPointer->setInternalWeakPointer(smartPointer);
@@ -100,8 +100,8 @@ QList<InternalNode::Pointer> InternalNodeProperty::allSubNodes() const
     QList<InternalNode::Pointer> nodeList;
 
     if (node()) {
-        nodeList.append(node()->allSubNodes());
         nodeList.append(node());
+        nodeList.append(node()->allSubNodes());
     }
 
     return nodeList;

@@ -42,7 +42,8 @@ public:
         ContextMenuAction,
         ToolBarAction,
         Action,
-        FormEditorAction
+        FormEditorAction,
+        Edit3DAction
     };
 
     enum Priorities {
@@ -52,7 +53,7 @@ public:
         LowestPriority = ComponentCoreConstants::priorityLast
     };
 
-    virtual ~ActionInterface() {}
+    virtual ~ActionInterface() = default;
 
     virtual QAction *action() const = 0;
     virtual QByteArray category() const = 0;

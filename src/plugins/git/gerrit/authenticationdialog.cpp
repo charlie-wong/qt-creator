@@ -27,7 +27,6 @@
 #include "ui_authenticationdialog.h"
 #include "gerritserver.h"
 
-#include <utils/asconst.h>
 #include <utils/fileutils.h>
 #include <utils/hostosinfo.h>
 
@@ -151,10 +150,10 @@ bool AuthenticationDialog::setupCredentials()
             replaceEntry(line, "login", user);
             replaceEntry(line, "password", password);
         }
-        out << line << endl;
+        out << line << '\n';
     }
     if (!found)
-        out << "machine " << m_server->host << " login " << user << " password " << password << endl;
+        out << "machine " << m_server->host << " login " << user << " password " << password << '\n';
     Utils::FileSaver saver(m_netrcFileName, QFile::WriteOnly | QFile::Truncate | QFile::Text);
     saver.write(netrcContents.toUtf8());
     return saver.finalize();

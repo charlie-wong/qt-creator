@@ -26,116 +26,84 @@
 #pragma once
 
 #include "cmakeconfigitem.h"
-#include "cmakeproject.h"
 #include "configmodel.h"
 
-#include <cpptools/cpprawprojectpart.h>
-
 #include <projectexplorer/buildconfiguration.h>
-#include <projectexplorer/abi.h>
-
-#include <memory>
-
-namespace ProjectExplorer { class ToolChain; }
 
 namespace CMakeProjectManager {
-class CMakeBuildInfo;
 class CMakeProject;
 
 namespace Internal {
 
-class BuildDirManager;
-class CMakeBuildConfigurationFactory;
+class CMakeBuildSystem;
 class CMakeBuildSettingsWidget;
-class CMakeProjectNode;
 
-class CMakeBuildConfiguration : public ProjectExplorer::BuildConfiguration
+class CMakeBuildConfiguration final : public ProjectExplorer::BuildConfiguration
 {
     Q_OBJECT
-    friend class CMakeBuildConfigurationFactory;
+
+    friend class ProjectExplorer::BuildConfigurationFactory;
+    CMakeBuildConfiguration(ProjectExplorer::Target *target, Core::Id id);
+    ~CMakeBuildConfiguration() final;
 
 public:
-    CMakeBuildConfiguration(ProjectExplorer::Target *parent);
-    ~CMakeBuildConfiguration();
-
-    bool isEnabled() const override;
-    QString disabledReason() const override;
-
-    ProjectExplorer::NamedWidget *createConfigWidget() override;
-
-    QVariantMap toMap() const override;
-
-    BuildType buildType() const override;
-
-    void emitBuildTypeChanged();
-
-    void setCMakeConfiguration(const CMakeConfig &config);
-    bool hasCMakeConfiguration() const;
-    CMakeConfig cmakeConfiguration() const;
+    CMakeConfig configurationForCMake() const;
+    CMakeConfig configurationFromCMake() const;
 
     QString error() const;
     QString warning() const;
 
-    bool isParsing() const;
-
-    void maybeForceReparse();
-    void resetData();
-    bool persistCMakeState();
-    bool updateCMakeStateBeforeBuild();
-    void runCMake();
-    void clearCache();
-
-    QList<CMakeBuildTarget> buildTargets() const;
-    CMakeProjectManager::Internal::CMakeProjectNode *generateProjectTree(const QList<const ProjectExplorer::FileNode *> &allFiles) const;
-    void updateCodeModel(CppTools::RawProjectParts &rpps);
-
-    static Utils::FileName
-    shadowBuildDirectory(const Utils::FileName &projectFilePath, const ProjectExplorer::Kit *k,
+    static Utils::FilePath
+    shadowBuildDirectory(const Utils::FilePath &projectFilePath, const ProjectExplorer::Kit *k,
                          const QString &bcName, BuildConfiguration::BuildType buildType);
 
     // Context menu action:
     void buildTarget(const QString &buildTarget);
+    ProjectExplorer::BuildSystem *buildSystem() const final;
 
 signals:
-    void errorOccured(const QString &message);
-    void warningOccured(const QString &message);
+    void errorOccurred(const QString &message);
+    void warningOccurred(const QString &message);
 
-    void parsingStarted();
-    void dataAvailable();
-
-protected:
-    CMakeBuildConfiguration(ProjectExplorer::Target *parent, CMakeBuildConfiguration *source);
-    bool fromMap(const QVariantMap &map) override;
+    void configurationForCMakeChanged();
 
 private:
-    void ctor();
+    QVariantMap toMap() const override;
+    BuildType buildType() const override;
 
-    enum ForceEnabledChanged : quint8 { False, True };
+    ProjectExplorer::NamedWidget *createConfigWidget() override;
+
+    bool fromMap(const QVariantMap &map) override;
+
+    enum ForceEnabledChanged { False, True };
     void clearError(ForceEnabledChanged fec = ForceEnabledChanged::False);
-    QList<ConfigModel::DataItem> completeCMakeConfiguration() const;
-    void setCurrentCMakeConfiguration(const QList<ConfigModel::DataItem> &items);
+
+    void setConfigurationFromCMake(const CMakeConfig &config);
+    void setConfigurationForCMake(const QList<ConfigModel::DataItem> &items);
+    void setConfigurationForCMake(const CMakeConfig &config);
 
     void setError(const QString &message);
     void setWarning(const QString &message);
 
-    CMakeConfig m_configuration;
+    CMakeConfig m_configurationForCMake;
+    CMakeConfig m_initialConfiguration;
     QString m_error;
     QString m_warning;
 
-    std::unique_ptr<BuildDirManager> m_buildDirManager;
+    CMakeConfig m_configurationFromCMake;
+    CMakeBuildSystem *m_buildSystem = nullptr;
 
     friend class CMakeBuildSettingsWidget;
-    friend class CMakeProjectManager::CMakeProject;
+    friend class CMakeBuildSystem;
+    friend class CMakeProject;
 };
 
 class CMakeProjectImporter;
 
-class CMakeBuildConfigurationFactory : public ProjectExplorer::IBuildConfigurationFactory
+class CMakeBuildConfigurationFactory final : public ProjectExplorer::BuildConfigurationFactory
 {
-    Q_OBJECT
-
 public:
-    CMakeBuildConfigurationFactory(QObject *parent = 0);
+    CMakeBuildConfigurationFactory();
 
     enum BuildType { BuildTypeNone = 0,
                      BuildTypeDebug = 1,
@@ -146,25 +114,8 @@ public:
     static BuildType buildTypeFromByteArray(const QByteArray &in);
     static ProjectExplorer::BuildConfiguration::BuildType cmakeBuildTypeToBuildType(const BuildType &in);
 
-    int priority(const ProjectExplorer::Target *parent) const override;
-    QList<ProjectExplorer::BuildInfo *> availableBuilds(const ProjectExplorer::Target *parent) const override;
-    int priority(const ProjectExplorer::Kit *k, const QString &projectPath) const override;
-    QList<ProjectExplorer::BuildInfo *> availableSetups(const ProjectExplorer::Kit *k,
-                                                        const QString &projectPath) const override;
-    ProjectExplorer::BuildConfiguration *create(ProjectExplorer::Target *parent,
-                                                const ProjectExplorer::BuildInfo *info) const override;
-
-    bool canClone(const ProjectExplorer::Target *parent, ProjectExplorer::BuildConfiguration *source) const override;
-    CMakeBuildConfiguration *clone(ProjectExplorer::Target *parent, ProjectExplorer::BuildConfiguration *source) override;
-    bool canRestore(const ProjectExplorer::Target *parent, const QVariantMap &map) const override;
-    CMakeBuildConfiguration *restore(ProjectExplorer::Target *parent, const QVariantMap &map) override;
-
 private:
-    bool canHandle(const ProjectExplorer::Target *t) const;
-
-    CMakeBuildInfo *createBuildInfo(const ProjectExplorer::Kit *k,
-                                    const QString &sourceDir,
-                                    BuildType buildType) const;
+    static ProjectExplorer::BuildInfo createBuildInfo(BuildType buildType);
 
     friend class CMakeProjectImporter;
 };

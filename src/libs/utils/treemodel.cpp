@@ -521,7 +521,7 @@ void ModelTest::data()
  */
 void ModelTest::rowsAboutToBeInserted(const QModelIndex &parent, int start, int end)
 {
-    Q_UNUSED(end);
+    Q_UNUSED(end)
     Changing c;
     c.parent = parent;
     c.oldSize = model->rowCount(parent);
@@ -605,21 +605,18 @@ namespace Utils {
 //
 // TreeItem
 //
-TreeItem::TreeItem()
-    : m_parent(0), m_model(0)
-{
-}
+TreeItem::TreeItem() = default;
 
 TreeItem::~TreeItem()
 {
-    QTC_CHECK(m_parent == 0);
-    QTC_CHECK(m_model == 0);
+    QTC_CHECK(m_parent == nullptr);
+    QTC_CHECK(m_model == nullptr);
     removeChildren();
 }
 
 TreeItem *TreeItem::childAt(int pos) const
 {
-    QTC_ASSERT(pos >= 0, return 0);
+    QTC_ASSERT(pos >= 0, return nullptr);
     return pos < childCount() ? *(begin() + pos) : nullptr;
 }
 
@@ -631,22 +628,22 @@ int TreeItem::indexOf(const TreeItem *item) const
 
 QVariant TreeItem::data(int column, int role) const
 {
-    Q_UNUSED(column);
-    Q_UNUSED(role);
+    Q_UNUSED(column)
+    Q_UNUSED(role)
     return QVariant();
 }
 
 bool TreeItem::setData(int column, const QVariant &data, int role)
 {
-    Q_UNUSED(column);
-    Q_UNUSED(data);
-    Q_UNUSED(role);
+    Q_UNUSED(column)
+    Q_UNUSED(data)
+    Q_UNUSED(role)
     return false;
 }
 
 Qt::ItemFlags TreeItem::flags(int column) const
 {
-    Q_UNUSED(column);
+    Q_UNUSED(column)
     return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
 }
 
@@ -686,6 +683,27 @@ void TreeItem::insertChild(int pos, TreeItem *item)
     } else {
         item->m_parent = this;
         m_children.insert(m_children.begin() + pos, item);
+    }
+}
+
+void TreeItem::insertOrderedChild(TreeItem *item,
+    const std::function<bool (const TreeItem *, const TreeItem *)> &cmp)
+{
+    auto where = std::lower_bound(begin(), end(), item, cmp);
+    insertChild(int(where - begin()), item);
+}
+
+void TreeItem::removeChildAt(int pos)
+{
+    QTC_ASSERT(0 <= pos && pos < m_children.count(), return);
+
+    if (m_model) {
+        QModelIndex idx = index();
+        m_model->beginRemoveRows(idx, pos, pos);
+        removeItemAt(pos);
+        m_model->endRemoveRows();
+    } else {
+        removeItemAt(pos);
     }
 }
 
@@ -730,7 +748,8 @@ void TreeItem::update()
 {
     if (m_model) {
         QModelIndex idx = index();
-        m_model->dataChanged(idx.sibling(idx.row(), 0), idx.sibling(idx.row(), m_model->m_columnCount - 1));
+        emit m_model->dataChanged(idx.sibling(idx.row(), 0),
+                                  idx.sibling(idx.row(), m_model->m_columnCount - 1));
     }
 }
 
@@ -738,7 +757,7 @@ void TreeItem::updateAll()
 {
     if (m_model) {
         QModelIndex idx = index();
-        m_model->dataChanged(idx, idx.sibling(idx.row(), m_model->m_columnCount - 1));
+        emit m_model->dataChanged(idx, idx.sibling(idx.row(), m_model->m_columnCount - 1));
         for (TreeItem *item : *this)
             item->updateAll();
     }
@@ -748,7 +767,7 @@ void TreeItem::updateColumn(int column)
 {
     if (m_model) {
         QModelIndex idx = index();
-        m_model->dataChanged(idx.sibling(idx.row(), column), idx.sibling(idx.row(), column));
+        emit m_model->dataChanged(idx.sibling(idx.row(), column), idx.sibling(idx.row(), column));
     }
 }
 
@@ -816,7 +835,7 @@ void TreeItem::forChildrenAtLevel(int level, const std::function<void(TreeItem *
 
 TreeItem *TreeItem::findChildAtLevel(int level, const std::function<bool(TreeItem *)> &pred) const
 {
-    QTC_ASSERT(level > 0, return 0);
+    QTC_ASSERT(level > 0, return nullptr);
     if (level == 1) {
         for (TreeItem *item : *this)
             if (pred(item))
@@ -827,7 +846,7 @@ TreeItem *TreeItem::findChildAtLevel(int level, const std::function<bool(TreeIte
                 return found;
         }
     }
-    return 0;
+    return nullptr;
 }
 
 TreeItem *TreeItem::findAnyChild(const std::function<bool(TreeItem *)> &pred) const
@@ -838,29 +857,56 @@ TreeItem *TreeItem::findAnyChild(const std::function<bool(TreeItem *)> &pred) co
         if (TreeItem *found = item->findAnyChild(pred))
             return found;
     }
-    return 0;
+    return nullptr;
+}
+
+TreeItem *TreeItem::reverseFindAnyChild(const std::function<bool (TreeItem *)> &pred) const
+{
+    auto end = m_children.rend();
+    for (auto it = m_children.rbegin(); it != end; ++it) {
+        if (TreeItem *found = (*it)->reverseFindAnyChild(pred))
+            return found;
+        if (pred(*it))
+            return *it;
+    }
+    return nullptr;
 }
 
 void TreeItem::clear()
 {
     while (childCount() != 0) {
         TreeItem *item = m_children.takeLast();
-        item->m_model = 0;
-        item->m_parent = 0;
+        item->m_model = nullptr;
+        item->m_parent = nullptr;
         delete item;
     }
+}
+
+void TreeItem::removeItemAt(int pos)
+{
+    TreeItem *item = m_children.at(pos);
+    item->m_model = nullptr;
+    item->m_parent = nullptr;
+    delete item;
+    m_children.removeAt(pos);
 }
 
 void TreeItem::expand()
 {
     QTC_ASSERT(m_model, return);
-    m_model->requestExpansion(index());
+    emit m_model->requestExpansion(index());
+}
+
+void TreeItem::collapse()
+{
+    QTC_ASSERT(m_model, return);
+    emit m_model->requestCollapse(index());
 }
 
 void TreeItem::propagateModel(BaseTreeModel *m)
 {
     QTC_ASSERT(m, return);
-    QTC_ASSERT(m_model == 0 || m_model == m, return);
+    QTC_ASSERT(m_model == nullptr || m_model == m, return);
     if (m && !m_model) {
         m_model = m;
         for (TreeItem *item : *this)
@@ -897,9 +943,9 @@ BaseTreeModel::BaseTreeModel(TreeItem *root, QObject *parent)
 BaseTreeModel::~BaseTreeModel()
 {
     QTC_ASSERT(m_root, return);
-    QTC_ASSERT(m_root->m_parent == 0, return);
+    QTC_ASSERT(m_root->m_parent == nullptr, return);
     QTC_ASSERT(m_root->m_model == this, return);
-    m_root->m_model = 0;
+    m_root->m_model = nullptr;
     delete m_root;
 }
 
@@ -924,6 +970,18 @@ QModelIndex BaseTreeModel::parent(const QModelIndex &idx) const
     return createIndex(i, 0, static_cast<void*>(parent));
 }
 
+QModelIndex BaseTreeModel::sibling(int row, int column, const QModelIndex &idx) const
+{
+    const TreeItem *item = itemForIndex(idx);
+    QTC_ASSERT(item, return QModelIndex());
+    QModelIndex result;
+    if (TreeItem *parent = item->parent()) {
+        if (TreeItem *sibl = parent->childAt(row))
+            result = createIndex(row, column, static_cast<void*>(sibl));
+    }
+    return result;
+}
+
 int BaseTreeModel::rowCount(const QModelIndex &idx) const
 {
     CHECK_INDEX(idx);
@@ -932,8 +990,7 @@ int BaseTreeModel::rowCount(const QModelIndex &idx) const
     if (idx.column() > 0)
         return 0;
     const TreeItem *item = itemForIndex(idx);
-    QTC_ASSERT(item, return 0);
-    return item->childCount();
+    return item ? item->childCount() : 0;
 }
 
 int BaseTreeModel::columnCount(const QModelIndex &idx) const
@@ -971,6 +1028,8 @@ QVariant BaseTreeModel::headerData(int section, Qt::Orientation orientation,
 
 bool BaseTreeModel::hasChildren(const QModelIndex &idx) const
 {
+    if (idx.column() > 0)
+        return false;
     TreeItem *item = itemForIndex(idx);
     return !item || item->hasChildren();
 }
@@ -978,7 +1037,7 @@ bool BaseTreeModel::hasChildren(const QModelIndex &idx) const
 Qt::ItemFlags BaseTreeModel::flags(const QModelIndex &idx) const
 {
     if (!idx.isValid())
-        return 0;
+        return {};
     TreeItem *item = itemForIndex(idx);
     return item ? item->flags(idx.column())
                 : (Qt::ItemIsEnabled|Qt::ItemIsSelectable);
@@ -1009,23 +1068,24 @@ TreeItem *BaseTreeModel::rootItem() const
 void BaseTreeModel::setRootItem(TreeItem *item)
 {
     QTC_ASSERT(item, return);
-    QTC_ASSERT(item->m_model == 0, return);
-    QTC_ASSERT(item->m_parent == 0, return);
+    QTC_ASSERT(item->m_model == nullptr, return);
+    QTC_ASSERT(item->m_parent == nullptr, return);
+    QTC_ASSERT(item != m_root, return);
     QTC_CHECK(m_root);
 
-    emit layoutAboutToBeChanged();
+    beginResetModel();
     if (m_root) {
-        QTC_CHECK(m_root->m_parent == 0);
+        QTC_CHECK(m_root->m_parent == nullptr);
         QTC_CHECK(m_root->m_model == this);
         // needs to be done explicitly before setting the model to 0, otherwise it might lead to a
         // crash inside a view or proxy model, especially if there are selected items
         m_root->removeChildren();
-        m_root->m_model = 0;
+        m_root->m_model = nullptr;
         delete m_root;
     }
     m_root = item;
     item->propagateModel(this);
-    emit layoutChanged();
+    endResetModel();
 }
 
 void BaseTreeModel::setHeader(const QStringList &displays)
@@ -1056,8 +1116,8 @@ TreeItem *BaseTreeModel::itemForIndex(const QModelIndex &idx) const
 {
     CHECK_INDEX(idx);
     TreeItem *item = idx.isValid() ? static_cast<TreeItem*>(idx.internalPointer()) : m_root;
-    QTC_ASSERT(item, return 0);
-    QTC_ASSERT(item->m_model == this, return 0);
+    QTC_ASSERT(item, return nullptr);
+    QTC_ASSERT(item->m_model == static_cast<const BaseTreeModel *>(this), return nullptr);
     return item;
 }
 
@@ -1070,7 +1130,7 @@ QModelIndex BaseTreeModel::indexForItem(const TreeItem *item) const
     TreeItem *p = item->parent();
     QTC_ASSERT(p, return QModelIndex());
 
-    TreeItem *mitem = const_cast<TreeItem *>(item);
+    auto mitem = const_cast<TreeItem *>(item);
     int row = p->indexOf(mitem);
     return createIndex(row, 0, mitem);
 }
@@ -1104,8 +1164,8 @@ TreeItem *BaseTreeModel::takeItem(TreeItem *item)
 
     QModelIndex idx = indexForItem(parent);
     beginRemoveRows(idx, pos, pos);
-    item->m_parent = 0;
-    item->m_model = 0;
+    item->m_parent = nullptr;
+    item->m_model = nullptr;
     parent->m_children.removeAt(pos);
     endRemoveRows();
     return item;
@@ -1135,7 +1195,7 @@ QVariant StaticTreeItem::data(int column, int role) const
 
 Qt::ItemFlags StaticTreeItem::flags(int column) const
 {
-    Q_UNUSED(column);
+    Q_UNUSED(column)
     return Qt::ItemIsEnabled;
 }
 

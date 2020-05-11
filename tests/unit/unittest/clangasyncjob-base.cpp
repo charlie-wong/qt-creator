@@ -26,16 +26,14 @@
 #include "clangasyncjob-base.h"
 #include "processevents-utilities.h"
 
-#include <clangbackendipc/filecontainer.h>
+#include <clangsupport/filecontainer.h>
 
 using namespace ClangBackEnd;
 
 void ClangAsyncJobTest::BaseSetUp(ClangBackEnd::JobRequest::Type jobRequestType,
                                   IAsyncJob &asyncJob)
 {
-    projects.createOrUpdate({ProjectPartContainer(projectPartId)});
-
-    const QVector<FileContainer> fileContainer{FileContainer(filePath, projectPartId)};
+    const QVector<FileContainer> fileContainer{FileContainer(filePath)};
     document = documents.create(fileContainer).front();
     documents.setVisibleInEditors({filePath});
     documents.setUsedByCurrentEditor(filePath);
@@ -49,14 +47,10 @@ void ClangAsyncJobTest::BaseSetUp(ClangBackEnd::JobRequest::Type jobRequestType,
 JobRequest ClangAsyncJobTest::createJobRequest(const Utf8String &filePath,
                                                JobRequest::Type type) const
 {
-    JobRequest jobRequest;
-    jobRequest.type = type;
-    jobRequest.expirationReasons = JobRequest::expirationReasonsForType(type);
+    JobRequest jobRequest(type);
     jobRequest.filePath = filePath;
-    jobRequest.projectPartId = projectPartId;
     jobRequest.unsavedFilesChangeTimePoint = unsavedFiles.lastChangeTimePoint();
     jobRequest.documentRevision = document.documentRevision();
-    jobRequest.projectChangeTimePoint = projects.project(projectPartId).lastChangeTimePoint();
 
     return jobRequest;
 }

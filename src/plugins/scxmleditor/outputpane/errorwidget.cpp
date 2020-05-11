@@ -151,7 +151,7 @@ void ErrorWidget::createUi()
     setLayout(new QVBoxLayout);
     layout()->addWidget(toolBar);
     layout()->addWidget(m_errorsTable);
-    layout()->setMargin(0);
+    layout()->setContentsMargins(0, 0, 0, 0);
     layout()->setSpacing(0);
 }
 
@@ -203,7 +203,7 @@ QString ErrorWidget::modifyExportedValue(const QString &val)
 
 void ErrorWidget::exportWarnings()
 {
-    QString fileName = QFileDialog::getSaveFileName(this, tr("Export To File"), QString(), tr("CSV files (*.csv)"));
+    QString fileName = QFileDialog::getSaveFileName(this, tr("Export to File"), QString(), tr("CSV files (*.csv)"));
     if (fileName.isEmpty())
         return;
 

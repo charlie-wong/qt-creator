@@ -42,6 +42,7 @@
 #include <texteditor/texteditor.h>
 #include <texteditor/textdocument.h>
 #include <projectexplorer/projectexplorer.h>
+#include <projectexplorer/projecttree.h>
 #include <projectexplorer/session.h>
 #include <utils/mimetypes/mimedatabase.h>
 #include <utils/qtcassert.h>
@@ -66,8 +67,8 @@ using namespace ProjectExplorer;
 static QString msgClassNotFound(const QString &uiClassName, const QList<Document::Ptr> &docList)
 {
     QString files;
-    foreach (const Document::Ptr &doc, docList) {
-        files += QLatin1Char('\n');
+    for (const Document::Ptr &doc : docList) {
+        files += '\n';
         files += QDir::toNativeSeparators(doc->fileName());
     }
     return QtCreatorIntegration::tr(
@@ -85,8 +86,7 @@ QtCreatorIntegration::QtCreatorIntegration(QDesignerFormEditorInterface *core, Q
     f &= ~ResourceEditorFeature;
     setFeatures(f);
 
-    connect(this, static_cast<void (QDesignerIntegrationInterface::*)
-                    (const QString&, const QString&, const QStringList&)>
+    connect(this, QOverload<const QString &, const QString &, const QStringList &>::of
                        (&QDesignerIntegrationInterface::navigateToSlot),
             this, &QtCreatorIntegration::slotNavigateToSlot);
     connect(this, &QtCreatorIntegration::helpRequested,
@@ -114,17 +114,17 @@ QWidget *QtCreatorIntegration::containerWindow(QWidget * /*widget*/) const
 {
     if (SharedTools::WidgetHost *host = FormEditorW::activeWidgetHost())
         return host->integrationContainer();
-    return 0;
+    return nullptr;
 }
 
 static QList<Document::Ptr> findDocumentsIncluding(const Snapshot &docTable,
                                                    const QString &fileName, bool checkFileNameOnly)
 {
     QList<Document::Ptr> docList;
-    foreach (const Document::Ptr &doc, docTable) { // we go through all documents
+    for (const Document::Ptr &doc : docTable) { // we go through all documents
         const QList<Document::Include> includes = doc->resolvedIncludes()
             + doc->unresolvedIncludes();
-        foreach (const Document::Include &include, includes) {
+        for (const Document::Include &include : includes) {
             if (checkFileNameOnly) {
                 const QFileInfo fi(include.unresolvedFileName());
                 if (fi.fileName() == fileName) { // we are only interested in docs which includes fileName only
@@ -142,8 +142,8 @@ static QList<Document::Ptr> findDocumentsIncluding(const Snapshot &docTable,
 // Does klass inherit baseClass?
 static bool inherits(const Overview &o, const Class *klass, const QString &baseClass)
 {
-    const unsigned int baseClassCount = klass->baseClassCount();
-    for (unsigned int b = 0; b < baseClassCount; ++b)
+    const int baseClassCount = klass->baseClassCount();
+    for (int b = 0; b < baseClassCount; ++b)
         if (o.prettyName(klass->baseClassAt(b)->name()) == baseClass)
             return true;
     return false;
@@ -171,14 +171,14 @@ static const Class *findClass(const Namespace *parentNameSpace, const LookupCont
         qDebug() << Q_FUNC_INFO << className;
 
     const Overview o;
-    const unsigned namespaceMemberCount = parentNameSpace->memberCount();
-    for (unsigned i = 0; i < namespaceMemberCount; ++i) { // we go through all namespace members
+    const int namespaceMemberCount = parentNameSpace->memberCount();
+    for (int i = 0; i < namespaceMemberCount; ++i) { // we go through all namespace members
         const Symbol *sym = parentNameSpace->memberAt(i);
         // we have found a class - we are interested in classes only
         if (const Class *cl = sym->asClass()) {
             // 1) we go through class members
-            const unsigned classMemberCount = cl->memberCount();
-            for (unsigned j = 0; j < classMemberCount; ++j)
+            const int classMemberCount = cl->memberCount();
+            for (int j = 0; j < classMemberCount; ++j)
                 if (Declaration *decl = cl->memberAt(j)->asDeclaration()) {
                 // we want to know if the class contains a member (so we look into
                 // a declaration) of uiClassName type
@@ -204,7 +204,7 @@ static const Class *findClass(const Namespace *parentNameSpace, const LookupCont
             if (const Namespace *ns = sym->asNamespace()) {
                 QString tempNS = *namespaceName;
                 tempNS += o.prettyName(ns->name());
-                tempNS += QLatin1String("::");
+                tempNS += "::";
                 if (const Class *cl = findClass(ns, context, className, &tempNS)) {
                     *namespaceName = tempNS;
                     return cl;
@@ -212,37 +212,37 @@ static const Class *findClass(const Namespace *parentNameSpace, const LookupCont
             } // member is namespave
         } // member is no class
     } // for members
-    return 0;
+    return nullptr;
 }
 
 static Function *findDeclaration(const Class *cl, const QString &functionName)
 {
     const QString funName = QString::fromUtf8(QMetaObject::normalizedSignature(functionName.toUtf8()));
-    const unsigned mCount = cl->memberCount();
+    const int mCount = cl->memberCount();
     // we are interested only in declarations (can be decl of function or of a field)
     // we are only interested in declarations of functions
     const Overview overview;
-    for (unsigned j = 0; j < mCount; ++j) { // go through all members
+    for (int j = 0; j < mCount; ++j) { // go through all members
         if (Declaration *decl = cl->memberAt(j)->asDeclaration())
             if (Function *fun = decl->type()->asFunctionType()) {
                 // Format signature
                 QString memberFunction = overview.prettyName(fun->name());
-                memberFunction += QLatin1Char('(');
-                const uint aCount = fun->argumentCount();
-                for (uint i = 0; i < aCount; i++) { // we build argument types string
+                memberFunction += '(';
+                const int aCount = fun->argumentCount();
+                for (int i = 0; i < aCount; i++) { // we build argument types string
                     const Argument *arg = fun->argumentAt(i)->asArgument();
                     if (i > 0)
-                        memberFunction += QLatin1Char(',');
+                        memberFunction += ',';
                     memberFunction += overview.prettyType(arg->type());
                 }
-                memberFunction += QLatin1Char(')');
+                memberFunction += ')';
                 // we compare normalized signatures
                 memberFunction = QString::fromUtf8(QMetaObject::normalizedSignature(memberFunction.toUtf8()));
                 if (memberFunction == funName) // we match function names and argument lists
                     return fun;
             }
     }
-    return 0;
+    return nullptr;
 }
 
 // TODO: remove me, this is taken from cppeditor.cpp. Find some common place for this function
@@ -273,9 +273,7 @@ static void addDeclaration(const Snapshot &snapshot,
                            const Class *cl,
                            const QString &functionName)
 {
-    QString declaration = QLatin1String("void ");
-    declaration += functionName;
-    declaration += QLatin1String(";\n");
+    const QString declaration = "void " + functionName + ";\n";
 
     CppTools::CppRefactoringChanges refactoring(snapshot);
     CppTools::InsertionPointLocator find(refactoring);
@@ -303,13 +301,8 @@ static Document::Ptr addDefinition(const Snapshot &docTable,
                                    const QString &functionName,
                                    int *line)
 {
-    QString definition = QLatin1String("\nvoid ");
-    definition += className;
-    definition += QLatin1String("::");
-    definition += functionName;
-    definition += QLatin1String("\n{\n");
-    definition += QString(indentation, QLatin1Char(' '));
-    definition += QLatin1String("\n}\n");
+    const QString definition = "\nvoid " + className + "::" + functionName
+            + "\n{\n" + QString(indentation, ' ') + "\n}\n";
 
     // we find all documents which include headerFileName
     const QList<Document::Ptr> docList = findDocumentsIncluding(docTable, headerFileName, false);
@@ -318,7 +311,7 @@ static Document::Ptr addDefinition(const Snapshot &docTable,
 
     QFileInfo headerFI(headerFileName);
     const QString headerBaseName = headerFI.completeBaseName();
-    foreach (const Document::Ptr &doc, docList) {
+    for (const Document::Ptr &doc : docList) {
         const QFileInfo sourceFI(doc->fileName());
         // we take only those documents which have the same filename
         if (headerBaseName == sourceFI.baseName()) {
@@ -335,7 +328,8 @@ static Document::Ptr addDefinition(const Snapshot &docTable,
                 const QString contents = editor->textDocument()->plainText();
                 int column;
                 editor->convertPosition(contents.length(), line, &column);
-                editor->gotoLine(*line, column);
+                // gotoLine accepts 0-based column.
+                editor->gotoLine(*line, column - 1);
                 editor->insert(definition);
                 *line += 1;
             }
@@ -347,9 +341,7 @@ static Document::Ptr addDefinition(const Snapshot &docTable,
 
 static QString addConstRefIfNeeded(const QString &argument)
 {
-    if (argument.startsWith(QLatin1String("const "))
-            || argument.endsWith(QLatin1Char('&'))
-            || argument.endsWith(QLatin1Char('*')))
+    if (argument.startsWith("const ") || argument.endsWith('&') || argument.endsWith('*'))
         return argument;
 
     // for those types we don't want to add "const &"
@@ -358,11 +350,11 @@ static QString addConstRefIfNeeded(const QString &argument)
                                                          "unsigned", "qint64", "quint64"});
 
     for (int i = 0; i < nonConstRefs.count(); i++) {
-        const QString nonConstRef = nonConstRefs.at(i);
-        if (argument == nonConstRef || argument.startsWith(nonConstRef + QLatin1Char(' ')))
+        const QString &nonConstRef = nonConstRefs.at(i);
+        if (argument == nonConstRef || argument.startsWith(nonConstRef + ' '))
             return argument;
     }
-    return QLatin1String("const ") + argument + QLatin1Char('&');
+    return "const " + argument + '&';
 }
 
 static QString formatArgument(const QString &argument)
@@ -372,8 +364,8 @@ static QString formatArgument(const QString &argument)
     while (i > 0) { // from the end of the "argument" string
         i--;
         const QChar c = argument.at(i); // take the char
-        if (c != QLatin1Char('*') && c != QLatin1Char('&')) { // if it's not the * or &
-            formattedArgument.insert(i + 1, QLatin1Char(' ')); // insert space after that char or just append space (to separate it from the parameter name)
+        if (c != '*' && c != '&') { // if it's not the * or &
+            formattedArgument.insert(i + 1, ' '); // insert space after that char or just append space (to separate it from the parameter name)
             break;
         }
     }
@@ -384,25 +376,25 @@ static QString formatArgument(const QString &argument)
 // "void foo(bool checked)"
 static QString addParameterNames(const QString &functionSignature, const QStringList &parameterNames)
 {
-    const int firstParen = functionSignature.indexOf(QLatin1Char('('));
+    const int firstParen = functionSignature.indexOf('(');
     QString functionName = functionSignature.left(firstParen + 1);
     QString argumentsString = functionSignature.mid(firstParen + 1);
-    const int lastParen = argumentsString.lastIndexOf(QLatin1Char(')'));
+    const int lastParen = argumentsString.lastIndexOf(')');
     if (lastParen != -1)
         argumentsString.truncate(lastParen);
-    const QStringList arguments = argumentsString.split(QLatin1Char(','), QString::SkipEmptyParts);
+    const QStringList arguments = argumentsString.split(',', QString::SkipEmptyParts);
     const int pCount = parameterNames.count();
     const int aCount = arguments.count();
     for (int i = 0; i < aCount; ++i) {
         if (i > 0)
-            functionName += QLatin1String(", ");
+            functionName += ", ";
         const QString argument = addConstRefIfNeeded(arguments.at(i));
         functionName += formatArgument(argument);
         if (i < pCount) {
             // prepare parameterName
             QString parameterName = parameterNames.at(i);
             if (parameterName.isEmpty()) {
-                const QString generatedName = QLatin1String("arg") + QString::number(i + 1);
+                const QString generatedName = "arg" + QString::number(i + 1);
                 if (!parameterNames.contains(generatedName))
                     parameterName = generatedName;
             }
@@ -411,7 +403,7 @@ static QString addParameterNames(const QString &functionSignature, const QString
                 functionName += parameterName;
         }
     }
-    functionName += QLatin1Char(')');
+    functionName += ')';
     return functionName;
 }
 
@@ -419,7 +411,7 @@ static QString addParameterNames(const QString &functionSignature, const QString
 // included files (going down [maxIncludeDepth] includes) and return a pair
 // of <Class*, Document>.
 
-typedef QPair<const Class *, Document::Ptr> ClassDocumentPtrPair;
+using ClassDocumentPtrPair = QPair<const Class *, Document::Ptr>;
 
 static ClassDocumentPtrPair
         findClassRecursively(const LookupContext &context, const QString &className,
@@ -435,10 +427,11 @@ static ClassDocumentPtrPair
     if (maxIncludeDepth) {
         // Check the includes
         const unsigned recursionMaxIncludeDepth = maxIncludeDepth - 1u;
-        foreach (const QString &include, doc->includedFiles()) {
+        const auto includedFiles = doc->includedFiles();
+        for (const QString &include : includedFiles) {
             const Snapshot::const_iterator it = docTable.find(include);
             if (it != docTable.end()) {
-                const Document::Ptr includeDoc = it.value();
+                const Document::Ptr &includeDoc = it.value();
                 LookupContext context(includeDoc, docTable);
                 const ClassDocumentPtrPair irc = findClassRecursively(context, className,
                     recursionMaxIncludeDepth, namespaceName);
@@ -463,9 +456,9 @@ void QtCreatorIntegration::slotNavigateToSlot(const QString &objectName, const Q
 
 static inline QString uiClassName(QString formObjectName)
 {
-    const int indexOfScope = formObjectName.lastIndexOf(QLatin1String("::"));
+    const int indexOfScope = formObjectName.lastIndexOf("::");
     const int uiNameSpaceInsertionPos = indexOfScope >= 0 ? indexOfScope + 2 : 0;
-    formObjectName.insert(uiNameSpaceInsertionPos, QLatin1String("Ui::"));
+    formObjectName.insert(uiNameSpaceInsertionPos, "Ui::");
     return formObjectName;
 }
 
@@ -496,9 +489,9 @@ bool QtCreatorIntegration::navigateToSlot(const QString &objectName,
                                           const QStringList &parameterNames,
                                           QString *errorMessage)
 {
-    typedef QMap<int, Document::Ptr> DocumentMap;
+    using DocumentMap = QMap<int, Document::Ptr>;
 
-    const Utils::FileName currentUiFile = FormEditorW::activeEditor()->document()->filePath();
+    const Utils::FilePath currentUiFile = FormEditorW::activeEditor()->document()->filePath();
 #if 0
     return Designer::Internal::navigateToSlot(currentUiFile.toString(), objectName,
                                               signalSignature, parameterNames, errorMessage);
@@ -510,7 +503,7 @@ bool QtCreatorIntegration::navigateToSlot(const QString &objectName,
     // So we should somehow get that info from project manager (?)
     const QFileInfo fi = currentUiFile.toFileInfo();
     const QString uiFolder = fi.absolutePath();
-    const QString uicedName = QLatin1String("ui_") + fi.completeBaseName() + QLatin1String(".h");
+    const QString uicedName = "ui_" + fi.completeBaseName() + ".h";
 
     // Retrieve code model snapshot restricted to project of ui file or the working copy.
     Snapshot docTable = CppTools::CppModelManager::instance()->snapshot();
@@ -523,14 +516,12 @@ bool QtCreatorIntegration::navigateToSlot(const QString &objectName,
                 newDocTable.insert(i.value());
         }
     } else {
-        const CppTools::WorkingCopy workingCopy =
-                CppTools::CppModelManager::instance()->workingCopy();
-        const Utils::FileName configFileName =
-                Utils::FileName::fromString(CppTools::CppModelManager::configurationFileName());
-        QHashIterator<Utils::FileName, QPair<QByteArray, unsigned> > it = workingCopy.iterator();
-        while (it.hasNext()) {
-            it.next();
-            const Utils::FileName &fileName = it.key();
+        const Utils::FilePath configFileName =
+                Utils::FilePath::fromString(CppTools::CppModelManager::configurationFileName());
+        const CppTools::WorkingCopy::Table elements =
+                CppTools::CppModelManager::instance()->workingCopy().elements();
+        for (auto it = elements.cbegin(), end = elements.cend(); it != end; ++it) {
+            const Utils::FilePath &fileName = it.key();
             if (fileName != configFileName)
                 newDocTable.insert(docTable.document(fileName));
         }
@@ -542,7 +533,7 @@ bool QtCreatorIntegration::navigateToSlot(const QString &objectName,
     // first in case there are project subdirectories that contain identical file names.
     const QList<Document::Ptr> docList = findDocumentsIncluding(docTable, uicedName, true); // change to false when we know the absolute path to generated ui_<>.h file
     DocumentMap docMap;
-    foreach (const Document::Ptr &d, docList) {
+    for (const Document::Ptr &d : docList) {
         const QFileInfo docFi(d->fileName());
         docMap.insert(qAbs(docFi.absolutePath().compare(uiFolder, Qt::CaseInsensitive)), d);
     }
@@ -564,10 +555,10 @@ bool QtCreatorIntegration::navigateToSlot(const QString &objectName,
     // Find the class definition (ui class defined as member or base class)
     // in the file itself or in the directly included files (order 1).
     QString namespaceName;
-    const Class *cl = 0;
+    const Class *cl = nullptr;
     Document::Ptr doc;
 
-    foreach (const Document::Ptr &d, docMap) {
+    for (const Document::Ptr &d : qAsConst(docMap)) {
         LookupContext context(d, docTable);
         const ClassDocumentPtrPair cd = findClassRecursively(context, uiClass, 1u , &namespaceName);
         if (cd.first) {
@@ -586,7 +577,7 @@ bool QtCreatorIntegration::navigateToSlot(const QString &objectName,
     if (Designer::Constants::Internal::debug)
         qDebug() << "Found class  " << className << doc->fileName();
 
-    const QString functionName = QLatin1String("on_") + objectName + QLatin1Char('_') + signalSignature;
+    const QString functionName = "on_" + objectName + '_' + signalSignature;
     const QString functionNameWithParameterNames = addParameterNames(functionName, parameterNames);
 
     if (Designer::Constants::Internal::debug)

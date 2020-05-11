@@ -28,16 +28,18 @@
 #include "qmlprofilerplugin.h"
 #include "qmlprofilerconstants.h"
 
+#include <debugger/analyzer/analyzericons.h>
+
 namespace QmlProfiler {
 namespace Internal {
 
 QmlProfilerOptionsPage::QmlProfilerOptionsPage()
 {
     setId(Constants::SETTINGS);
-    setDisplayName(tr("QML Profiler"));
+    setDisplayName(QmlProfilerConfigWidget::tr("QML Profiler"));
     setCategory("T.Analyzer");
-    setDisplayCategory(tr("Analyzer"));
-    setCategoryIcon(Utils::Icon(":/images/analyzer_category.png"));
+    setDisplayCategory(QmlProfilerConfigWidget::tr("Analyzer"));
+    setCategoryIconPath(Analyzer::Icons::SETTINGSCATEGORY_ANALYZER);
 }
 
 QWidget *QmlProfilerOptionsPage::widget()

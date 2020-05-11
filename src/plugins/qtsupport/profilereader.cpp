@@ -27,6 +27,7 @@
 
 #include <coreplugin/icore.h>
 
+#include <QCoreApplication>
 #include <QDebug>
 
 using namespace QtSupport;
@@ -45,40 +46,43 @@ ProMessageHandler::ProMessageHandler(bool verbose, bool exact)
     : m_verbose(verbose)
     , m_exact(exact)
     //: Prefix used for output from the cumulative evaluation of project files.
-    , m_prefix(tr("[Inexact] "))
+    , m_prefix(QCoreApplication::translate("ProMessageHandler", "[Inexact] "))
 {
-    connect(this, &ProMessageHandler::writeMessage,
-            Core::MessageManager::instance(), &Core::MessageManager::write, Qt::QueuedConnection);
 }
+
+ProMessageHandler::~ProMessageHandler()
+{
+    if (!m_messages.isEmpty())
+        Core::MessageManager::writeMessages(m_messages);
+}
+
+
 
 void ProMessageHandler::message(int type, const QString &msg, const QString &fileName, int lineNo)
 {
     if ((type & CategoryMask) == ErrorMessage && ((type & SourceMask) == SourceParser || m_verbose)) {
-        QString fmsg = format(fileName, lineNo, msg);
-        if ((type & SourceMask) == SourceParser || m_exact)
-            emit writeMessage(fmsg, Core::MessageManager::NoModeSwitch);
-        else
-            emit writeMessage(m_prefix + fmsg, Core::MessageManager::NoModeSwitch);
+        appendMessage(format(fileName, lineNo, msg));
     }
 }
 
 void ProMessageHandler::fileMessage(int type, const QString &msg)
 {
     Q_UNUSED(type)
-    if (m_verbose) {
-        if (m_exact)
-            emit writeMessage(msg, Core::MessageManager::NoModeSwitch);
-        else
-            emit writeMessage(m_prefix + msg, Core::MessageManager::NoModeSwitch);
-    }
+    if (m_verbose)
+        appendMessage(msg);
 }
 
+void ProMessageHandler::appendMessage(const QString &msg)
+{
+    m_messages << (m_exact ? msg : m_prefix + msg);
+}
 
 ProFileReader::ProFileReader(QMakeGlobals *option, QMakeVfs *vfs)
     : QMakeParser(ProFileCacheManager::instance()->cache(), vfs, this)
     , ProFileEvaluator(option, this, vfs, this)
     , m_ignoreLevel(0)
 {
+    setExtraConfigs(QStringList("qtc_run"));
 }
 
 ProFileReader::~ProFileReader()
@@ -90,6 +94,7 @@ ProFileReader::~ProFileReader()
 void ProFileReader::setCumulative(bool on)
 {
     ProMessageHandler::setVerbose(!on);
+    ProMessageHandler::setExact(!on);
     ProFileEvaluator::setCumulative(on);
 }
 
@@ -118,12 +123,10 @@ QHash<ProFile *, QVector<ProFile *> > ProFileReader::includeFiles() const
     return m_includeFiles;
 }
 
-ProFileCacheManager *ProFileCacheManager::s_instance = 0;
+ProFileCacheManager *ProFileCacheManager::s_instance = nullptr;
 
 ProFileCacheManager::ProFileCacheManager(QObject *parent) :
-        QObject(parent),
-        m_cache(0),
-        m_refCount(0)
+    QObject(parent)
 {
     s_instance = this;
     m_timer.setInterval(5000);
@@ -147,7 +150,7 @@ void ProFileCacheManager::decRefCount()
 
 ProFileCacheManager::~ProFileCacheManager()
 {
-    s_instance = 0;
+    s_instance = nullptr;
     clear();
 }
 
@@ -165,17 +168,17 @@ void ProFileCacheManager::clear()
     // obtaining a cache pointer and using it is atomic as far as the main
     // loop is concerned. Use a shared pointer once this is not true anymore.
     delete m_cache;
-    m_cache = 0;
+    m_cache = nullptr;
 }
 
-void ProFileCacheManager::discardFiles(const QString &prefix)
+void ProFileCacheManager::discardFiles(const QString &prefix, QMakeVfs *vfs)
 {
     if (m_cache)
-        m_cache->discardFiles(prefix);
+        m_cache->discardFiles(prefix, vfs);
 }
 
-void ProFileCacheManager::discardFile(const QString &fileName)
+void ProFileCacheManager::discardFile(const QString &fileName, QMakeVfs *vfs)
 {
     if (m_cache)
-        m_cache->discardFile(fileName);
+        m_cache->discardFile(fileName, vfs);
 }

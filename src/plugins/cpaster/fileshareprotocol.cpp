@@ -56,6 +56,7 @@ FileShareProtocol::FileShareProtocol() :
 
 FileShareProtocol::~FileShareProtocol()
 {
+    delete m_settingsPage;
 }
 
 QString FileShareProtocol::name() const
@@ -142,7 +143,7 @@ void FileShareProtocol::fetch(const QString &id)
         fi = QFileInfo(m_settings->path + QLatin1Char('/') + id);
     QString errorMessage;
     QString text;
-    if (parse(fi.absoluteFilePath(), &errorMessage, 0, 0, &text))
+    if (parse(fi.absoluteFilePath(), &errorMessage, nullptr, nullptr, &text))
         emit fetchDone(id, text, false);
     else
         emit fetchDone(id, errorMessage, true);
@@ -176,11 +177,15 @@ void FileShareProtocol::list()
     emit listDone(name(), entries);
 }
 
-void FileShareProtocol::paste(const QString &text,
-                              ContentType /* ct */, int /* expiryDays */,
-                              const QString &username,
-                              const QString & /* comment */,
-                              const QString &description)
+void FileShareProtocol::paste(
+        const QString &text,
+        ContentType /* ct */,
+        int /* expiryDays */,
+        bool /* publicPaste */,
+        const QString &username,
+        const QString & /* comment */,
+        const QString &description
+        )
 {
     // Write out temp XML file
     Utils::TempFileSaver saver(m_settings->path + QLatin1Char('/') + QLatin1String(tempPatternC));

@@ -37,6 +37,8 @@
 
 #include <QCoreApplication>
 
+using namespace Utils;
+
 namespace VcsBase {
 namespace Internal {
 
@@ -47,13 +49,13 @@ CommonSettingsWidget::CommonSettingsWidget(QWidget *parent) :
     m_ui(new Ui::CommonSettingsPage)
 {
     m_ui->setupUi(this);
-    m_ui->submitMessageCheckScriptChooser->setExpectedKind(Utils::PathChooser::ExistingCommand);
+    m_ui->submitMessageCheckScriptChooser->setExpectedKind(PathChooser::ExistingCommand);
     m_ui->submitMessageCheckScriptChooser->setHistoryCompleter(QLatin1String("Vcs.MessageCheckScript.History"));
-    m_ui->nickNameFieldsFileChooser->setExpectedKind(Utils::PathChooser::File);
+    m_ui->nickNameFieldsFileChooser->setExpectedKind(PathChooser::File);
     m_ui->nickNameFieldsFileChooser->setHistoryCompleter(QLatin1String("Vcs.NickFields.History"));
-    m_ui->nickNameMailMapChooser->setExpectedKind(Utils::PathChooser::File);
+    m_ui->nickNameMailMapChooser->setExpectedKind(PathChooser::File);
     m_ui->nickNameMailMapChooser->setHistoryCompleter(QLatin1String("Vcs.NickMap.History"));
-    m_ui->sshPromptChooser->setExpectedKind(Utils::PathChooser::ExistingCommand);
+    m_ui->sshPromptChooser->setExpectedKind(PathChooser::ExistingCommand);
     m_ui->sshPromptChooser->setHistoryCompleter(QLatin1String("Vcs.SshPrompt.History"));
 
     updatePath();
@@ -61,7 +63,7 @@ CommonSettingsWidget::CommonSettingsWidget(QWidget *parent) :
     connect(Core::VcsManager::instance(), &Core::VcsManager::configurationChanged,
             this, &CommonSettingsWidget::updatePath);
     connect(m_ui->cacheResetButton, &QPushButton::clicked,
-            this, [] { Core::VcsManager::clearVersionControlCache(); });
+            Core::VcsManager::instance(), &Core::VcsManager::clearVersionControlCache);
 }
 
 CommonSettingsWidget::~CommonSettingsWidget()
@@ -72,12 +74,12 @@ CommonSettingsWidget::~CommonSettingsWidget()
 CommonVcsSettings CommonSettingsWidget::settings() const
 {
     CommonVcsSettings rc;
-    rc.nickNameMailMap = m_ui->nickNameMailMapChooser->path();
-    rc.nickNameFieldListFile = m_ui->nickNameFieldsFileChooser->path();
-    rc.submitMessageCheckScript = m_ui->submitMessageCheckScriptChooser->path();
+    rc.nickNameMailMap = m_ui->nickNameMailMapChooser->filePath().toString();
+    rc.nickNameFieldListFile = m_ui->nickNameFieldsFileChooser->filePath().toString();
+    rc.submitMessageCheckScript = m_ui->submitMessageCheckScriptChooser->filePath().toString();
     rc.lineWrap= m_ui->lineWrapCheckBox->isChecked();
     rc.lineWrapWidth = m_ui->lineWrapSpinBox->value();
-    rc.sshPasswordPrompt = m_ui->sshPromptChooser->path();
+    rc.sshPasswordPrompt = m_ui->sshPromptChooser->filePath().toString();
     return rc;
 }
 
@@ -93,20 +95,23 @@ void CommonSettingsWidget::setSettings(const CommonVcsSettings &s)
 
 void CommonSettingsWidget::updatePath()
 {
-    Utils::Environment env = Utils::Environment::systemEnvironment();
+    Environment env = Environment::systemEnvironment();
     QStringList toAdd = Core::VcsManager::additionalToolsPath();
-    env.appendOrSetPath(toAdd.join(Utils::HostOsInfo::pathListSeparator()));
+    env.appendOrSetPath(toAdd.join(HostOsInfo::pathListSeparator()));
     m_ui->sshPromptChooser->setEnvironment(env);
 }
 
 // --------------- VcsBaseSettingsPage
-CommonOptionsPage::CommonOptionsPage(QObject *parent) :
-    VcsBaseOptionsPage(parent)
+CommonOptionsPage::CommonOptionsPage()
 {
     m_settings.fromSettings(Core::ICore::settings());
 
     setId(Constants::VCS_COMMON_SETTINGS_ID);
     setDisplayName(QCoreApplication::translate("VcsBase", Constants::VCS_COMMON_SETTINGS_NAME));
+    setCategory(Constants::VCS_SETTINGS_CATEGORY);
+    // The following act as blueprint for other pages in the same category:
+    setDisplayCategory(QCoreApplication::translate("VcsBase", "Version Control"));
+    setCategoryIconPath(":/vcsbase/images/settingscategory_vcs.png");
 }
 
 QWidget *CommonOptionsPage::widget()

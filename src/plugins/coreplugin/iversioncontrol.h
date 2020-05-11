@@ -36,6 +36,8 @@
 #include <QObject>
 #include <QString>
 
+QT_FORWARD_DECLARE_CLASS(QMenu);
+
 namespace Core {
 
 class ShellCommand;
@@ -86,8 +88,8 @@ public:
 
     };
 
-    explicit IVersionControl(TopicCache *topicCache = 0) : m_topicCache(topicCache) {}
-    virtual ~IVersionControl();
+    IVersionControl();
+    ~IVersionControl() override;
 
     virtual QString displayName() const = 0;
     virtual Id id() const = 0;
@@ -100,8 +102,10 @@ public:
      *
      * It will return true only for exact matches of the name, not for e.g. files in a
      * directory owned by the version control system (e.g. .git/control).
+     *
+     * This method needs to be thread safe!
      */
-    virtual bool isVcsFileOrDirectory(const Utils::FileName &fileName) const = 0;
+    virtual bool isVcsFileOrDirectory(const Utils::FilePath &fileName) const = 0;
 
     /*!
      * Returns whether files in this directory should be managed with this
@@ -111,7 +115,7 @@ public:
      * that all files in the returned directory are managed by the same IVersionControl.
      */
 
-    virtual bool managesDirectory(const QString &filename, QString *topLevel = 0) const = 0;
+    virtual bool managesDirectory(const QString &filename, QString *topLevel = nullptr) const = 0;
 
     /*!
      * Returns whether \a fileName is managed by this version control.
@@ -120,6 +124,15 @@ public:
      * top level). \a fileName is expected to be relative to workingDirectory.
      */
     virtual bool managesFile(const QString &workingDirectory, const QString &fileName) const = 0;
+
+    /*!
+     * Returns the subset of \a filePaths that is not managed by this version control.
+     *
+     * \a workingDirectory is assumed to be part of a valid repository (not necessarily its
+     * top level). The \a filePaths are expected to be absolute paths.
+     */
+    virtual QStringList unmanagedFiles(const QString &workingDir,
+                                       const QStringList &filePaths) const;
 
     /*!
      * Returns true is the VCS is configured to run.
@@ -149,7 +162,7 @@ public:
      * Returns settings.
      */
 
-    virtual SettingsFlags settingsFlags() const { return 0; }
+    virtual SettingsFlags settingsFlags() const { return {}; }
 
     /*!
      * Called after a file has been added to a project If the version control
@@ -211,9 +224,28 @@ public:
      * \a extraArgs are passed on to the command being run.
      */
     virtual ShellCommand *createInitialCheckoutCommand(const QString &url,
-                                                       const Utils::FileName &baseDirectory,
+                                                       const Utils::FilePath &baseDirectory,
                                                        const QString &localName,
                                                        const QStringList &extraArgs);
+
+    virtual void fillLinkContextMenu(QMenu *menu,
+                                     const QString &workingDirectory,
+                                     const QString &reference);
+
+    class CORE_EXPORT RepoUrl {
+    public:
+        RepoUrl(const QString &location);
+
+        QString protocol;
+        QString userName;
+        QString host;
+        QString path;
+        quint16 port = 0;
+        bool isValid = false;
+    };
+    virtual RepoUrl getRepoUrl(const QString &location) const;
+
+    void setTopicCache(TopicCache *topicCache);
 
 signals:
     void repositoryChanged(const QString &repository);
@@ -221,12 +253,12 @@ signals:
     void configurationChanged();
 
 private:
-    TopicCache *m_topicCache;
+    TopicCache *m_topicCache = nullptr;
 };
 
-Q_DECLARE_OPERATORS_FOR_FLAGS(Core::IVersionControl::SettingsFlags)
-
 } // namespace Core
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(Core::IVersionControl::SettingsFlags)
 
 #if defined(WITH_TESTS)
 
@@ -239,12 +271,12 @@ class CORE_EXPORT TestVersionControl : public IVersionControl
     Q_OBJECT
 public:
     TestVersionControl(Id id, const QString &name) :
-        m_id(id), m_displayName(name), m_dirCount(0), m_fileCount(0)
+        m_id(id), m_displayName(name)
     { }
-    ~TestVersionControl();
+    ~TestVersionControl() override;
 
-    bool isVcsFileOrDirectory(const Utils::FileName &fileName) const final
-    { Q_UNUSED(fileName); return false; }
+    bool isVcsFileOrDirectory(const Utils::FilePath &fileName) const final
+    { Q_UNUSED(fileName) return false; }
 
     void setManagedDirectories(const QHash<QString, QString> &dirs);
     void setManagedFiles(const QSet<QString> &files);
@@ -271,8 +303,8 @@ private:
     QString m_displayName;
     QHash<QString, QString> m_managedDirs;
     QSet<QString> m_managedFiles;
-    mutable int m_dirCount;
-    mutable int m_fileCount;
+    mutable int m_dirCount = 0;
+    mutable int m_fileCount = 0;
 };
 
 } // namespace Core

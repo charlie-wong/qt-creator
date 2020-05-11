@@ -24,72 +24,125 @@
 ****************************************************************************/
 
 #include "refactoringengine.h"
-
 #include "projectpartutilities.h"
 
-
+#include <filepath.h>
 #include <refactoringserverinterface.h>
-#include <requestsourcelocationforrenamingmessage.h>
 
-#include <cpptools/clangcompileroptionsbuilder.h>
+#include <cpptools/compileroptionsbuilder.h>
 #include <cpptools/cpptoolsreuse.h>
+
+#include <clangsupport/filepathcachinginterface.h>
+
+#include <utils/algorithm.h>
+#include <utils/textutils.h>
 
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextBlock>
+#include <QDir>
 
 #include <algorithm>
 
 namespace ClangRefactoring {
 
-using ClangBackEnd::RequestSourceLocationsForRenamingMessage;
 
 RefactoringEngine::RefactoringEngine(ClangBackEnd::RefactoringServerInterface &server,
-                                     ClangBackEnd::RefactoringClientInterface &client)
-    : server(server),
-      client(client)
+                                     ClangBackEnd::RefactoringClientInterface &client,
+                                     ClangBackEnd::FilePathCachingInterface &filePathCache,
+                                     SymbolQueryInterface &symbolQuery)
+    : m_server(server),
+      m_client(client),
+      m_filePathCache(filePathCache),
+      m_symbolQuery(symbolQuery)
+{
+    Q_UNUSED(m_client)
+}
+
+RefactoringEngine::~RefactoringEngine() = default;
+
+void RefactoringEngine::startLocalRenaming(const CppTools::CursorInEditor &,
+                                           CppTools::ProjectPart *,
+                                           RenameCallback &&)
 {
 }
 
-void RefactoringEngine::startLocalRenaming(const QTextCursor &textCursor,
-                                           const Utils::FileName &filePath,
-                                           int revision,
-                                           CppTools::ProjectPart *projectPart,
-                                           RenameCallback &&renameSymbolsCallback)
+CppTools::Usages RefactoringEngine::locationsAt(const CppTools::CursorInEditor &data) const
 {
-    using CppTools::ClangCompilerOptionsBuilder;
+    if (data.cursor().isNull())
+        return {};
 
-    setUsable(false);
+    QTextCursor cursor = Utils::Text::wordStartCursor(data.cursor());
+    Utils::OptionalLineColumn lineColumn = Utils::Text::convertPosition(cursor.document(),
+                                                                        cursor.position());
 
-    client.setLocalRenamingCallback(std::move(renameSymbolsCallback));
+    if (lineColumn) {
+        const QByteArray filePath = data.filePath().toString().toUtf8();
+        const ClangBackEnd::FilePathId filePathId = m_filePathCache.filePathId(ClangBackEnd::FilePathView(filePath));
 
-    Utils::SmallStringVector commandLine{ClangCompilerOptionsBuilder::build(
-                    projectPart,
-                    fileKindInProjectPart(projectPart, filePath.toString()),
-                    CppTools::getPchUsage(),
-                    CLANG_VERSION,
-                    CLANG_RESOURCE_DIR)};
+        return m_symbolQuery.sourceUsagesAt(filePathId, lineColumn->line, lineColumn->column);
+    }
 
-    commandLine.push_back(filePath.toString());
-
-    RequestSourceLocationsForRenamingMessage message(ClangBackEnd::FilePath(filePath.toString()),
-                                                     uint(textCursor.blockNumber() + 1),
-                                                     uint(textCursor.positionInBlock() + 1),
-                                                     textCursor.document()->toPlainText(),
-                                                     std::move(commandLine),
-                                                     revision);
-
-
-    server.requestSourceLocationsForRenamingMessage(std::move(message));
+    return {};
 }
 
-bool RefactoringEngine::isUsable() const
+CppTools::Usages RefactoringEngine::declarationAt(const CppTools::CursorInEditor &data) const
 {
-    return server.isUsable();
+    if (data.cursor().isNull())
+        return {};
+
+    QTextCursor cursor = Utils::Text::wordStartCursor(data.cursor());
+    Utils::OptionalLineColumn lineColumn = Utils::Text::convertPosition(cursor.document(),
+                                                                        cursor.position());
+
+    if (lineColumn) {
+        const QByteArray filePath = data.filePath().toString().toUtf8();
+        const ClangBackEnd::FilePathId filePathId = m_filePathCache.filePathId(
+            ClangBackEnd::FilePathView(filePath));
+
+        return m_symbolQuery.declarationsAt(filePathId, lineColumn->line, lineColumn->column);
+    }
+
+    return {};
 }
 
-void RefactoringEngine::setUsable(bool isUsable)
+void RefactoringEngine::globalRename(const CppTools::CursorInEditor &data,
+                                     CppTools::UsagesCallback &&renameUsagesCallback,
+                                     const QString &)
 {
-    server.setUsable(isUsable);
+    renameUsagesCallback(locationsAt(data));
+}
+
+void RefactoringEngine::findUsages(const CppTools::CursorInEditor &data,
+                                   CppTools::UsagesCallback &&showUsagesCallback) const
+{
+    showUsagesCallback(locationsAt(data));
+}
+
+void RefactoringEngine::globalFollowSymbol(const CppTools::CursorInEditor &data,
+                                           Utils::ProcessLinkCallback &&processLinkCallback,
+                                           const CPlusPlus::Snapshot &,
+                                           const CPlusPlus::Document::Ptr &,
+                                           CppTools::SymbolFinder *,
+                                           bool) const
+{
+    const CppTools::Usages usages = declarationAt(data);
+    CppTools::Usage usage = Utils::findOrDefault(usages, [&data](const CppTools::Usage &usage) {
+        return usage.path != data.filePath().toString();
+
+    });
+
+    processLinkCallback(Link(usage.path, usage.line, usage.column - 1));
+}
+
+bool RefactoringEngine::isRefactoringEngineAvailable() const
+{
+    return m_server.isAvailable();
+}
+
+void RefactoringEngine::setRefactoringEngineAvailable(bool isAvailable)
+{
+    m_server.setAvailable(isAvailable);
 }
 
 } // namespace ClangRefactoring

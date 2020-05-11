@@ -39,7 +39,7 @@ void MExpansion::assign(MElement *lhs, const MElement &rhs)
 
 void MExpansion::destroy(MElement *element)
 {
-    Q_UNUSED(element);
+    Q_UNUSED(element)
 
     delete this;
 }
@@ -50,7 +50,7 @@ MElement::MElement()
 
 MElement::MElement(const MElement &rhs)
     : m_uid(rhs.m_uid),
-      m_expansion(rhs.m_expansion ? rhs.m_expansion->clone(rhs) : 0),
+      m_expansion(rhs.m_expansion ? rhs.m_expansion->clone(rhs) : nullptr),
       m_stereotypes(rhs.m_stereotypes)
 {
 }

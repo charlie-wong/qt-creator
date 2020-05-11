@@ -24,12 +24,20 @@
 ****************************************************************************/
 
 #include "gtestresult.h"
+#include "gtestconstants.h"
+#include "../testframeworkmanager.h"
+#include "../testtreeitem.h"
+
+#include <coreplugin/id.h>
+
+#include <QRegularExpression>
 
 namespace Autotest {
 namespace Internal {
 
-GTestResult::GTestResult(const QString &name)
-    : TestResult(name)
+GTestResult::GTestResult(const QString &id, const QString &projectFile,
+                         const QString &name)
+    : TestResult(id, name), m_projectFile(projectFile)
 {
 }
 
@@ -38,9 +46,9 @@ const QString GTestResult::outputString(bool selected) const
     const QString &desc = description();
     QString output;
     switch (result()) {
-    case Result::Pass:
-    case Result::Fail:
-        output = m_testSetName;
+    case ResultType::Pass:
+    case ResultType::Fail:
+        output = m_testCaseName;
         if (selected && !desc.isEmpty())
             output.append('\n').append(desc);
         break;
@@ -58,9 +66,75 @@ bool GTestResult::isDirectParentOf(const TestResult *other, bool *needsIntermedi
         return false;
 
     const GTestResult *gtOther = static_cast<const GTestResult *>(other);
+    if (m_testCaseName == gtOther->m_testCaseName) {
+        const ResultType otherResult = other->result();
+        if (otherResult == ResultType::MessageInternal || otherResult == ResultType::MessageLocation)
+            return result() != ResultType::MessageInternal && result() != ResultType::MessageLocation;
+    }
     if (m_iteration != gtOther->m_iteration)
         return false;
-    return isTest() && gtOther->isTestSet();
+    return isTestSuite() && gtOther->isTestCase();
+}
+
+static QString normalizeName(const QString &name)
+{
+    static QRegularExpression parameterIndex("/\\d+");
+
+    QString nameWithoutParameterIndices = name;
+    nameWithoutParameterIndices.remove(parameterIndex);
+
+    return nameWithoutParameterIndices.split('/').last();
+}
+
+static QString normalizeTestName(const QString &testname)
+{
+    QString nameWithoutTypeParam = testname.split(',').first();
+
+    return normalizeName(nameWithoutTypeParam);
+}
+
+const TestTreeItem *GTestResult::findTestTreeItem() const
+{
+    auto id = Core::Id(Constants::FRAMEWORK_PREFIX).withSuffix(GTest::Constants::FRAMEWORK_NAME);
+    ITestFramework *framework = TestFrameworkManager::frameworkForId(id);
+    QTC_ASSERT(framework, return nullptr);
+    const TestTreeItem *rootNode = framework->rootNode();
+    if (!rootNode)
+        return nullptr;
+
+    const auto item = rootNode->findAnyChild([this](const Utils::TreeItem *item) {
+        const auto treeItem = static_cast<const TestTreeItem *>(item);
+        return treeItem && matches(treeItem);
+    });
+    return static_cast<const TestTreeItem *>(item);
+}
+
+bool GTestResult::matches(const TestTreeItem *treeItem) const
+{
+    if (treeItem->proFile() != m_projectFile)
+        return false;
+
+    if (isTestSuite())
+        return matchesTestSuite(treeItem);
+
+    return matchesTestCase(treeItem);
+}
+
+bool GTestResult::matchesTestCase(const TestTreeItem *treeItem) const
+{
+    if (treeItem->type() != TestTreeItem::TestCase)
+        return false;
+
+    const QString testItemTestCase = treeItem->parentItem()->name() + '.' + treeItem->name();
+    return testItemTestCase == normalizeName(m_testCaseName);
+}
+
+bool GTestResult::matchesTestSuite(const TestTreeItem *treeItem) const
+{
+    if (treeItem->type() != TestTreeItem::TestSuite)
+        return false;
+
+    return treeItem->name() == normalizeTestName(name());
 }
 
 } // namespace Internal

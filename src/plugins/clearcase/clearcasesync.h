@@ -27,6 +27,9 @@
 
 #include "clearcaseplugin.h"
 
+#include <QDir>
+#include <QFutureInterface>
+
 namespace ClearCase {
 namespace Internal {
 
@@ -34,14 +37,15 @@ class ClearCaseSync : public QObject
 {
     Q_OBJECT
 public:
-    explicit ClearCaseSync(ClearCasePlugin *plugin, QSharedPointer<StatusMap> statusMap);
+    explicit ClearCaseSync(QSharedPointer<StatusMap> statusMap);
     void run(QFutureInterface<void> &future, QStringList &files);
 
     QStringList updateStatusHotFiles(const QString &viewRoot, int &total);
     void invalidateStatus(const QDir &viewRootDir, const QStringList &files);
     void invalidateStatusAllFiles();
     void processCleartoolLsLine(const QDir &viewRootDir, const QString &buffer);
-    void updateTotalFilesCount(const QString view, ClearCaseSettings settings, const int processed);
+    void updateTotalFilesCount(const QString &view, ClearCaseSettings settings,
+                               const int processed);
     void updateStatusForNotManagedFiles(const QStringList &files);
 
     void syncDynamicView(QFutureInterface<void> &future,
@@ -54,7 +58,6 @@ signals:
     void updateStreamAndView();
 
 private:
-    ClearCasePlugin *const m_plugin;
     QSharedPointer<StatusMap> m_statusMap;
 
 #ifdef WITH_TESTS

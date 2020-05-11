@@ -28,38 +28,57 @@
 #include "clangpathwatcherinterface.h"
 #include "clangpathwatchernotifier.h"
 #include "pchcreatorinterface.h"
-#include "pchgeneratornotifierinterface.h"
 #include "pchmanagerserverinterface.h"
-#include "projectpartsinterface.h"
-#include "stringcache.h"
+#include "projectpartsmanagerinterface.h"
+#include "toolchainargumentscache.h"
+
+#include <generatedfilesinterface.h>
+#include <ipcclientprovider.h>
 
 namespace ClangBackEnd {
 
 class SourceRangesAndDiagnosticsForQueryMessage;
+class PchTaskGeneratorInterface;
+class BuildDependenciesStorageInterface;
+class FilePathCachingInterface;
 
 class PchManagerServer : public PchManagerServerInterface,
                          public ClangPathWatcherNotifier,
-                         public PchGeneratorNotifierInterface
+                         public IpcClientProvider<PchManagerClientInterface>
+
 {
 public:
-    PchManagerServer(StringCache<Utils::PathString> &filePathCache,
-                     ClangPathWatcherInterface &fileSystemWatcher,
-                     PchCreatorInterface &pchCreator,
-                     ProjectPartsInterface &projectParts);
-
+    PchManagerServer(ClangPathWatcherInterface &fileSystemWatcher,
+                     PchTaskGeneratorInterface &pchTaskGenerator,
+                     ProjectPartsManagerInterface &projectParts,
+                     GeneratedFilesInterface &generatedFiles,
+                     BuildDependenciesStorageInterface &buildDependenciesStorage,
+                     FilePathCachingInterface &filePathCache);
 
     void end() override;
-    void updatePchProjectParts(UpdatePchProjectPartsMessage &&message) override;
-    void removePchProjectParts(RemovePchProjectPartsMessage &&message) override;
+    void updateProjectParts(UpdateProjectPartsMessage &&message) override;
+    void removeProjectParts(RemoveProjectPartsMessage &&message) override;
+    void updateGeneratedFiles(UpdateGeneratedFilesMessage &&message) override;
+    void removeGeneratedFiles(RemoveGeneratedFilesMessage &&message) override;
 
-    void pathsWithIdsChanged(const Utils::SmallStringVector &ids) override;
-    void taskFinished(TaskFinishStatus status, const ProjectPartPch &projectPartPch) override;
+    void pathsWithIdsChanged(const std::vector<IdPaths> &idPaths) override;
+    void pathsChanged(const FilePathIds &filePathIds) override;
+
+    void setPchCreationProgress(int progress, int total);
+    void setDependencyCreationProgress(int progress, int total);
 
 private:
-    StringCache<Utils::PathString> &m_filePathCache;
+    void addCompleteProjectParts(const ProjectPartIds &projectPartIds);
+    void addNonSystemProjectParts(const ProjectPartIds &projectPartIds);
+
+private:
     ClangPathWatcherInterface &m_fileSystemWatcher;
-    PchCreatorInterface &m_pchCreator;
-    ProjectPartsInterface &m_projectParts;
+    PchTaskGeneratorInterface &m_pchTaskGenerator;
+    ProjectPartsManagerInterface &m_projectPartsManager;
+    GeneratedFilesInterface &m_generatedFiles;
+    BuildDependenciesStorageInterface &m_buildDependenciesStorage;
+    ToolChainsArgumentsCache m_toolChainsArgumentsCache;
+    FilePathCachingInterface &m_filePathCache;
 };
 
 } // namespace ClangBackEnd

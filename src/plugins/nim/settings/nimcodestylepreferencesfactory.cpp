@@ -30,12 +30,13 @@
 #include "../editor/nimindenter.h"
 
 #include <coreplugin/id.h>
+
 #include <texteditor/simplecodestylepreferences.h>
-#include <texteditor/snippets/snippetprovider.h>
-#include <extensionsystem/pluginmanager.h>
 
 #include <QWidget>
 #include <QLayout>
+
+using namespace TextEditor;
 
 namespace Nim {
 
@@ -62,21 +63,18 @@ QWidget *NimCodeStylePreferencesFactory::createEditor(TextEditor::ICodeStylePref
                                                       QWidget *parent) const
 {
     auto result = new NimCodeStylePreferencesWidget(preferences, parent);
-    result->layout()->setMargin(0);
+    result->layout()->setContentsMargins(0, 0, 0, 0);
     return result;
 }
 
-TextEditor::Indenter *NimCodeStylePreferencesFactory::createIndenter() const
+TextEditor::Indenter *NimCodeStylePreferencesFactory::createIndenter(QTextDocument *doc) const
 {
-    return new NimIndenter();
+    return new NimIndenter(doc);
 }
 
-TextEditor::SnippetProvider *NimCodeStylePreferencesFactory::snippetProvider() const
+QString NimCodeStylePreferencesFactory::snippetProviderGroupId() const
 {
-    return ExtensionSystem::PluginManager::getObject<TextEditor::SnippetProvider>(
-        [](TextEditor::SnippetProvider *provider) {
-            return provider->groupId() == Nim::Constants::C_NIMSNIPPETSGROUP_ID;
-        });
+    return Nim::Constants::C_NIMSNIPPETSGROUP_ID;
 }
 
 QString NimCodeStylePreferencesFactory::previewText() const

@@ -25,7 +25,19 @@
 
 #include "remotelinuxdeployconfiguration.h"
 
-#include <projectexplorer/deploymentdataview.h>
+#include "genericdirectuploadstep.h"
+#include "makeinstallstep.h"
+#include "remotelinuxcheckforfreediskspacestep.h"
+#include "remotelinuxkillappstep.h"
+#include "remotelinux_constants.h"
+#include "rsyncdeploystep.h"
+
+#include <projectexplorer/abi.h>
+#include <projectexplorer/kitinformation.h>
+#include <projectexplorer/project.h>
+#include <projectexplorer/target.h>
+
+#include <QCoreApplication>
 
 using namespace ProjectExplorer;
 
@@ -33,21 +45,47 @@ namespace RemoteLinux {
 
 using namespace Internal;
 
-RemoteLinuxDeployConfiguration::RemoteLinuxDeployConfiguration(Target *target,
-        const Core::Id id, const QString &defaultDisplayName)
-    : DeployConfiguration(target, id)
+Core::Id genericDeployConfigurationId()
 {
-    setDefaultDisplayName(defaultDisplayName);
+    return "DeployToGenericLinux";
 }
 
-RemoteLinuxDeployConfiguration::RemoteLinuxDeployConfiguration(Target *target,
-        RemoteLinuxDeployConfiguration *source)
-    : DeployConfiguration(target, source)
-{ }
+namespace Internal {
 
-NamedWidget *RemoteLinuxDeployConfiguration::createConfigWidget()
+RemoteLinuxDeployConfigurationFactory::RemoteLinuxDeployConfigurationFactory()
 {
-    return new DeploymentDataView(target());
+    setConfigBaseId(genericDeployConfigurationId());
+    addSupportedTargetDeviceType(RemoteLinux::Constants::GenericLinuxOsType);
+    setDefaultDisplayName(QCoreApplication::translate("RemoteLinux",
+                                                      "Deploy to Remote Linux Host"));
+    setUseDeploymentDataView();
+
+    const auto needsMakeInstall = [](Target *target)
+    {
+        const Project * const prj = target->project();
+        return prj->deploymentKnowledge() == DeploymentKnowledge::Bad
+                && prj->hasMakeInstallEquivalent();
+    };
+    setPostRestore([needsMakeInstall](DeployConfiguration *dc, const QVariantMap &map) {
+        // 4.9 -> 4.10. See QTCREATORBUG-22689.
+        if (map.value("_checkMakeInstall").toBool() && needsMakeInstall(dc->target())) {
+            auto step = new MakeInstallStep(dc->stepList(), MakeInstallStep::stepId());
+            dc->stepList()->insertStep(0, step);
+        }
+    });
+
+    addInitialStep(MakeInstallStep::stepId(), needsMakeInstall);
+    addInitialStep(RemoteLinuxCheckForFreeDiskSpaceStep::stepId());
+    addInitialStep(RemoteLinuxKillAppStep::stepId());
+    addInitialStep(RsyncDeployStep::stepId(), [](Target *target) {
+        auto device = DeviceKitAspect::device(target->kit());
+        return device && device->extraData(Constants::SupportsRSync).toBool();
+    });
+    addInitialStep(GenericDirectUploadStep::stepId(), [](Target *target) {
+        auto device = DeviceKitAspect::device(target->kit());
+        return device && !device->extraData(Constants::SupportsRSync).toBool();
+    });
 }
 
+} // namespace Internal
 } // namespace RemoteLinux

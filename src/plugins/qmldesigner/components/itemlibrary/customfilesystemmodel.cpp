@@ -25,6 +25,8 @@
 
 #include "customfilesystemmodel.h"
 
+#include <theme.h>
+
 #include <utils/filesystemwatcher.h>
 
 #include <QDir>
@@ -39,19 +41,15 @@ namespace QmlDesigner {
 class ItemLibraryFileIconProvider : public QFileIconProvider
 {
 public:
-    ItemLibraryFileIconProvider()
-    {
-    }
+    ItemLibraryFileIconProvider() = default;
 
-    QIcon icon( const QFileInfo & info ) const
+    QIcon icon( const QFileInfo & info ) const override
     {
         QIcon icon;
 
         for (auto iconSize : iconSizes) {
 
             QPixmap pixmap(info.absoluteFilePath());
-
-            QImage image(info.absoluteFilePath());
 
             if (pixmap.isNull())
                 return QFileIconProvider::icon(info);
@@ -81,7 +79,7 @@ CustomFileSystemModel::CustomFileSystemModel(QObject *parent) : QAbstractListMod
     m_fileSystemModel->setIconProvider(new ItemLibraryFileIconProvider());
 
     connect(m_fileSystemWatcher, &Utils::FileSystemWatcher::directoryChanged, [this] {
-        setRootPath(m_fileSystemModel->rootPath());
+        updatePath(m_fileSystemModel->rootPath());
     });
 }
 
@@ -90,40 +88,39 @@ void CustomFileSystemModel::setFilter(QDir::Filters)
 
 }
 
-QModelIndex CustomFileSystemModel::setRootPath(const QString &newPath)
+bool filterMetaIcons(const QString &fileName)
 {
-    beginResetModel();
-    m_fileSystemModel->setRootPath(newPath);
 
-    m_fileSystemWatcher->removeDirectories(m_fileSystemWatcher->directories());
+    QFileInfo info(fileName);
 
-    m_fileSystemWatcher->addDirectory(newPath, Utils::FileSystemWatcher::WatchAllChanges);
+    if (info.dir().path().split("/").contains("designer")) {
 
-    QStringList nameFilterList;
+        QDir currentDir = info.dir();
 
-    const QString searchFilter = m_searchFilter;
+        int i = 0;
+        while (!currentDir.isRoot() && i < 3) {
+            if (currentDir.dirName() == "designer") {
+                if (!currentDir.entryList({"*.metainfo"}).isEmpty())
+                    return false;
+            }
 
-    if (searchFilter.contains(QLatin1Char('.'))) {
-        nameFilterList.append(QString(QStringLiteral("*%1*")).arg(searchFilter));
-    } else {
-        foreach (const QByteArray &extension, QImageReader::supportedImageFormats()) {
-            nameFilterList.append(QString(QStringLiteral("*%1*.%2")).arg(searchFilter, QString::fromUtf8(extension)));
+            currentDir.cdUp();
+            ++i;
         }
+
+        if (info.dir().dirName() == "designer")
+            return false;
     }
 
-    m_files.clear();
+    return true;
+}
 
-    QDirIterator fileIterator(newPath, nameFilterList, QDir::Files, QDirIterator::Subdirectories);
+QModelIndex CustomFileSystemModel::setRootPath(const QString &newPath)
+{
+    if (m_fileSystemModel->rootPath() == newPath)
+        return QAbstractListModel::index(0, 0);
 
-    while (fileIterator.hasNext())
-        m_files.append(fileIterator.next());
-
-    QDirIterator dirIterator(newPath, {}, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (dirIterator.hasNext())
-        m_fileSystemWatcher->addDirectory(dirIterator.next(), Utils::FileSystemWatcher::WatchAllChanges);
-
-    endResetModel();
-    return QAbstractListModel::index(0, 0);
+    return updatePath(newPath);
 }
 
 QVariant CustomFileSystemModel::data(const QModelIndex &index, int role) const
@@ -133,7 +130,7 @@ QVariant CustomFileSystemModel::data(const QModelIndex &index, int role) const
 
     if (role == Qt::FontRole) {
         QFont font = m_fileSystemModel->data(fileSystemModelIndex(index), role).value<QFont>();
-        font.setPixelSize(9);
+        font.setPixelSize(Theme::instance()->smallFontPixelSize());
         return font;
     }
 
@@ -180,6 +177,48 @@ void CustomFileSystemModel::setSearchFilter(const QString &nameFilterList)
 {
     m_searchFilter = nameFilterList;
     setRootPath(m_fileSystemModel->rootPath());
+}
+
+void CustomFileSystemModel::appendIfNotFiltered(const QString &file)
+{
+    if (filterMetaIcons(file))
+        m_files.append(file);
+}
+
+QModelIndex CustomFileSystemModel::updatePath(const QString &newPath)
+{
+    beginResetModel();
+    m_fileSystemModel->setRootPath(newPath);
+
+    m_fileSystemWatcher->removeDirectories(m_fileSystemWatcher->directories());
+
+    m_fileSystemWatcher->addDirectory(newPath, Utils::FileSystemWatcher::WatchAllChanges);
+
+    QStringList nameFilterList;
+
+    const QString searchFilter = m_searchFilter;
+
+    if (searchFilter.contains(QLatin1Char('.'))) {
+        nameFilterList.append(QString(QStringLiteral("*%1*")).arg(searchFilter));
+    } else {
+        foreach (const QByteArray &extension, QImageReader::supportedImageFormats()) {
+            nameFilterList.append(QString(QStringLiteral("*%1*.%2")).arg(searchFilter, QString::fromUtf8(extension)));
+        }
+    }
+
+    m_files.clear();
+
+    QDirIterator fileIterator(newPath, nameFilterList, QDir::Files, QDirIterator::Subdirectories);
+
+    while (fileIterator.hasNext())
+        appendIfNotFiltered(fileIterator.next());
+
+    QDirIterator dirIterator(newPath, {}, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (dirIterator.hasNext())
+        m_fileSystemWatcher->addDirectory(dirIterator.next(), Utils::FileSystemWatcher::WatchAllChanges);
+
+    endResetModel();
+    return QAbstractListModel::index(0, 0);
 }
 
 QModelIndex CustomFileSystemModel::fileSystemModelIndex(const QModelIndex &index) const

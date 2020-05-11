@@ -25,7 +25,7 @@
 
 #pragma once
 
-#include "clangbackendipcintegration.h"
+#include "clangbackendcommunicator.h"
 #include "clangutils.h"
 
 #include <texteditor/codeassist/assistinterface.h>
@@ -36,26 +36,26 @@ namespace Internal {
 class ClangCompletionAssistInterface: public TextEditor::AssistInterface
 {
 public:
-    ClangCompletionAssistInterface(IpcCommunicator &ipcCommunicator,
+    ClangCompletionAssistInterface(BackendCommunicator &communicator,
                                    const TextEditor::TextEditorWidget *textEditorWidget,
                                    int position,
                                    const QString &fileName,
                                    TextEditor::AssistReason reason,
-                                   const CppTools::ProjectPartHeaderPaths &headerPaths,
+                                   const ProjectExplorer::HeaderPaths &headerPaths,
                                    const CPlusPlus::LanguageFeatures &features);
 
-    IpcCommunicator &ipcCommunicator() const;
+    BackendCommunicator &communicator() const;
     bool objcEnabled() const;
-    const CppTools::ProjectPartHeaderPaths &headerPaths() const;
+    const ProjectExplorer::HeaderPaths &headerPaths() const;
     CPlusPlus::LanguageFeatures languageFeatures() const;
     const TextEditor::TextEditorWidget *textEditorWidget() const;
 
-    void setHeaderPaths(const CppTools::ProjectPartHeaderPaths &headerPaths); // For tests
+    void setHeaderPaths(const ProjectExplorer::HeaderPaths &headerPaths); // For tests
 
 private:
-    IpcCommunicator &m_ipcCommunicator;
+    BackendCommunicator &m_communicator;
     QStringList m_options;
-    CppTools::ProjectPartHeaderPaths m_headerPaths;
+    ProjectExplorer::HeaderPaths m_headerPaths;
     CPlusPlus::LanguageFeatures m_languageFeatures;
     const TextEditor::TextEditorWidget *m_textEditorWidget;
 };

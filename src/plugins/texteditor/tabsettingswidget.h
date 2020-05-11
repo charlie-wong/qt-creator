@@ -27,7 +27,7 @@
 
 #include "texteditor_global.h"
 
-#include <QWidget>
+#include <QGroupBox>
 
 namespace TextEditor {
 
@@ -35,7 +35,7 @@ namespace Internal { namespace Ui { class TabSettingsWidget; } }
 
 class TabSettings;
 
-class TEXTEDITOR_EXPORT TabSettingsWidget : public QWidget
+class TEXTEDITOR_EXPORT TabSettingsWidget : public QGroupBox
 {
     Q_OBJECT
 
@@ -45,12 +45,11 @@ public:
         QtQuickLink
     };
 
-    explicit TabSettingsWidget(QWidget *parent = 0);
-    ~TabSettingsWidget();
+    explicit TabSettingsWidget(QWidget *parent = nullptr);
+    ~TabSettingsWidget() override;
 
     TabSettings tabSettings() const;
 
-    void setFlat(bool on);
     void setCodingStyleWarningVisible(bool visible);
     void setTabSettings(const TextEditor::TabSettings& s);
 

@@ -32,10 +32,6 @@
 #include <QSharedPointer>
 #include <QPair>
 
-QT_BEGIN_NAMESPACE
-class QAction;
-QT_END_NAMESPACE
-
 namespace Core {
 class ActionContainer;
 class Command;
@@ -57,11 +53,11 @@ class GerritPlugin : public QObject
     Q_OBJECT
 public:
     explicit GerritPlugin(QObject *parent = nullptr);
-    ~GerritPlugin();
+    ~GerritPlugin() override;
 
-    bool initialize(Core::ActionContainer *ac);
+    void initialize(Core::ActionContainer *ac);
 
-    static Utils::FileName gitBinDirectory();
+    static Utils::FilePath gitBinDirectory();
     static QString branch(const QString &repository);
     void addToLocator(Core::CommandLocator *locator);
     void push(const QString &topLevel);
@@ -82,8 +78,8 @@ private:
     QSharedPointer<GerritParameters> m_parameters;
     QSharedPointer<GerritServer> m_server;
     QPointer<GerritDialog> m_dialog;
-    Core::Command *m_gerritCommand;
-    Core::Command *m_pushToGerritCommand;
+    Core::Command *m_gerritCommand = nullptr;
+    Core::Command *m_pushToGerritCommand = nullptr;
     QString m_reviewers;
 };
 

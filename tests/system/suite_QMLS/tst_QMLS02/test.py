@@ -27,8 +27,14 @@ source("../shared/qmls.py")
 source("../../shared/suites_qtta.py")
 
 def main():
-    editorArea = startQtCreatorWithNewAppAtQMLEditor(tempDir(), "SampleApp", "TextEdit {")
+    editorArea = startQtCreatorWithNewAppAtQMLEditor(tempDir(), "SampleApp")
     if not editorArea:
+        return
+    # add basic TextEdit item to check it afterwards
+    codelines = ['TextEdit {', 'text: "Enter something"', 'anchors.top: parent.top',
+                 'anchors.horizontalCenter: parent.horizontalCenter', 'anchors.topMargin: 20']
+    if not addTestableCodeAfterLine(editorArea, 'title: qsTr("Hello World")', codelines):
+        saveAndExit()
         return
     # write code with error (C should be lower case)
     testingCodeLine = 'Color : "blue"'
@@ -42,7 +48,7 @@ def main():
                 "Verifying if error is properly reported")
     # repair error - go to written line
     placeCursorToLine(editorArea, testingCodeLine)
-    for i in range(14):
+    for _ in range(14):
         type(editorArea, "<Left>")
     markText(editorArea, "Right")
     type(editorArea, "c")

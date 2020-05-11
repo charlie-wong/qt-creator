@@ -69,6 +69,7 @@ bool JsonWizardFileGenerator::setup(const QVariant &data, QString *errorMessage)
         f.isBinary = tmp.value(QLatin1String("isBinary"), false);
         f.overwrite = tmp.value(QLatin1String("overwrite"), false);
         f.openInEditor = tmp.value(QLatin1String("openInEditor"), false);
+        f.isTemporary = tmp.value(QLatin1String("temporary"), false);
         f.openAsProject = tmp.value(QLatin1String("openAsProject"), false);
 
         f.options = JsonWizard::parseOptions(tmp.value(QLatin1String("options")), errorMessage);
@@ -127,7 +128,9 @@ Core::GeneratedFile JsonWizardFileGenerator::generateFile(const File &file,
                 *ret = options.value(n);
                 return true;
             });
-            nested.registerExtraResolver([expander](QString n, QString *ret) { return expander->resolveMacro(n, ret); });
+            nested.registerExtraResolver([expander](QString n, QString *ret) {
+                return expander->resolveMacro(n, ret);
+            });
 
             gf.setContents(Utils::TemplateEngine::processText(&nested, QString::fromUtf8(reader.data()),
                                                               errorMessage));
@@ -139,13 +142,15 @@ Core::GeneratedFile JsonWizardFileGenerator::generateFile(const File &file,
         }
     }
 
-    Core::GeneratedFile::Attributes attributes = 0;
+    Core::GeneratedFile::Attributes attributes;
     if (JsonWizard::boolFromVariant(file.openInEditor, expander))
         attributes |= Core::GeneratedFile::OpenEditorAttribute;
     if (JsonWizard::boolFromVariant(file.openAsProject, expander))
         attributes |= Core::GeneratedFile::OpenProjectAttribute;
     if (JsonWizard::boolFromVariant(file.overwrite, expander))
         attributes |= Core::GeneratedFile::ForceOverwrite;
+    if (JsonWizard::boolFromVariant(file.isTemporary, expander))
+        attributes |= Core::GeneratedFile::TemporaryFile;
 
     if (file.keepExisting)
         attributes |= Core::GeneratedFile::KeepExistingFileAttribute;
@@ -188,8 +193,7 @@ Core::GeneratedFiles JsonWizardFileGenerator::fileList(Utils::MacroExpander *exp
     std::tie(fileList, dirList)
             = Utils::partition(concreteFiles, [](const File &f) { return !QFileInfo(f.source).isDir(); });
 
-    const QSet<QString> knownFiles
-            = QSet<QString>::fromList(Utils::transform(fileList, [](const File &f) { return f.target; }));
+    const QSet<QString> knownFiles = Utils::transform<QSet>(fileList, &File::target);
 
     foreach (const File &dir, dirList) {
         QDir sourceDir(dir.source);
@@ -226,7 +230,7 @@ Core::GeneratedFiles JsonWizardFileGenerator::fileList(Utils::MacroExpander *exp
 
 bool JsonWizardFileGenerator::writeFile(const JsonWizard *wizard, Core::GeneratedFile *file, QString *errorMessage)
 {
-    Q_UNUSED(wizard);
+    Q_UNUSED(wizard)
     if (!(file->attributes() & Core::GeneratedFile::KeepExistingFileAttribute)) {
         if (!file->write(errorMessage))
             return false;

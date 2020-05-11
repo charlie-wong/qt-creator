@@ -25,22 +25,18 @@
 
 source("../../shared/qtcreator.py")
 
-import re
-import tempfile
-import __builtin__
-
 currentSelectedTreeItem = None
 warningOrError = re.compile('<p><b>((Error|Warning).*?)</p>')
 
 def main():
+    global appContext
     emptySettings = tempDir()
     __createMinimumIni__(emptySettings)
-    SettingsPath = ' -settingspath "%s"' % emptySettings
-    startApplication("qtcreator" + SettingsPath)
+    appContext = startQC(['-settingspath', '"%s"' % emptySettings], False)
     if not startedWithoutPluginError():
         return
     invokeMenuItem("Tools", "Options...")
-    __checkBuildAndRun__()
+    __checkKits__()
     clickButton(waitForObject(":Options.Cancel_QPushButton"))
     invokeMenuItem("File", "Exit")
     __checkCreatedSettings__(emptySettings)
@@ -53,9 +49,8 @@ def __createMinimumIni__(emptyParent):
     iniFile.write("OverrideLanguage=C\n")
     iniFile.close()
 
-def __checkBuildAndRun__():
-    waitForObjectItem(":Options_QListView", "Build & Run")
-    clickItem(":Options_QListView", "Build & Run", 14, 15, 0, Qt.LeftButton)
+def __checkKits__():
+    mouseClick(waitForObjectItem(":Options_QListView", "Kits"))
     # check compilers
     expectedCompilers = __getExpectedCompilers__()
     foundCompilers = []
@@ -125,10 +120,9 @@ def __compFunc__(it, foundComp, foundCompNames):
         pathLineEdit = findObject(":Path.Utils_BaseValidatingLineEdit")
         foundComp.append(str(pathLineEdit.text))
     except:
-        label = findObject("{buddy={container=':qt_tabwidget_stackedwidget_QWidget' "
-                           "text='Initialization:' type='QLabel' unnamed='1' visible='1'} "
-                           "type='QLabel' unnamed='1' visible='1'}")
-        foundComp.append({it:str(label.text)})
+        varsBatCombo = waitForObjectExists("{name='varsBatCombo' type='QComboBox' visible='1'}")
+        foundComp.append({it:str(varsBatCombo.currentText)})
+
     foundCompNames.append(it)
 
 def __dbgFunc__(it, foundDbg):
@@ -177,6 +171,37 @@ def __kitFunc__(it, foundQt, foundCompNames):
             details = details.replace("<b>", "").replace("</b>", "")
             test.warning("Detected error and/or warning: %s" % details)
 
+def __extendExpectedCompilersWithInternalClang__(expected):
+    global appContext
+    # QC ships a clang itself
+    regex = '^(.*(qtcreator(.exe)?|Qt Creator))( .*)?$' # QC with optional arguments
+    qcPath = re.match(regex, appContext.commandLine)
+    if qcPath is None:
+        test.warning("Regular expression failed.")
+    else:
+        qcPath = qcPath.group(1)
+        if platform.system() == 'Darwin':
+            internalClang = os.path.join(qcPath, '..', '..', 'Resources')
+        elif platform.system() in ('Windows', 'Microsoft'):
+            internalClang = os.path.join(qcPath, '..')
+        else:
+            internalClang = os.path.join(qcPath, '..', '..', 'libexec', 'qtcreator')
+        internalClang = os.path.join(internalClang, 'clang', 'bin', 'clang')
+        if platform.system() in ('Microsoft', 'Windows'):
+            internalClang += '-cl.exe'
+        internalClang = os.path.abspath(internalClang)
+        if os.path.exists(internalClang):
+            if platform.system() in ('Microsoft', 'Windows'):
+                # just add a fuzzy comparable name - everything else is not worth the effort here
+                expected.append({'^Default LLVM \d{2} bit based on MSVC\d{4}$':''})
+            else:
+                expected.append(internalClang)
+        else:
+            test.fail("QC package seems to be faulty - missing internal provided clang.\nIf this "
+                      "is not a package, but a self-compiled QC, just copy the clang executable "
+                      "located inside the LLVM_INSTALL_DIR/bin (used while building) to the "
+                      "expected path.", "Expected '%s'" % internalClang)
+
 def __getExpectedCompilers__():
     # TODO: enhance this to distinguish between C and C++ compilers
     expected = []
@@ -184,11 +209,17 @@ def __getExpectedCompilers__():
         expected.extend(__getWinCompilers__())
     compilers = ["g++", "gcc"]
     if platform.system() in ('Linux', 'Darwin'):
-        compilers.extend(["g++-4.0", "g++-4.2", "clang++", "clang"])
+        for c in ('clang++', 'clang', 'afl-clang', 'clang-[0-9]', 'clang-[0-9].[0-9]',
+                  '*g++*', '*gcc*'):
+            compilers.extend(findAllFilesInPATH(c))
     if platform.system() == 'Darwin':
-        xcodeClang = getOutputFromCmdline(["xcrun", "--find", "clang++"]).strip("\n")
-        if xcodeClang and os.path.exists(xcodeClang) and xcodeClang not in expected:
-            expected.append(xcodeClang)
+        for compilerExe in ('clang++', 'clang'):
+            xcodeClang = getOutputFromCmdline(["xcrun", "--find", compilerExe]).strip("\n")
+            if xcodeClang and os.path.exists(xcodeClang) and xcodeClang not in expected:
+                expected.append(xcodeClang)
+
+    __extendExpectedCompilersWithInternalClang__(expected)
+
     for compiler in compilers:
         compilerPath = which(compiler)
         if compilerPath:
@@ -277,6 +308,13 @@ def __compareCompilers__(foundCompilers, expectedCompilers):
                 if isinstance(currentExp, (str, unicode)):
                     continue
                 key = currentExp.keys()[0]
+                # special case for (fuzzy) regex comparison on Windows (internal LLVM)
+                if isWin and key.startswith('^') and key.endswith('$'):
+                    if re.match(key, currentFound.keys()[0], flags):
+                        test.verify(os.path.exists(currentFound.values()[0].rsplit(" ", 1)[0]),
+                                    "Verifying whether shipped clang got set up.")
+                        foundExp = True
+                        break
                 # the regex .*? is used for the different possible version strings of the WinSDK
                 # if it's present a regex will be validated otherwise simple string comparison
                 if (((".*?" in key and re.match(key, currentFound.keys()[0], flags))
@@ -333,7 +371,6 @@ def __checkCreatedSettings__(settingsFolder):
                   {os.path.join(folders[0], "qtversion.xml"):0},
                   {os.path.join(folders[0], "toolchains.xml"):0}])
     folders.extend([os.path.join(folders[0], "generic-highlighter"),
-                    os.path.join(folders[0], "json"),
                     os.path.join(folders[0], "macros")])
     for f in folders:
         test.verify(os.path.isdir(f),

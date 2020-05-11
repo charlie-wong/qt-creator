@@ -25,134 +25,66 @@
 
 #pragma once
 
+#include <projectexplorer/buildsystem.h>
 #include <projectexplorer/projectnodes.h>
 
-#include <qbs.h>
+#include <QJsonObject>
 
 namespace QbsProjectManager {
 namespace Internal {
 
-class QbsNodeTreeBuilder;
 class QbsProject;
+class QbsBuildSystem;
 
-// ----------------------------------------------------------------------
-// QbsFileNode:
-// ----------------------------------------------------------------------
-
-class QbsFileNode : public ProjectExplorer::FileNode
+class QbsGroupNode : public ProjectExplorer::ProjectNode
 {
 public:
-    QbsFileNode(const Utils::FileName &filePath, const ProjectExplorer::FileType fileType, bool generated,
-                int line);
+    QbsGroupNode(const QJsonObject &grp);
 
-    QString displayName() const override;
-};
-
-class QbsFolderNode : public ProjectExplorer::FolderNode
-{
-public:
-    QbsFolderNode(const Utils::FileName &folderPath, ProjectExplorer::NodeType nodeType,
-                  const QString &displayName);
+    bool showInSimpleTree() const final { return false; }
+    QJsonObject groupData() const { return m_groupData; }
 
 private:
-    bool supportsAction(ProjectExplorer::ProjectAction action, Node *node) const final;
+    friend class QbsBuildSystem;
+    AddNewInformation addNewInformation(const QStringList &files, Node *context) const override;
+    QVariant data(Core::Id role) const override;
+
+    const QJsonObject m_groupData;
 };
 
-// ---------------------------------------------------------------------------
-// QbsBaseProjectNode:
-// ---------------------------------------------------------------------------
-
-class QbsGroupNode;
-
-class QbsBaseProjectNode : public ProjectExplorer::ProjectNode
+class QbsProductNode : public ProjectExplorer::ProjectNode
 {
 public:
-    explicit QbsBaseProjectNode(const Utils::FileName &absoluteFilePath);
+    explicit QbsProductNode(const QJsonObject &prd);
 
-    bool showInSimpleTree() const override;
-};
+    void build() override;
+    QStringList targetApplications() const override;
 
-// --------------------------------------------------------------------
-// QbsGroupNode:
-// --------------------------------------------------------------------
+    QString fullDisplayName() const;
+    QString buildKey() const override;
 
-class QbsGroupNode : public QbsBaseProjectNode
-{
-public:
-    QbsGroupNode(const qbs::GroupData &grp, const QString &productPath);
+    static QString getBuildKey(const QJsonObject &product);
 
-    bool supportsAction(ProjectExplorer::ProjectAction action, Node *node) const final;
-    bool addFiles(const QStringList &filePaths, QStringList *notAdded = 0) override;
-    bool removeFiles(const QStringList &filePaths, QStringList *notRemoved = 0) override;
-    bool renameFile(const QString &filePath, const QString &newFilePath) override;
-
-    qbs::GroupData qbsGroupData() const { return m_qbsGroupData; }
+    const QJsonObject productData() const { return m_productData; }
+    QJsonObject mainGroup() const;
+    QVariant data(Core::Id role) const override;
 
 private:
-    qbs::GroupData m_qbsGroupData;
-    QString m_productPath;
+    const QJsonObject m_productData;
 };
 
-// --------------------------------------------------------------------
-// QbsProductNode:
-// --------------------------------------------------------------------
-
-class QbsProductNode : public QbsBaseProjectNode
+class QbsProjectNode : public ProjectExplorer::ProjectNode
 {
 public:
-    explicit QbsProductNode(const qbs::ProductData &prd);
+    explicit QbsProjectNode(const QJsonObject &projectData);
 
-    bool showInSimpleTree() const override;
-    bool supportsAction(ProjectExplorer::ProjectAction action, Node *node) const final;
-    bool addFiles(const QStringList &filePaths, QStringList *notAdded = 0) override;
-    bool removeFiles(const QStringList &filePaths, QStringList *notRemoved = 0) override;
-    bool renameFile(const QString &filePath, const QString &newFilePath) override;
-
-    const qbs::ProductData qbsProductData() const { return m_qbsProductData; }
-
-    QList<ProjectExplorer::RunConfiguration *> runConfigurations() const override;
+    const QJsonObject projectData() const { return m_projectData; }
 
 private:
-    const qbs::ProductData m_qbsProductData;
+    const QJsonObject m_projectData;
 };
 
-// ---------------------------------------------------------------------------
-// QbsProjectNode:
-// ---------------------------------------------------------------------------
-
-class QbsProjectNode : public QbsBaseProjectNode
-{
-public:
-    explicit QbsProjectNode(const Utils::FileName &projectDirectory);
-
-    virtual QbsProject *project() const;
-    const qbs::Project qbsProject() const;
-    const qbs::ProjectData qbsProjectData() const { return m_projectData; }
-
-    bool showInSimpleTree() const override;
-    void setProjectData(const qbs::ProjectData &data); // FIXME: Needed?
-
-private:
-    qbs::ProjectData m_projectData;
-
-    friend class QbsNodeTreeBuilder;
-};
-
-// --------------------------------------------------------------------
-// QbsRootProjectNode:
-// --------------------------------------------------------------------
-
-class QbsRootProjectNode : public QbsProjectNode
-{
-public:
-    explicit QbsRootProjectNode(QbsProject *project);
-
-    QbsProject *project() const  override { return m_project; }
-
-private:
-    QbsProject *const m_project;
-};
-
+const QbsProductNode *parentQbsProductNode(const ProjectExplorer::Node *node);
 
 } // namespace Internal
 } // namespace QbsProjectManager

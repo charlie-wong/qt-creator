@@ -34,7 +34,7 @@ QString AddKeysOperation::name() const
 
 QString AddKeysOperation::helpText() const
 {
-    return QLatin1String("add settings to Qt Creator configuration");
+    return QLatin1String("add arbitrary settings to configuration");
 }
 
 QString AddKeysOperation::argumentsHelpText() const
@@ -250,7 +250,7 @@ QVariantMap AddKeysOperation::addKeys(const QVariantMap &map, const KeyValuePair
             foldBack = current;
         }
 
-        Q_ASSERT(stack.count() == 0);
+        Q_ASSERT(stack.isEmpty());
         Q_ASSERT(foldBack != map);
 
         result = foldBack;

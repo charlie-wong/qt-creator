@@ -26,30 +26,20 @@
 #include "androidtoolchain.h"
 #include "androidconstants.h"
 #include "androidconfigurations.h"
-#include "androidqtversion.h"
 
-#include <extensionsystem/pluginmanager.h>
-
-#include <qtsupport/qtkitinformation.h>
-#include <qtsupport/qtversionmanager.h>
-
-#include <projectexplorer/target.h>
+#include <projectexplorer/kitmanager.h>
 #include <projectexplorer/toolchainmanager.h>
 #include <projectexplorer/projectexplorer.h>
 
-#include <utils/algorithm.h>
 #include <utils/environment.h>
-#include <utils/hostosinfo.h>
 
-#include <QDir>
-#include <QDirIterator>
-#include <QFormLayout>
-#include <QLabel>
+#include <QFileInfo>
+#include <QLoggingCategory>
 #include <QRegExp>
-#include <QVBoxLayout>
+
 
 namespace {
-    const QLatin1String NDKGccVersionRegExp("-\\d[\\.\\d]+");
+static Q_LOGGING_CATEGORY(androidTCLog, "qtc.android.toolchainmanagement", QtWarningMsg);
 }
 
 namespace Android {
@@ -58,203 +48,114 @@ namespace Internal {
 using namespace ProjectExplorer;
 using namespace Utils;
 
-static const char ANDROID_QT_VERSION_KEY[] = "Qt4ProjectManager.Android.QtVersion";
-static const char ANDROID_NDK_TC_VERION[] = "Qt4ProjectManager.Android.NDK_TC_VERION";
+static const QHash<QString, Abi> ClangTargets = {
+    {"arm-linux-androideabi",
+     Abi(Abi::ArmArchitecture, Abi::LinuxOS, Abi::AndroidLinuxFlavor, Abi::ElfFormat, 32)},
+    {"i686-linux-android",
+     Abi(Abi::X86Architecture, Abi::LinuxOS, Abi::AndroidLinuxFlavor, Abi::ElfFormat, 32)},
+    {"x86_64-linux-android",
+     Abi(Abi::X86Architecture, Abi::LinuxOS, Abi::AndroidLinuxFlavor, Abi::ElfFormat, 64)},
+    {"aarch64-linux-android",
+     Abi(Abi::ArmArchitecture, Abi::LinuxOS, Abi::AndroidLinuxFlavor, Abi::ElfFormat, 64)}};
 
-QHash<Abi, QList<int> > AndroidToolChainFactory::m_newestVersionForAbi;
-FileName AndroidToolChainFactory::m_ndkLocation;
+static const QList<Core::Id> LanguageIds = {ProjectExplorer::Constants::CXX_LANGUAGE_ID,
+                                            ProjectExplorer::Constants::C_LANGUAGE_ID};
 
-AndroidToolChain::AndroidToolChain(const Abi &abi, const QString &ndkToolChainVersion, Core::Id l, Detection d)
-    : GccToolChain(Constants::ANDROID_TOOLCHAIN_ID, d),
-      m_ndkToolChainVersion(ndkToolChainVersion), m_secondaryToolChain(false)
+static ToolChain *findToolChain(Utils::FilePath &compilerPath, Core::Id lang, const QString &target,
+                                const ToolChainList &alreadyKnown)
 {
-    setLanguage(l);
-    setTargetAbi(abi);
-    setDisplayName(QString::fromLatin1("Android GCC (%1, %2-%3)")
-                   .arg(ToolChainManager::displayNameOfLanguageId(l),
-                        AndroidConfig::displayName(targetAbi()),
-                        ndkToolChainVersion));
+    ToolChain * tc = Utils::findOrDefault(alreadyKnown, [target, compilerPath, lang](ToolChain *tc) {
+        return tc->typeId() == Constants::ANDROID_TOOLCHAIN_TYPEID
+                && tc->language() == lang
+                && tc->targetAbi() == ClangTargets[target]
+                && tc->compilerCommand() == compilerPath;
+    });
+    return tc;
 }
 
-// for fromMap
 AndroidToolChain::AndroidToolChain()
-    : GccToolChain(Constants::ANDROID_TOOLCHAIN_ID, ToolChain::ManualDetection),
-      m_secondaryToolChain(false)
+    : ClangToolChain(Constants::ANDROID_TOOLCHAIN_TYPEID)
 {
+    setTypeDisplayName(AndroidToolChain::tr("Android Clang"));
 }
 
-AndroidToolChain::AndroidToolChain(const AndroidToolChain &tc) :
-    GccToolChain(tc), m_ndkToolChainVersion(tc.m_ndkToolChainVersion),
-    m_secondaryToolChain(tc.m_secondaryToolChain)
-{ }
-
-AndroidToolChain::~AndroidToolChain()
-{ }
-
-QString AndroidToolChain::typeDisplayName() const
+Utils::FilePath AndroidToolChain::ndkLocation() const
 {
-    return AndroidToolChainFactory::tr("Android GCC");
+    return m_ndkLocation;
 }
+
+void AndroidToolChain::setNdkLocation(const Utils::FilePath &ndkLocation)
+{
+    m_ndkLocation = ndkLocation;
+}
+
+AndroidToolChain::~AndroidToolChain() = default;
 
 bool AndroidToolChain::isValid() const
 {
-    return GccToolChain::isValid() && targetAbi().isValid() && !m_ndkToolChainVersion.isEmpty()
-            && compilerCommand().isChildOf(AndroidConfigurations::currentConfig().ndkLocation());
+    if (m_ndkLocation.isEmpty()) {
+        QStringList ndkParts(compilerCommand().toString().split("toolchains/llvm/prebuilt/"));
+        if (ndkParts.size() > 1) {
+            QString ndkLocation(ndkParts.first());
+            if (ndkLocation.endsWith('/'))
+                ndkLocation.chop(1);
+            m_ndkLocation = FilePath::fromString(ndkLocation);
+        }
+    }
+
+    const bool isChildofNdk = compilerCommand().isChildOf(m_ndkLocation);
+    const bool isChildofSdk = compilerCommand().isChildOf(
+        AndroidConfigurations::currentConfig().sdkLocation());
+
+    return ClangToolChain::isValid() && typeId() == Constants::ANDROID_TOOLCHAIN_TYPEID
+           && targetAbi().isValid() && (isChildofNdk || isChildofSdk)
+           && !originalTargetTriple().isEmpty();
 }
 
 void AndroidToolChain::addToEnvironment(Environment &env) const
 {
-// TODO this vars should be configurable in projects -> build tab
-// TODO invalidate all .pro files !!!
-
-    env.set(QLatin1String("ANDROID_NDK_HOST"), AndroidConfigurations::currentConfig().toolchainHost());
-    env.set(QLatin1String("ANDROID_NDK_TOOLCHAIN_PREFIX"), AndroidConfig::toolchainPrefix(targetAbi()));
-    env.set(QLatin1String("ANDROID_NDK_TOOLS_PREFIX"), AndroidConfig::toolsPrefix(targetAbi()));
-    env.set(QLatin1String("ANDROID_NDK_TOOLCHAIN_VERSION"), m_ndkToolChainVersion);
-    const Utils::FileName javaHome = AndroidConfigurations::currentConfig().openJDKLocation();
-    if (!javaHome.isEmpty() && javaHome.toFileInfo().exists()) {
+    AndroidConfig config = AndroidConfigurations::currentConfig();
+    env.set(QLatin1String("ANDROID_NDK_HOST"), config.toolchainHostFromNdk(m_ndkLocation));
+    const Utils::FilePath javaHome = config.openJDKLocation();
+    if (javaHome.exists()) {
         env.set(QLatin1String("JAVA_HOME"), javaHome.toString());
-        Utils::FileName javaBin = javaHome;
-        javaBin.appendPath(QLatin1String("bin"));
-        const QString jb = javaBin.toUserOutput();
-        if (!Utils::contains(env.path(), [&jb](const QString &p) { return p == jb; }))
-            env.prependOrSetPath(jb);
+        const FilePath javaBin = javaHome.pathAppended("bin");
+        const FilePath currentJavaFilePath = env.searchInPath("java");
+        if (!currentJavaFilePath.isChildOf(javaBin))
+            env.prependOrSetPath(javaBin.toUserOutput());
     }
-    env.set(QLatin1String("ANDROID_HOME"), AndroidConfigurations::currentConfig().sdkLocation().toString());
-    env.set(QLatin1String("ANDROID_SDK_ROOT"), AndroidConfigurations::currentConfig().sdkLocation().toString());
-}
-
-bool AndroidToolChain::operator ==(const ToolChain &tc) const
-{
-    if (!GccToolChain::operator ==(tc))
-        return false;
-
-    return m_ndkToolChainVersion == static_cast<const AndroidToolChain &>(tc).m_ndkToolChainVersion;
-}
-
-ToolChainConfigWidget *AndroidToolChain::configurationWidget()
-{
-    return new AndroidToolChainConfigWidget(this);
-}
-
-FileName AndroidToolChain::suggestedDebugger() const
-{
-    return AndroidConfigurations::currentConfig().gdbPath(targetAbi(), m_ndkToolChainVersion);
-}
-
-FileName AndroidToolChain::suggestedGdbServer() const
-{
-    FileName path = AndroidConfigurations::currentConfig().ndkLocation();
-    path.appendPath(QString::fromLatin1("prebuilt/android-%1/gdbserver/gdbserver")
-                    .arg(Abi::toString(targetAbi().architecture())));
-    if (path.exists())
-        return path;
-    path = AndroidConfigurations::currentConfig().ndkLocation();
-    path.appendPath(QString::fromLatin1("toolchains/%1-%2/prebuilt/gdbserver")
-                               .arg(AndroidConfig::toolchainPrefix(targetAbi()))
-                               .arg(m_ndkToolChainVersion));
-    if (path.exists())
-        return path;
-
-    return FileName();
-}
-
-QVariantMap AndroidToolChain::toMap() const
-{
-    QVariantMap result = GccToolChain::toMap();
-    result.insert(QLatin1String(ANDROID_NDK_TC_VERION), m_ndkToolChainVersion);
-    return result;
+    env.set(QLatin1String("ANDROID_HOME"), config.sdkLocation().toString());
+    env.set(QLatin1String("ANDROID_SDK_ROOT"), config.sdkLocation().toString());
 }
 
 bool AndroidToolChain::fromMap(const QVariantMap &data)
 {
-    if (!GccToolChain::fromMap(data))
+    if (!ClangToolChain::fromMap(data))
         return false;
-
-    if (data.contains(QLatin1String(ANDROID_QT_VERSION_KEY))) {
-        QString command = compilerCommand().toString();
-        QString ndkPath = AndroidConfigurations::currentConfig().ndkLocation().toString();
-        if (!command.startsWith(ndkPath))
-            return false;
-        command = command.mid(ndkPath.length());
-        if (!command.startsWith(QLatin1String("/toolchains/")))
-            return false;
-        command = command.mid(12);
-        int index = command.indexOf(QLatin1Char('/'));
-        if (index == -1)
-            return false;
-        command = command.left(index);
-        QRegExp versionRegExp(NDKGccVersionRegExp);
-        index = versionRegExp.indexIn(command);
-        if (index == -1)
-            return false;
-        m_ndkToolChainVersion = command.mid(index + 1);
-        QString platform = command.left(index);
-        setTargetAbi(AndroidConfig::abiForToolChainPrefix(platform));
-    } else {
-        m_ndkToolChainVersion = data.value(QLatin1String(ANDROID_NDK_TC_VERION)).toString();
-    }
-
-    Abi abi = targetAbi();
-    m_secondaryToolChain = AndroidToolChainFactory::versionCompareLess(AndroidToolChainFactory::versionNumberFromString(m_ndkToolChainVersion),
-                                                                       AndroidToolChainFactory::newestToolChainVersionForArch(abi));
     return isValid();
 }
 
-FileNameList AndroidToolChain::suggestedMkspecList() const
+QStringList AndroidToolChain::suggestedMkspecList() const
 {
-    return FileNameList()<< FileName::fromLatin1("android-g++");
+    return {"android-g++", "android-clang"};
 }
 
-QString AndroidToolChain::makeCommand(const Environment &env) const
+FilePath AndroidToolChain::makeCommand(const Environment &env) const
 {
-    QStringList extraDirectories = AndroidConfigurations::currentConfig().makeExtraSearchDirectories();
-    if (HostOsInfo::isWindowsHost()) {
-        FileName tmp = env.searchInPath(QLatin1String("ma-make.exe"), extraDirectories);
-        if (!tmp.isEmpty())
-            return QString();
-        tmp = env.searchInPath(QLatin1String("mingw32-make"), extraDirectories);
-        return tmp.isEmpty() ? QLatin1String("mingw32-make") : tmp.toString();
-    }
-
-    QString make = QLatin1String("make");
-    FileName tmp = env.searchInPath(make, extraDirectories);
-    return tmp.isEmpty() ? make : tmp.toString();
-}
-
-QString AndroidToolChain::ndkToolChainVersion() const
-{
-    return m_ndkToolChainVersion;
-}
-
-bool AndroidToolChain::isSecondaryToolChain() const
-{
-    return m_secondaryToolChain;
-}
-
-void AndroidToolChain::setSecondaryToolChain(bool b)
-{
-    if (m_secondaryToolChain == b)
-        return;
-    m_secondaryToolChain = b;
-    toolChainUpdated();
+    Q_UNUSED(env)
+    FilePath makePath = AndroidConfigurations::currentConfig().makePathFromNdk(m_ndkLocation);
+    return makePath.exists() ? makePath : FilePath::fromString("make");
 }
 
 GccToolChain::DetectedAbisResult AndroidToolChain::detectSupportedAbis() const
 {
-    return QList<Abi>() << targetAbi();
+    for (auto itr = ClangTargets.constBegin();itr != ClangTargets.constEnd(); ++itr) {
+        if (itr.value() == targetAbi())
+            return GccToolChain::DetectedAbisResult({targetAbi()}, itr.key());
+    }
+    return GccToolChain::DetectedAbisResult({targetAbi()}, "");
 }
 
-// --------------------------------------------------------------------------
-// ToolChainConfigWidget
-// --------------------------------------------------------------------------
-
-AndroidToolChainConfigWidget::AndroidToolChainConfigWidget(AndroidToolChain *tc) :
-   ToolChainConfigWidget(tc)
-{
-    QLabel *label = new QLabel(AndroidConfigurations::currentConfig().ndkLocation().toUserOutput());
-    m_mainLayout->addRow(tr("NDK Root:"), label);
-}
 
 // --------------------------------------------------------------------------
 // ToolChainFactory
@@ -262,202 +163,110 @@ AndroidToolChainConfigWidget::AndroidToolChainConfigWidget(AndroidToolChain *tc)
 
 AndroidToolChainFactory::AndroidToolChainFactory()
 {
-    setDisplayName(tr("Android GCC"));
+    setDisplayName(AndroidToolChain::tr("Android Clang"));
+    setSupportedToolChainType(Constants::ANDROID_TOOLCHAIN_TYPEID);
+    setSupportedLanguages({ProjectExplorer::Constants::CXX_LANGUAGE_ID});
+    setToolchainConstructor([] { return new AndroidToolChain; });
 }
 
-QSet<Core::Id> Android::Internal::AndroidToolChainFactory::supportedLanguages() const
+static FilePath clangPlusPlusPath(const FilePath &clangPath)
 {
-    return {ProjectExplorer::Constants::CXX_LANGUAGE_ID};
+    return clangPath.parentDir().pathAppended(
+                HostOsInfo::withExecutableSuffix(
+                    QFileInfo(clangPath.toString()).baseName() + "++"));
 }
 
-QList<ToolChain *> AndroidToolChainFactory::autoDetect(const QList<ToolChain *> &alreadyKnown)
+static QList<FilePath> uniqueNdksForCurrentQtVersions()
 {
-    return autodetectToolChainsForNdk(AndroidConfigurations::currentConfig().ndkLocation(), alreadyKnown);
-}
+    AndroidConfig config = AndroidConfigurations::currentConfig();
 
-bool AndroidToolChainFactory::canRestore(const QVariantMap &data)
-{
-    return typeIdFromMap(data) == Constants::ANDROID_TOOLCHAIN_ID;
-}
+    auto androidQtVersions = QtSupport::QtVersionManager::versions(
+        [](const QtSupport::BaseQtVersion *v) {
+            return v->targetDeviceTypes().contains(Android::Constants::ANDROID_DEVICE_TYPE);
+        });
 
-ToolChain *AndroidToolChainFactory::restore(const QVariantMap &data)
-{
-    AndroidToolChain *tc = new AndroidToolChain();
-    if (tc->fromMap(data))
-        return tc;
-
-    delete tc;
-    return 0;
-}
-
-QList<AndroidToolChainFactory::AndroidToolChainInformation> AndroidToolChainFactory::toolchainPathsForNdk(const FileName &ndkPath)
-{
-    QList<AndroidToolChainInformation> result;
-    if (ndkPath.isEmpty())
-        return result;
-    QRegExp versionRegExp(NDKGccVersionRegExp);
-    FileName path = ndkPath;
-    QDirIterator it(path.appendPath(QLatin1String("toolchains")).toString(),
-                    QStringList("*"), QDir::Dirs);
-    while (it.hasNext()) {
-        const QString &fileName = FileName::fromString(it.next()).fileName();
-        int idx = versionRegExp.indexIn(fileName);
-        if (idx == -1)
-            continue;
-        for (const Core::Id lang : {ProjectExplorer::Constants::CXX_LANGUAGE_ID,
-                                    ProjectExplorer::Constants::C_LANGUAGE_ID}) {
-            AndroidToolChainInformation ati;
-            ati.language = lang;
-            ati.version = fileName.mid(idx + 1);
-            QString platform = fileName.left(idx);
-            ati.abi = AndroidConfig::abiForToolChainPrefix(platform);
-            if (ati.abi.architecture() == Abi::UnknownArchitecture)
-                continue;
-            ati.compilerCommand = AndroidConfigurations::currentConfig().gccPath(ati.abi, lang, ati.version);
-            result.append(ati);
-        }
+    QList<FilePath> uniqueNdks;
+    for (const QtSupport::BaseQtVersion *version : androidQtVersions) {
+        FilePath ndk = config.ndkLocation(version);
+        if (!uniqueNdks.contains(ndk))
+            uniqueNdks.append(ndk);
     }
-    return result;
+
+    return uniqueNdks;
 }
 
-QList<int> AndroidToolChainFactory::versionNumberFromString(const QString &version)
+ToolChainList AndroidToolChainFactory::autodetectToolChains(const ToolChainList &alreadyKnown)
 {
-    QList<int> result;
-    int start = 0;
-    int end = version.length();
-    while (start <= end) {
-        int index = version.indexOf(QLatin1Char('.'), start);
-        if (index == -1)
-            index = end;
-
-        bool ok;
-        int v = version.midRef(start, index - start).toInt(&ok);
-        if (!ok) // unparseable, return what we have
-            return result;
-
-        result << v;
-        start = index + 1;
-    }
-    return result;
+    const QList<Utils::FilePath> uniqueNdks = uniqueNdksForCurrentQtVersions();
+    return autodetectToolChainsFromNdks(alreadyKnown, uniqueNdks);
 }
 
-bool AndroidToolChainFactory::versionCompareLess(const QList<int> &a, const QList<int> &b)
-{
-    int aend = a.length();
-    int bend = b.length();
-    int end = qMax(aend, bend);
-    for (int i = 0; i < end; ++i) {
-        int an = i < aend ? a.at(i) : 0;
-        int bn = i < bend ? b.at(i) : 0;
-        if (an < bn)
-            return true;
-        if (bn < an)
-            return false;
-    }
-    return false;
-}
-
-bool AndroidToolChainFactory::versionCompareLess(QList<AndroidToolChain *> atc,
-                                                 QList<AndroidToolChain *> btc)
-{
-    const QList<int> a = versionNumberFromString(atc.at(0)->ndkToolChainVersion());
-    const QList<int> b = versionNumberFromString(btc.at(0)->ndkToolChainVersion());
-
-    return versionCompareLess(a, b);
-}
-
-static AndroidToolChain *findToolChain(Utils::FileName &compilerPath, Core::Id lang,
-                                       const QList<ToolChain *> &alreadyKnown)
-{
-    return static_cast<AndroidToolChain *>(
-                Utils::findOrDefault(alreadyKnown, [compilerPath, lang](ToolChain *tc) {
-                                                       return tc->typeId() == Constants::ANDROID_TOOLCHAIN_ID
-                                                           && tc->language() == lang
-                                                           && tc->compilerCommand() == compilerPath;
-                                                   }));
-}
-
-QList<ToolChain *>
-AndroidToolChainFactory::autodetectToolChainsForNdk(const FileName &ndkPath,
-                                                    const QList<ToolChain *> &alreadyKnown)
+ToolChainList AndroidToolChainFactory::autodetectToolChainsFromNdks(
+    const ToolChainList &alreadyKnown,
+    const QList<Utils::FilePath> &ndkLocations,
+    const bool isCustom)
 {
     QList<ToolChain *> result;
-    if (ndkPath.isEmpty())
-        return result;
+    const AndroidConfig config = AndroidConfigurations::currentConfig();
 
-    QRegExp versionRegExp(NDKGccVersionRegExp);
-    FileName path = ndkPath;
-    QDirIterator it(path.appendPath(QLatin1String("toolchains")).toString(),
-                    QStringList("*"), QDir::Dirs);
-    QHash<Abi, QList<AndroidToolChain *>> newestToolChainForArch;
+    for (const Utils::FilePath &ndkLocation : ndkLocations) {
+        qCDebug(androidTCLog) << "Detecting toolchains from Android NDK:" << ndkLocation;
 
-    while (it.hasNext()) {
-        const QString &fileName = FileName::fromString(it.next()).fileName();
-        int idx = versionRegExp.indexIn(fileName);
-        if (idx == -1)
+        FilePath clangPath = config.clangPathFromNdk(ndkLocation);
+        if (!clangPath.exists()) {
+            qCDebug(androidTCLog) << "Clang toolchains detection fails. Can not find Clang"
+                                  << clangPath;
             continue;
-        QString version = fileName.mid(idx + 1);
-        QString platform = fileName.left(idx);
-        Abi abi = AndroidConfig::abiForToolChainPrefix(platform);
-        if (abi.architecture() == Abi::UnknownArchitecture)
-            continue;
-        QList<AndroidToolChain *> toolChainBundle;
-        for (Core::Id lang : {ProjectExplorer::Constants::CXX_LANGUAGE_ID, ProjectExplorer::Constants::C_LANGUAGE_ID}) {
-            FileName compilerPath = AndroidConfigurations::currentConfig().gccPath(abi, lang, version);
-
-            AndroidToolChain *tc = findToolChain(compilerPath, lang, alreadyKnown);
-            if (!tc) {
-                tc = new AndroidToolChain(abi, version, lang,
-                                          ToolChain::AutoDetection);
-                tc->resetToolChain(compilerPath);
-            }
-            result.append(tc);
-            toolChainBundle.append(tc);
         }
 
-        auto it = newestToolChainForArch.constFind(abi);
-        if (it == newestToolChainForArch.constEnd())
-            newestToolChainForArch.insert(abi, toolChainBundle);
-        else if (versionCompareLess(it.value(), toolChainBundle))
-            newestToolChainForArch[abi] = toolChainBundle;
-    }
+        for (const Core::Id &lang : LanguageIds) {
+            FilePath compilerCommand = clangPath;
+            if (lang == ProjectExplorer::Constants::CXX_LANGUAGE_ID)
+                compilerCommand = clangPlusPlusPath(clangPath);
 
-    foreach (ToolChain *tc, result) {
-        AndroidToolChain *atc = static_cast<AndroidToolChain *>(tc);
-        atc->setSecondaryToolChain(!newestToolChainForArch.value(atc->targetAbi()).contains(atc));
+            if (!compilerCommand.exists()) {
+                qCDebug(androidTCLog)
+                    << "Skipping Clang toolchain. Can not find compiler" << compilerCommand;
+                continue;
+            }
+
+            auto targetItr = ClangTargets.constBegin();
+            while (targetItr != ClangTargets.constEnd()) {
+                const Abi &abi = targetItr.value();
+                const QString target = targetItr.key();
+                ToolChain *tc = findToolChain(compilerCommand, lang, target, alreadyKnown);
+
+                QLatin1String customStr = isCustom ? QLatin1String("Custom ") : QLatin1String();
+                const QString displayName(customStr + QString("Android Clang (%1, %2, NDK %3)")
+                                              .arg(ToolChainManager::displayNameOfLanguageId(lang),
+                                                   AndroidConfig::displayName(abi),
+                                                   config.ndkVersion(ndkLocation).toString()));
+                if (tc) {
+                    qCDebug(androidTCLog) << "Tool chain already known" << abi.toString() << lang;
+                    // make sure to update the toolchain with current name format
+                    if (tc->displayName() != displayName)
+                        tc->setDisplayName(displayName);
+                } else {
+                    qCDebug(androidTCLog) << "New Clang toolchain found" << abi.toString() << lang;
+                    auto atc = new AndroidToolChain();
+                    atc->setNdkLocation(ndkLocation);
+                    atc->setOriginalTargetTriple(target);
+                    atc->setLanguage(lang);
+                    atc->setTargetAbi(ClangTargets[target]);
+                    atc->setPlatformCodeGenFlags({"-target", target});
+                    atc->setPlatformLinkerFlags({"-target", target});
+                    atc->setDisplayName(displayName);
+                    atc->resetToolChain(compilerCommand);
+                    tc = atc;
+                }
+                tc->setDetection(ToolChain::AutoDetection);
+                result << tc;
+                ++targetItr;
+            }
+        }
     }
 
     return result;
-}
-
-QList<int> AndroidToolChainFactory::newestToolChainVersionForArch(const Abi &abi)
-{
-    if (m_newestVersionForAbi.isEmpty()
-            || m_ndkLocation != AndroidConfigurations::currentConfig().ndkLocation()) {
-        QRegExp versionRegExp(NDKGccVersionRegExp);
-        m_ndkLocation = AndroidConfigurations::currentConfig().ndkLocation();
-        FileName path = m_ndkLocation;
-        QDirIterator it(path.appendPath(QLatin1String("toolchains")).toString(),
-                        QStringList("*"), QDir::Dirs);
-        while (it.hasNext()) {
-            const QString &fileName = FileName::fromString(it.next()).fileName();
-            int idx = versionRegExp.indexIn(fileName);
-            if (idx == -1)
-                continue;
-            QList<int> version = versionNumberFromString(fileName.mid(idx + 1));
-            QString platform = fileName.left(idx);
-            Abi abi = AndroidConfig::abiForToolChainPrefix(platform);
-            if (abi.architecture() == Abi::UnknownArchitecture)
-                continue;
-            QHash<Abi, QList<int> >::const_iterator it
-                    = m_newestVersionForAbi.constFind(abi);
-            if (it == m_newestVersionForAbi.constEnd())
-                m_newestVersionForAbi.insert(abi, version);
-            else if (versionCompareLess(it.value(), version))
-                m_newestVersionForAbi[abi] = version;
-        }
-    }
-    return m_newestVersionForAbi.value(abi);
 }
 
 } // namespace Internal

@@ -26,8 +26,9 @@
 #include "pchmanagerclient.h"
 
 #include <precompiledheadersupdatedmessage.h>
+#include <progressmanagerinterface.h>
+#include <progressmessage.h>
 #include <pchmanagerconnectionclient.h>
-
 #include <pchmanagernotifierinterface.h>
 
 #include <algorithm>
@@ -42,11 +43,25 @@ void PchManagerClient::alive()
 
 void PchManagerClient::precompiledHeadersUpdated(ClangBackEnd::PrecompiledHeadersUpdatedMessage &&message)
 {
-    for (const ClangBackEnd::ProjectPartPch &projectPartPch : message.projectPartPchs())
-        precompiledHeaderUpdated(projectPartPch.id(), projectPartPch.path());
+    for (ClangBackEnd::ProjectPartId &projectPartId : message.takeProjectPartIds())
+        precompiledHeaderUpdated(projectPartId);
 }
 
-void PchManagerClient::precompiledHeaderRemoved(const QString &projectPartId)
+void PchManagerClient::progress(ClangBackEnd::ProgressMessage &&message)
+{
+    switch (message.progressType) {
+    case ClangBackEnd::ProgressType::PrecompiledHeader:
+        m_pchCreationProgressManager.setProgress(message.progress, message.total);
+        break;
+    case ClangBackEnd::ProgressType::DependencyCreation:
+        m_dependencyCreationProgressManager.setProgress(message.progress, message.total);
+        break;
+    default:
+        break;
+    }
+}
+
+void PchManagerClient::precompiledHeaderRemoved(ClangBackEnd::ProjectPartId projectPartId)
 {
     for (auto notifier : m_notifiers)
         notifier->precompiledHeaderRemoved(projectPartId);
@@ -78,10 +93,10 @@ const std::vector<PchManagerNotifierInterface *> &PchManagerClient::notifiers() 
     return m_notifiers;
 }
 
-void PchManagerClient::precompiledHeaderUpdated(const QString &projectPartId, const QString &pchFilePath)
+void PchManagerClient::precompiledHeaderUpdated(ClangBackEnd::ProjectPartId projectPartId)
 {
     for (auto notifier : m_notifiers)
-        notifier->precompiledHeaderUpdated(projectPartId, pchFilePath);
+        notifier->precompiledHeaderUpdated(projectPartId);
 }
 
 } // namespace ClangPchManager

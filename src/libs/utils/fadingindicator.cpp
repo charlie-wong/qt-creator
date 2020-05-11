@@ -49,14 +49,14 @@ public:
     {
         m_effect = new QGraphicsOpacityEffect(this);
         setGraphicsEffect(m_effect);
-        m_effect->setOpacity(1.);
+        m_effect->setOpacity(.999);
 
         m_label = new QLabel;
         QFont font = m_label->font();
         font.setPixelSize(size == FadingIndicator::LargeText ? 45 : 22);
         m_label->setFont(font);
         QPalette pal = palette();
-        pal.setColor(QPalette::Foreground, pal.color(QPalette::Background));
+        pal.setColor(QPalette::WindowText, pal.color(QPalette::Window));
         m_label->setPalette(pal);
         auto layout = new QHBoxLayout;
         setLayout(layout);
@@ -69,18 +69,24 @@ public:
         m_label->setText(text);
         layout()->setSizeConstraint(QLayout::SetFixedSize);
         adjustSize();
-        if (QWidget *parent = parentWidget())
-            move(parent->rect().center() - rect().center());
+        QWidget *parent = parentWidget();
+        QPoint pos = parent ? (parent->rect().center() - rect().center()) : QPoint();
+        if (pixmapIndicator && pixmapIndicator->geometry().intersects(QRect(pos, size())))
+            pos.setY(pixmapIndicator->geometry().bottom() + 1);
+        move(pos);
     }
 
     void setPixmap(const QString &uri)
     {
         m_label->hide();
-        m_pixmap.load(Utils::StyleHelper::dpiSpecificImageFile(uri));
+        m_pixmap.load(StyleHelper::dpiSpecificImageFile(uri));
         layout()->setSizeConstraint(QLayout::SetNoConstraint);
         resize(m_pixmap.size() / m_pixmap.devicePixelRatio());
-        if (QWidget *parent = parentWidget())
-            move(parent->rect().center() - rect().center());
+        QWidget *parent = parentWidget();
+        QPoint pos = parent ? (parent->rect().center() - rect().center()) : QPoint();
+        if (textIndicator && textIndicator->geometry().intersects(QRect(pos, size())))
+            pos.setY(textIndicator->geometry().bottom() + 1);
+        move(pos);
     }
 
     void run(int ms)
@@ -90,15 +96,18 @@ public:
         QTimer::singleShot(ms, this, &FadingIndicatorPrivate::runInternal);
     }
 
+    static QPointer<FadingIndicatorPrivate> textIndicator;
+    static QPointer<FadingIndicatorPrivate> pixmapIndicator;
+
 protected:
-    void paintEvent(QPaintEvent *)
+    void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
         if (!m_pixmap.isNull()) {
             p.drawPixmap(rect(), m_pixmap);
         } else {
-            p.setBrush(palette().color(QPalette::Foreground));
+            p.setBrush(palette().color(QPalette::WindowText));
             p.setPen(Qt::NoPen);
             p.drawRoundedRect(rect(), 15, 15);
         }
@@ -119,13 +128,17 @@ private:
     QPixmap m_pixmap;
 };
 
+QPointer<FadingIndicatorPrivate> FadingIndicatorPrivate::textIndicator;
+QPointer<FadingIndicatorPrivate> FadingIndicatorPrivate::pixmapIndicator;
+
 } // Internal
 
 namespace FadingIndicator {
 
 void showText(QWidget *parent, const QString &text, TextSize size)
 {
-    static QPointer<Internal::FadingIndicatorPrivate> indicator;
+    QPointer<Internal::FadingIndicatorPrivate> &indicator
+        = Internal::FadingIndicatorPrivate::textIndicator;
     if (indicator)
         delete indicator;
     indicator = new Internal::FadingIndicatorPrivate(parent, size);
@@ -135,7 +148,8 @@ void showText(QWidget *parent, const QString &text, TextSize size)
 
 void showPixmap(QWidget *parent, const QString &pixmap)
 {
-    static QPointer<Internal::FadingIndicatorPrivate> indicator;
+    QPointer<Internal::FadingIndicatorPrivate> &indicator
+        = Internal::FadingIndicatorPrivate::pixmapIndicator;
     if (indicator)
         delete indicator;
     indicator = new Internal::FadingIndicatorPrivate(parent, LargeText);

@@ -36,8 +36,6 @@ QT_END_NAMESPACE
 namespace Git {
 namespace Internal {
 
-class GitClient;
-
 class MergeTool : public QObject
 {
     Q_OBJECT
@@ -52,8 +50,8 @@ class MergeTool : public QObject
     };
 
 public:
-    explicit MergeTool(QObject *parent = 0);
-    ~MergeTool();
+    explicit MergeTool(QObject *parent = nullptr);
+    ~MergeTool() override;
     bool start(const QString &workingDirectory, const QStringList &files = QStringList());
 
     enum MergeType {

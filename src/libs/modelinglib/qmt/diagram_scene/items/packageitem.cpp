@@ -32,7 +32,6 @@
 #include "qmt/diagram_scene/parts/contextlabelitem.h"
 #include "qmt/diagram_scene/parts/customiconitem.h"
 #include "qmt/diagram_scene/parts/editabletextitem.h"
-#include "qmt/diagram_scene/parts/relationstarter.h"
 #include "qmt/diagram_scene/parts/stereotypesitem.h"
 #include "qmt/infrastructure/geometryutilities.h"
 #include "qmt/stereotype/stereotypecontroller.h"
@@ -72,7 +71,7 @@ public:
 };
 
 PackageItem::PackageItem(DPackage *package, DiagramSceneModel *diagramSceneModel, QGraphicsItem *parent)
-    : ObjectItem(package, diagramSceneModel, parent)
+    : ObjectItem("package", package, diagramSceneModel, parent)
 {
 }
 
@@ -99,7 +98,7 @@ void PackageItem::update()
     } else if (m_customIcon) {
         m_customIcon->scene()->removeItem(m_customIcon);
         delete m_customIcon;
-        m_customIcon = 0;
+        m_customIcon = nullptr;
     }
 
     // shape
@@ -112,7 +111,7 @@ void PackageItem::update()
     } else if (m_shape) {
         m_shape->scene()->removeItem(m_shape);
         delete m_shape;
-        m_shape = 0;
+        m_shape = nullptr;
     }
 
     // stereotypes
@@ -122,7 +121,7 @@ void PackageItem::update()
     updateNameItem(style);
 
     // context
-    if (showContext()) {
+    if (!suppressTextDisplay() && showContext()) {
         if (!m_contextLabel)
             m_contextLabel = new ContextLabelItem(this);
         m_contextLabel->setFont(style->smallFont());
@@ -131,46 +130,43 @@ void PackageItem::update()
     } else if (m_contextLabel) {
         m_contextLabel->scene()->removeItem(m_contextLabel);
         delete m_contextLabel;
-        m_contextLabel = 0;
+        m_contextLabel = nullptr;
     }
 
     updateSelectionMarker(m_customIcon);
-
-    // relation starters
-    if (isFocusSelected()) {
-        if (!m_relationStarter) {
-            m_relationStarter = new RelationStarter(this, diagramSceneModel(), 0);
-            scene()->addItem(m_relationStarter);
-            m_relationStarter->setZValue(RELATION_STARTER_ZVALUE);
-            m_relationStarter->addArrow(QStringLiteral("dependency"), ArrowItem::ShaftDashed, ArrowItem::HeadOpen);
-        }
-    } else if (m_relationStarter) {
-        scene()->removeItem(m_relationStarter);
-        delete m_relationStarter;
-        m_relationStarter = 0;
-    }
-
+    updateRelationStarter();
     updateAlignmentButtons();
     updateGeometry();
 }
 
 bool PackageItem::intersectShapeWithLine(const QLineF &line, QPointF *intersectionPoint, QLineF *intersectionLine) const
 {
-    QPolygonF polygon;
     if (m_customIcon) {
-        // TODO use customIcon path as shape
-        QRectF rect = object()->rect();
-        rect.translate(object()->pos());
-        polygon << rect.topLeft() << rect.topRight() << rect.bottomRight() << rect.bottomLeft() << rect.topLeft();
-    } else {
-        QRectF rect = object()->rect();
-        rect.translate(object()->pos());
-        ShapeGeometry shape = calcMinimumGeometry();
-        polygon << rect.topLeft() << (rect.topLeft() + QPointF(shape.m_minimumTabSize.width(), 0.0))
-                << (rect.topLeft() + QPointF(shape.m_minimumTabSize.width(), shape.m_minimumTabSize.height()))
-                << rect.topRight() + QPointF(0.0, shape.m_minimumTabSize.height())
-                << rect.bottomRight() << rect.bottomLeft() << rect.topLeft();
+        QList<QPolygonF> polygons = m_customIcon->outline();
+        for (int i = 0; i < polygons.size(); ++i)
+            polygons[i].translate(object()->pos() + object()->rect().topLeft());
+        if (shapeIcon().textAlignment() == qmt::StereotypeIcon::TextalignBelow) {
+            if (nameItem()) {
+                QPolygonF polygon(nameItem()->boundingRect());
+                polygon.translate(object()->pos() + nameItem()->pos());
+                polygons.append(polygon);
+            }
+            if (m_contextLabel) {
+                QPolygonF polygon(m_contextLabel->boundingRect());
+                polygon.translate(object()->pos() + m_contextLabel->pos());
+                polygons.append(polygon);
+            }
+        }
+        return GeometryUtilities::intersect(polygons, line, nullptr, intersectionPoint, intersectionLine);
     }
+    QPolygonF polygon;
+    QRectF rect = object()->rect();
+    rect.translate(object()->pos());
+    ShapeGeometry shape = calcMinimumGeometry();
+    polygon << rect.topLeft() << (rect.topLeft() + QPointF(shape.m_minimumTabSize.width(), 0.0))
+            << (rect.topLeft() + QPointF(shape.m_minimumTabSize.width(), shape.m_minimumTabSize.height()))
+            << rect.topRight() + QPointF(0.0, shape.m_minimumTabSize.height())
+            << rect.bottomRight() << rect.bottomLeft() << rect.topLeft();
     return GeometryUtilities::intersect(polygon, line, intersectionPoint, intersectionLine);
 }
 
@@ -190,34 +186,42 @@ QList<ILatchable::Latch> PackageItem::verticalLatches(ILatchable::Action action,
     return ObjectItem::verticalLatches(action, grabbedItem);
 }
 
-QPointF PackageItem::relationStartPos() const
-{
-    return pos();
-}
-
-void PackageItem::relationDrawn(const QString &id, const QPointF &toScenePos, const QList<QPointF> &intermediatePoints)
-{
-    DElement *targetElement = diagramSceneModel()->findTopmostElement(toScenePos);
-    if (targetElement) {
-        if (id == QStringLiteral("dependency")) {
-            auto dependantObject = dynamic_cast<DObject *>(targetElement);
-            if (dependantObject)
-                diagramSceneModel()->diagramSceneController()->createDependency(object(), dependantObject, intermediatePoints, diagramSceneModel()->diagram());
-        }
-    }
-}
-
 PackageItem::ShapeGeometry PackageItem::calcMinimumGeometry() const
 {
     double width = 0.0;
     double height = 0.0;
-    double tabHeight = 0.0;
-    double tabWidth = 0.0;
 
     if (m_customIcon) {
-        return ShapeGeometry(stereotypeIconMinimumSize(m_customIcon->stereotypeIcon(), CUSTOM_ICON_MINIMUM_AUTO_WIDTH,
-                                                       CUSTOM_ICON_MINIMUM_AUTO_HEIGHT), QSizeF(tabWidth, tabHeight));
+        QSizeF sz = stereotypeIconMinimumSize(m_customIcon->stereotypeIcon(),
+                                              CUSTOM_ICON_MINIMUM_AUTO_WIDTH, CUSTOM_ICON_MINIMUM_AUTO_HEIGHT);
+        if (shapeIcon().textAlignment() != qmt::StereotypeIcon::TextalignTop
+                && shapeIcon().textAlignment() != qmt::StereotypeIcon::TextalignCenter)
+            return ShapeGeometry(sz, QSizeF(0.0, 0.0));
+        width = sz.width();
+        height += BODY_VERT_BORDER;
+        if (CustomIconItem *stereotypeIconItem = this->stereotypeIconItem()) {
+            width = std::max(width, stereotypeIconItem->boundingRect().width());
+            height += stereotypeIconItem->boundingRect().height();
+        }
+        if (StereotypesItem *stereotypesItem = this->stereotypesItem()) {
+            width = std::max(width, stereotypesItem->boundingRect().width());
+            height += stereotypesItem->boundingRect().height();
+        }
+        if (nameItem()) {
+            width = std::max(width, nameItem()->boundingRect().width());
+            height += nameItem()->boundingRect().height();
+        }
+        if (m_contextLabel)
+            height += m_contextLabel->height();
+        height += BODY_VERT_BORDER;
+
+        width = BODY_HORIZ_BORDER + width + BODY_HORIZ_BORDER;
+
+        return ShapeGeometry(GeometryUtilities::ensureMinimumRasterSize(QSizeF(width, height), 2 * RASTER_WIDTH, 2 * RASTER_HEIGHT), QSizeF(0.0, 0.0));
     }
+
+    double tabHeight = 0.0;
+    double tabWidth = 0.0;
     double bodyHeight = 0.0;
     double bodyWidth = 0.0;
 
@@ -294,9 +298,36 @@ void PackageItem::updateGeometry()
     if (m_customIcon) {
         m_customIcon->setPos(left, top);
         m_customIcon->setActualSize(QSizeF(width, height));
-        y += height;
 
-        y += BODY_VERT_BORDER;
+        switch (shapeIcon().textAlignment()) {
+        case qmt::StereotypeIcon::TextalignBelow:
+            y += height + BODY_VERT_BORDER;
+            break;
+        case qmt::StereotypeIcon::TextalignCenter:
+        {
+            double h = 0.0;
+            if (CustomIconItem *stereotypeIconItem = this->stereotypeIconItem())
+                h += stereotypeIconItem->boundingRect().height();
+            if (StereotypesItem *stereotypesItem = this->stereotypesItem())
+                h += stereotypesItem->boundingRect().height();
+            if (nameItem())
+                h += nameItem()->boundingRect().height();
+            if (m_contextLabel)
+                h += m_contextLabel->height();
+            y = top + (height - h) / 2.0;
+            break;
+        }
+        case qmt::StereotypeIcon::TextalignNone:
+            // nothing to do
+            break;
+        case qmt::StereotypeIcon::TextalignTop:
+            y += BODY_VERT_BORDER;
+            break;
+        }
+        if (CustomIconItem *stereotypeIconItem = this->stereotypeIconItem()) {
+            stereotypeIconItem->setPos(right - stereotypeIconItem->boundingRect().width() - BODY_HORIZ_BORDER, y);
+            y += stereotypeIconItem->boundingRect().height();
+        }
         if (StereotypesItem *stereotypesItem = this->stereotypesItem()) {
             stereotypesItem->setPos(-stereotypesItem->boundingRect().width() / 2.0, y);
             y += stereotypesItem->boundingRect().height();
@@ -308,7 +339,6 @@ void PackageItem::updateGeometry()
         if (m_contextLabel) {
             m_contextLabel->resetMaxWidth();
             m_contextLabel->setPos(-m_contextLabel->boundingRect().width() / 2.0, y);
-            y += m_contextLabel->boundingRect().height();
         }
     } else if (m_shape) {
         QPolygonF polygon;
@@ -343,10 +373,7 @@ void PackageItem::updateGeometry()
     }
 
     updateSelectionMarkerGeometry(rect);
-
-    if (m_relationStarter)
-        m_relationStarter->setPos(mapToScene(QPointF(right + 8.0, top)));
-
+    updateRelationStarterGeometry(rect);
     updateAlignmentButtonsGeometry(rect);
     updateDepth();
 }

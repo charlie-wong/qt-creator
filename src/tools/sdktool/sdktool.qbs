@@ -4,15 +4,29 @@ QtcTool {
     name: "sdktool"
 
     Depends { name: "Qt.core" }
-    Depends { name: "Utils" }
     Depends { name: "app_version_header" }
 
-    cpp.defines: base.concat([qbs.targetOS.contains("macos")
+    property string libsDir: path + "/../../libs"
+
+    cpp.defines: base.concat([
+        "UTILS_LIBRARY",
+        qbs.targetOS.contains("macos")
             ? 'DATA_PATH="."'
             : qbs.targetOS.contains("windows") ? 'DATA_PATH="../share/qtcreator"'
-                                               : 'DATA_PATH="../../share/qtcreator"'])
+                                               : 'DATA_PATH="../../share/qtcreator"'
+    ])
+    cpp.dynamicLibraries: {
+        if (qbs.targetOS.contains("windows"))
+            return ["user32", "shell32"]
+    }
+    Properties {
+        condition: qbs.targetOS.contains("macos")
+        cpp.frameworks: ["Foundation"]
+    }
+    cpp.includePaths: base.concat([libsDir])
 
     files: [
+        "addabiflavor.cpp", "addabiflavor.h",
         "addcmakeoperation.cpp", "addcmakeoperation.h",
         "adddebuggeroperation.cpp", "adddebuggeroperation.h",
         "adddeviceoperation.cpp", "adddeviceoperation.h",
@@ -24,6 +38,8 @@ QtcTool {
         "addqtoperation.h",
         "addtoolchainoperation.cpp",
         "addtoolchainoperation.h",
+        "addvalueoperation.cpp",
+        "addvalueoperation.h",
         "findkeyoperation.cpp",
         "findkeyoperation.h",
         "findvalueoperation.cpp",
@@ -47,4 +63,30 @@ QtcTool {
         "settings.cpp",
         "settings.h",
     ]
+
+    Group {
+        name: "Utils"
+        prefix: libsDir + "/utils/"
+        files: [
+            "environment.cpp", "environment.h",
+            "fileutils.cpp", "fileutils.h",
+            "hostosinfo.cpp", "hostosinfo.h",
+            "namevaluedictionary.cpp", "namevaluedictionary.h",
+            "namevalueitem.cpp", "namevalueitem.h",
+            "persistentsettings.cpp", "persistentsettings.h",
+            "qtcassert.cpp", "qtcassert.h",
+            "qtcprocess.cpp", "qtcprocess.h",
+            "savefile.cpp", "savefile.h",
+            "stringutils.cpp"
+        ]
+    }
+    Group {
+        name: "Utils/macOS"
+        condition: qbs.targetOS.contains("macos")
+        prefix: libsDir + "/utils/"
+        files: [
+            "fileutils_mac.h",
+            "fileutils_mac.mm",
+        ]
+    }
 }

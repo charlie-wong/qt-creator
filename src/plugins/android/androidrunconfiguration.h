@@ -27,25 +27,46 @@
 
 #include "android_global.h"
 
-#include <projectexplorer/runconfiguration.h>
+#include "adbcommandswidget.h"
 
-QT_BEGIN_NAMESPACE
-class QToolButton;
-QT_END_NAMESPACE
+#include <projectexplorer/runconfiguration.h>
+#include <projectexplorer/runconfigurationaspects.h>
 
 namespace Android {
+
+class BaseStringListAspect : public ProjectExplorer::ProjectConfigurationAspect
+{
+    Q_OBJECT
+
+public:
+    explicit BaseStringListAspect(const QString &settingsKey = QString(),
+                                  Core::Id id = Core::Id());
+    ~BaseStringListAspect() override;
+
+    void addToLayout(ProjectExplorer::LayoutBuilder &builder) override;
+
+    QStringList value() const;
+    void setValue(const QStringList &val);
+
+    void setLabel(const QString &label);
+
+    void fromMap(const QVariantMap &map) override;
+    void toMap(QVariantMap &map) const override;
+
+signals:
+    void changed();
+
+private:
+    QStringList m_value;
+    QString m_label;
+    QPointer<Android::Internal::AdbCommandsWidget> m_widget; // Owned by RunConfigWidget
+};
 
 class ANDROID_EXPORT AndroidRunConfiguration : public ProjectExplorer::RunConfiguration
 {
     Q_OBJECT
 public:
-    AndroidRunConfiguration(ProjectExplorer::Target *parent, Core::Id id);
-
-    QWidget *createConfigurationWidget() override;
-    Utils::OutputFormatter *createOutputFormatter() const override;
-
-protected:
-    AndroidRunConfiguration(ProjectExplorer::Target *parent, AndroidRunConfiguration *source);
+    explicit AndroidRunConfiguration(ProjectExplorer::Target *target, Core::Id id);
 };
 
 } // namespace Android

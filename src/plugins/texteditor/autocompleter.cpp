@@ -37,11 +37,11 @@ AutoCompleter::AutoCompleter() :
     m_autoInsertBrackets(true),
     m_surroundWithBrackets(true),
     m_autoInsertQuotes(true),
-    m_surroundWithQuotes(true)
+    m_surroundWithQuotes(true),
+    m_overwriteClosingChars(false)
 {}
 
-AutoCompleter::~AutoCompleter()
-{}
+AutoCompleter::~AutoCompleter() = default;
 
 static void countBracket(QChar open, QChar close, QChar c, int *errors, int *stillopen)
 {
@@ -150,6 +150,24 @@ bool AutoCompleter::isQuote(const QString &text)
     return text == QLatin1String("\"") || text == QLatin1String("'");
 }
 
+bool AutoCompleter::isNextBlockIndented(const QTextBlock &currentBlock) const
+{
+    QTextBlock block = currentBlock;
+    int indentation = m_tabSettings.indentationColumn(block.text());
+
+    if (block.next().isValid()) { // not the last block
+        block = block.next();
+        //skip all empty blocks
+        while (block.isValid() && m_tabSettings.onlySpace(block.text()))
+            block = block.next();
+        if (block.isValid()
+                && m_tabSettings.indentationColumn(block.text()) > indentation)
+            return true;
+    }
+
+    return false;
+}
+
 QString AutoCompleter::replaceSelection(QTextCursor &cursor, const QString &textToInsert) const
 {
     if (!cursor.hasSelection())
@@ -173,6 +191,9 @@ QString AutoCompleter::autoComplete(QTextCursor &cursor, const QString &textToIn
 
     QTextDocument *doc = cursor.document();
     const QChar lookAhead = doc->characterAt(cursor.selectionEnd());
+
+    if (m_overwriteClosingChars && (textToInsert == lookAhead))
+        skipChars = true;
 
     int skippedChars = 0;
 
@@ -273,8 +294,7 @@ bool AutoCompleter::autoBackspace(QTextCursor &cursor)
     return false;
 }
 
-int AutoCompleter::paragraphSeparatorAboutToBeInserted(QTextCursor &cursor,
-                                                       const TabSettings &tabSettings)
+int AutoCompleter::paragraphSeparatorAboutToBeInserted(QTextCursor &cursor)
 {
     if (!m_autoInsertBrackets)
         return 0;
@@ -302,17 +322,8 @@ int AutoCompleter::paragraphSeparatorAboutToBeInserted(QTextCursor &cursor,
             if (condition) {|
                 statement;
     */
-    int indentation = tabSettings.indentationColumn(block.text());
-
-    if (block.next().isValid()) { // not the last block
-        block = block.next();
-        //skip all empty blocks
-        while (block.isValid() && tabSettings.onlySpace(block.text()))
-            block = block.next();
-        if (block.isValid()
-                && tabSettings.indentationColumn(block.text()) > indentation)
-            return 0;
-    }
+    if (isNextBlockIndented(block))
+        return 0;
 
     const QString &textToInsert = insertParagraphSeparator(cursor);
     int pos = cursor.position();
@@ -331,15 +342,15 @@ int AutoCompleter::paragraphSeparatorAboutToBeInserted(QTextCursor &cursor,
 bool AutoCompleter::contextAllowsAutoBrackets(const QTextCursor &cursor,
                                               const QString &textToInsert) const
 {
-    Q_UNUSED(cursor);
-    Q_UNUSED(textToInsert);
+    Q_UNUSED(cursor)
+    Q_UNUSED(textToInsert)
     return false;
 }
 
 bool AutoCompleter::contextAllowsAutoQuotes(const QTextCursor &cursor, const QString &textToInsert) const
 {
-    Q_UNUSED(cursor);
-    Q_UNUSED(textToInsert);
+    Q_UNUSED(cursor)
+    Q_UNUSED(textToInsert)
     return false;
 }
 
@@ -350,13 +361,13 @@ bool AutoCompleter::contextAllowsElectricCharacters(const QTextCursor &cursor) c
 
 bool AutoCompleter::isInComment(const QTextCursor &cursor) const
 {
-    Q_UNUSED(cursor);
+    Q_UNUSED(cursor)
     return false;
 }
 
 bool AutoCompleter::isInString(const QTextCursor &cursor) const
 {
-    Q_UNUSED(cursor);
+    Q_UNUSED(cursor)
     return false;
 }
 
@@ -366,11 +377,11 @@ QString AutoCompleter::insertMatchingBrace(const QTextCursor &cursor,
                                            bool skipChars,
                                            int *skippedChars) const
 {
-    Q_UNUSED(cursor);
-    Q_UNUSED(text);
-    Q_UNUSED(lookAhead);
-    Q_UNUSED(skipChars);
-    Q_UNUSED(skippedChars);
+    Q_UNUSED(cursor)
+    Q_UNUSED(text)
+    Q_UNUSED(lookAhead)
+    Q_UNUSED(skipChars)
+    Q_UNUSED(skippedChars)
     return QString();
 }
 
@@ -380,16 +391,16 @@ QString AutoCompleter::insertMatchingQuote(const QTextCursor &cursor,
                                            bool skipChars,
                                            int *skippedChars) const
 {
-    Q_UNUSED(cursor);
-    Q_UNUSED(text);
-    Q_UNUSED(lookAhead);
-    Q_UNUSED(skipChars);
-    Q_UNUSED(skippedChars);
+    Q_UNUSED(cursor)
+    Q_UNUSED(text)
+    Q_UNUSED(lookAhead)
+    Q_UNUSED(skipChars)
+    Q_UNUSED(skippedChars)
     return QString();
 }
 
 QString AutoCompleter::insertParagraphSeparator(const QTextCursor &cursor) const
 {
-    Q_UNUSED(cursor);
+    Q_UNUSED(cursor)
     return QString();
 }

@@ -24,20 +24,17 @@
 ****************************************************************************/
 
 #include "cmakefilecompletionassist.h"
-#include "cmakeprojectconstants.h"
-#include "cmakeprojectmanager.h"
-#include "cmakesettingspage.h"
-#include "cmaketoolmanager.h"
+
 #include "cmakekitinformation.h"
+#include "cmakeprojectconstants.h"
+#include "cmaketool.h"
 
 #include <texteditor/codeassist/assistinterface.h>
-#include <projectexplorer/projecttree.h>
 #include <projectexplorer/project.h>
-#include <projectexplorer/kit.h>
+#include <projectexplorer/session.h>
 #include <projectexplorer/target.h>
 
-#include <coreplugin/editormanager/editormanager.h>
-#include <projectexplorer/session.h>
+#include <QFileInfo>
 
 using namespace CMakeProjectManager::Internal;
 using namespace TextEditor;
@@ -46,11 +43,6 @@ using namespace ProjectExplorer;
 // -------------------------------
 // CMakeFileCompletionAssistProvider
 // -------------------------------
-
-bool CMakeFileCompletionAssistProvider::supportsEditor(Core::Id editorId) const
-{
-    return editorId == CMakeProjectManager::Constants::CMAKE_EDITOR_ID;
-}
 
 IAssistProcessor *CMakeFileCompletionAssistProvider::createProcessor() const
 {
@@ -61,6 +53,7 @@ CMakeFileCompletionAssist::CMakeFileCompletionAssist() :
     KeywordsCompletionAssistProcessor(Keywords())
 {
     setSnippetGroup(Constants::CMAKE_SNIPPETS_GROUP_ID);
+    setDynamicCompletionFunction(&TextEditor::pathComplete);
 }
 
 IAssistProposal *CMakeFileCompletionAssist::perform(const AssistInterface *interface)
@@ -68,9 +61,9 @@ IAssistProposal *CMakeFileCompletionAssist::perform(const AssistInterface *inter
     Keywords kw;
     QString fileName = interface->fileName();
     if (!fileName.isEmpty() && QFileInfo(fileName).isFile()) {
-        Project *p = SessionManager::projectForFile(Utils::FileName::fromString(fileName));
+        Project *p = SessionManager::projectForFile(Utils::FilePath::fromString(fileName));
         if (p && p->activeTarget()) {
-            CMakeTool *cmake = CMakeKitInformation::cmakeTool(p->activeTarget()->kit());
+            CMakeTool *cmake = CMakeKitAspect::cmakeTool(p->activeTarget()->kit());
             if (cmake && cmake->isValid())
                 kw = cmake->keywords();
         }

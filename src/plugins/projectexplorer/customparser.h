@@ -81,22 +81,21 @@ public:
     CustomParserExpression warning;
 };
 
-class CustomParser : public ProjectExplorer::IOutputParser
+class CustomParser : public ProjectExplorer::OutputTaskParser
 {
 public:
     CustomParser(const CustomParserSettings &settings = CustomParserSettings());
-
-    void stdError(const QString &line) override;
-    void stdOutput(const QString &line) override;
 
     void setSettings(const CustomParserSettings &settings);
 
     static Core::Id id();
 
 private:
-    bool hasMatch(const QString &line, CustomParserExpression::CustomParserChannel channel,
-                  const CustomParserExpression &expression, Task::TaskType taskType);
-    bool parseLine(const QString &rawLine, CustomParserExpression::CustomParserChannel channel);
+    Result handleLine(const QString &line, Utils::OutputFormat type) override;
+
+    Result hasMatch(const QString &line, CustomParserExpression::CustomParserChannel channel,
+                    const CustomParserExpression &expression, Task::TaskType taskType);
+    Result parseLine(const QString &rawLine, CustomParserExpression::CustomParserChannel channel);
 
     CustomParserExpression m_error;
     CustomParserExpression m_warning;

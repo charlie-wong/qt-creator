@@ -27,7 +27,6 @@
 
 #include "topicchooser.h"
 
-#include <centralwidget.h>
 #include <helpviewer.h>
 #include <localhelpmanager.h>
 #include <openpagesmanager.h>
@@ -47,6 +46,11 @@
 
 #include <QHelpEngine>
 #include <QHelpIndexModel>
+
+#ifdef HELP_NEW_FILTER_ENGINE
+#include <QHelpLink>
+#endif
+
 
 using namespace Help::Internal;
 
@@ -69,14 +73,14 @@ IndexWindow::IndexWindow()
     QLabel *l = new QLabel(tr("&Look for:"));
     l->setBuddy(m_searchLineEdit);
     layout->addWidget(l);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
     Utils::StyledBar *toolbar = new Utils::StyledBar(this);
     toolbar->setSingleRow(false);
     QLayout *tbLayout = new QHBoxLayout();
     tbLayout->setSpacing(6);
-    tbLayout->setMargin(4);
+    tbLayout->setContentsMargins(4, 4, 4, 4);
     tbLayout->addWidget(l);
     tbLayout->addWidget(m_searchLineEdit);
     toolbar->setLayout(tbLayout);
@@ -196,14 +200,17 @@ void IndexWindow::disableSearchLineEdit()
 
 void IndexWindow::open(const QModelIndex &index, bool newPage)
 {
-    QString keyword = m_filteredIndexModel->data(index, Qt::DisplayRole).toString();
-    QMap<QString, QUrl> links = LocalHelpManager::helpEngine().indexModel()->linksForKeyword(keyword);
+    const QString keyword = m_filteredIndexModel->data(index, Qt::DisplayRole).toString();
+#ifndef HELP_NEW_FILTER_ENGINE
+    QMultiMap<QString, QUrl> links = LocalHelpManager::helpEngine().linksForKeyword(keyword);
+#else
+    QMultiMap<QString, QUrl> links;
+    const QList<QHelpLink> docs = LocalHelpManager::helpEngine().documentsForKeyword(keyword);
+    for (const auto doc : docs)
+        links.insert(doc.title, doc.url);
 
-    if (links.size() == 1) {
-        emit linkActivated(links.first(), newPage);
-    } else if (links.size() > 1) {
-        emit linksActivated(links, keyword, newPage);
-    }
+#endif
+    emit linksActivated(links, keyword, newPage);
 }
 
 Qt::DropActions IndexFilterModel::supportedDragActions() const

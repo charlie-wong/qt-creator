@@ -51,19 +51,19 @@ class CppSourceProcessor: public CPlusPlus::Client
     Q_DISABLE_COPY(CppSourceProcessor)
 
 public:
-    typedef std::function<void (const CPlusPlus::Document::Ptr &)> DocumentCallback;
+    using DocumentCallback = std::function<void (const CPlusPlus::Document::Ptr &)>;
 
 public:
     static QString cleanPath(const QString &path);
 
     CppSourceProcessor(const CPlusPlus::Snapshot &snapshot, DocumentCallback documentFinished);
-    ~CppSourceProcessor();
+    ~CppSourceProcessor() override;
 
     using CancelChecker = std::function<bool()>;
     void setCancelChecker(const CancelChecker &cancelChecker);
 
     void setWorkingCopy(const CppTools::WorkingCopy &workingCopy);
-    void setHeaderPaths(const ProjectPartHeaderPaths &headerPaths);
+    void setHeaderPaths(const ProjectExplorer::HeaderPaths &headerPaths);
     void setLanguageFeatures(CPlusPlus::LanguageFeatures languageFeatures);
     void setFileSizeLimitInMb(int fileSizeLimitInMb);
     void setTodo(const QSet<QString> &files);
@@ -78,7 +78,7 @@ public:
     void setGlobalSnapshot(const CPlusPlus::Snapshot &snapshot) { m_globalSnapshot = snapshot; }
 
 private:
-    void addFrameworkPath(const ProjectPartHeaderPath &frameworkPath);
+    void addFrameworkPath(const ProjectExplorer::HeaderPath &frameworkPath);
 
     CPlusPlus::Document::Ptr switchCurrentDocument(CPlusPlus::Document::Ptr doc);
 
@@ -87,26 +87,26 @@ private:
     bool checkFile(const QString &absoluteFilePath) const;
     QString resolveFile(const QString &fileName, IncludeType type);
     QString resolveFile_helper(const QString &fileName,
-                               ProjectPartHeaderPaths::Iterator headerPathsIt);
+                               ProjectExplorer::HeaderPaths::Iterator headerPathsIt);
 
     void mergeEnvironment(CPlusPlus::Document::Ptr doc);
 
     // Client interface
     void macroAdded(const CPlusPlus::Macro &macro) override;
-    void passedMacroDefinitionCheck(unsigned bytesOffset, unsigned utf16charsOffset,
-                                    unsigned line, const CPlusPlus::Macro &macro) override;
-    void failedMacroDefinitionCheck(unsigned bytesOffset, unsigned utf16charOffset,
+    void passedMacroDefinitionCheck(int bytesOffset, int utf16charsOffset,
+                                    int line, const CPlusPlus::Macro &macro) override;
+    void failedMacroDefinitionCheck(int bytesOffset, int utf16charOffset,
                                     const CPlusPlus::ByteArrayRef &name) override;
-    void notifyMacroReference(unsigned bytesOffset, unsigned utf16charOffset,
-                              unsigned line, const CPlusPlus::Macro &macro) override;
-    void startExpandingMacro(unsigned bytesOffset, unsigned utf16charOffset,
-                             unsigned line, const CPlusPlus::Macro &macro,
+    void notifyMacroReference(int bytesOffset, int utf16charOffset,
+                              int line, const CPlusPlus::Macro &macro) override;
+    void startExpandingMacro(int bytesOffset, int utf16charOffset,
+                             int line, const CPlusPlus::Macro &macro,
                              const QVector<CPlusPlus::MacroArgumentReference> &actuals) override;
-    void stopExpandingMacro(unsigned bytesOffset, const CPlusPlus::Macro &macro) override;
+    void stopExpandingMacro(int bytesOffset, const CPlusPlus::Macro &macro) override;
     void markAsIncludeGuard(const QByteArray &macroName) override;
-    void startSkippingBlocks(unsigned utf16charsOffset) override;
-    void stopSkippingBlocks(unsigned utf16charsOffset) override;
-    void sourceNeeded(unsigned line, const QString &fileName, IncludeType type,
+    void startSkippingBlocks(int utf16charsOffset) override;
+    void stopSkippingBlocks(int utf16charsOffset) override;
+    void sourceNeeded(int line, const QString &fileName, IncludeType type,
                       const QStringList &initialIncludes) override;
 
 private:
@@ -115,7 +115,7 @@ private:
     DocumentCallback m_documentFinished;
     CPlusPlus::Environment m_env;
     CPlusPlus::Preprocessor m_preprocess;
-    ProjectPartHeaderPaths m_headerPaths;
+    ProjectExplorer::HeaderPaths m_headerPaths;
     CPlusPlus::LanguageFeatures m_languageFeatures;
     CppTools::WorkingCopy m_workingCopy;
     QSet<QString> m_included;

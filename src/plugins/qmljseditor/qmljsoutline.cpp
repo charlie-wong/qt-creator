@@ -47,7 +47,6 @@ enum {
 namespace QmlJSEditor {
 namespace Internal {
 
-
 QmlJSOutlineFilterModel::QmlJSOutlineFilterModel(QObject *parent) :
     QSortFilterProxyModel(parent)
 {
@@ -104,9 +103,9 @@ QmlJSOutlineWidget::QmlJSOutlineWidget(QWidget *parent)
     m_treeView->setModel(m_filterModel);
     setFocusProxy(m_treeView);
 
-    QVBoxLayout *layout = new QVBoxLayout;
+    auto layout = new QVBoxLayout;
 
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(Core::ItemViewFind::createSearchableWrapper(m_treeView));
 
@@ -125,6 +124,14 @@ void QmlJSOutlineWidget::setEditor(QmlJSEditorWidget *editor)
 
     m_filterModel->setSourceModel(m_editor->qmlJsEditorDocument()->outlineModel());
     m_treeView->expandAll();
+    connect(m_editor->qmlJsEditorDocument()->outlineModel(), &QAbstractItemModel::modelAboutToBeReset, m_treeView, [this]() {
+        if (m_treeView->selectionModel())
+            m_treeView->selectionModel()->blockSignals(true);
+    });
+    connect(m_editor->qmlJsEditorDocument()->outlineModel(), &QAbstractItemModel::modelReset, m_treeView, [this]() {
+        if (m_treeView->selectionModel())
+            m_treeView->selectionModel()->blockSignals(false);
+    });
 
     connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &QmlJSOutlineWidget::updateSelectionInText);
@@ -195,29 +202,34 @@ void QmlJSOutlineWidget::updateSelectionInText(const QItemSelection &selection)
 
 void QmlJSOutlineWidget::updateTextCursor(const QModelIndex &index)
 {
-    if (!m_editor->isOutlineCursorChangesBlocked()) {
-        QModelIndex sourceIndex = m_filterModel->mapToSource(index);
-        AST::SourceLocation location
-                = m_editor->qmlJsEditorDocument()->outlineModel()->sourceLocation(sourceIndex);
+    const auto update = [this](const QModelIndex &index) {
+        if (!m_editor->isOutlineCursorChangesBlocked()) {
+            QModelIndex sourceIndex = m_filterModel->mapToSource(index);
 
-        if (!location.isValid())
-            return;
+            SourceLocation location
+                    = m_editor->qmlJsEditorDocument()->outlineModel()->sourceLocation(sourceIndex);
 
-        const QTextBlock lastBlock = m_editor->document()->lastBlock();
-        const uint textLength = lastBlock.position() + lastBlock.length();
-        if (location.offset >= textLength)
-            return;
+            if (!location.isValid())
+                return;
 
-        Core::EditorManager::cutForwardNavigationHistory();
-        Core::EditorManager::addCurrentPositionToNavigationHistory();
+            const QTextBlock lastBlock = m_editor->document()->lastBlock();
+            const uint textLength = lastBlock.position() + lastBlock.length();
+            if (location.offset >= textLength)
+                return;
 
-        QTextCursor textCursor = m_editor->textCursor();
-        m_blockCursorSync = true;
-        textCursor.setPosition(location.offset);
-        m_editor->setTextCursor(textCursor);
-        m_editor->centerCursor();
-        m_blockCursorSync = false;
-    }
+            Core::EditorManager::cutForwardNavigationHistory();
+            Core::EditorManager::addCurrentPositionToNavigationHistory();
+
+            QTextCursor textCursor = m_editor->textCursor();
+
+            textCursor.setPosition(location.offset);
+            m_editor->setTextCursor(textCursor);
+            m_editor->centerCursor();
+        }
+    };
+    m_blockCursorSync = true;
+    update(index);
+    m_blockCursorSync = false;
 }
 
 void QmlJSOutlineWidget::focusEditor()
@@ -246,10 +258,10 @@ bool QmlJSOutlineWidgetFactory::supportsEditor(Core::IEditor *editor) const
 
 TextEditor::IOutlineWidget *QmlJSOutlineWidgetFactory::createWidget(Core::IEditor *editor)
 {
-    QmlJSOutlineWidget *widget = new QmlJSOutlineWidget;
+    auto widget = new QmlJSOutlineWidget;
 
-    QmlJSEditor *qmlJSEditable = qobject_cast<QmlJSEditor*>(editor);
-    QmlJSEditorWidget *qmlJSEditor = qobject_cast<QmlJSEditorWidget*>(qmlJSEditable->widget());
+    auto qmlJSEditable = qobject_cast<const QmlJSEditor*>(editor);
+    auto qmlJSEditor = qobject_cast<QmlJSEditorWidget*>(qmlJSEditable->widget());
     Q_ASSERT(qmlJSEditor);
 
     widget->setEditor(qmlJSEditor);

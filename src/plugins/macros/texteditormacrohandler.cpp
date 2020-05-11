@@ -53,8 +53,7 @@ static quint8 AUTOREP = 4;
 static quint8 COUNT = 5;
 
 
-TextEditorMacroHandler::TextEditorMacroHandler():
-    IMacroHandler()
+TextEditorMacroHandler::TextEditorMacroHandler()
 {
     Core::EditorManager *editorManager = Core::EditorManager::instance();
     connect(editorManager, &Core::EditorManager::currentEditorChanged,
@@ -111,7 +110,7 @@ bool TextEditorMacroHandler::eventFilter(QObject *watched, QEvent *event)
         return false;
 
     if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
-        QKeyEvent *keyEvent = dynamic_cast<QKeyEvent *>(event);
+        auto keyEvent = dynamic_cast<QKeyEvent *>(event);
         MacroEvent e;
         e.setId(KEYEVENTNAME);
         e.setValue(TEXT, keyEvent->text());
@@ -137,8 +136,8 @@ void TextEditorMacroHandler::changeEditor(Core::IEditor *editor)
 
 void TextEditorMacroHandler::closeEditor(Core::IEditor *editor)
 {
-    Q_UNUSED(editor);
+    Q_UNUSED(editor)
     if (isRecording() && m_currentEditor && m_currentEditor->widget())
         m_currentEditor->widget()->removeEventFilter(this);
-    m_currentEditor = 0;
+    m_currentEditor = nullptr;
 }

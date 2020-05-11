@@ -30,7 +30,6 @@
 #include "debuggercore.h"
 #include "debuggerengine.h"
 #include "debuggerinternalconstants.h"
-#include "debuggerstartparameters.h"
 #include "disassemblerlines.h"
 #include "sourceutils.h"
 
@@ -45,6 +44,7 @@
 
 #include <utils/mimetypes/mimedatabase.h>
 #include <utils/qtcassert.h>
+#include <utils/savedaction.h>
 
 #include <QTextBlock>
 #include <QDir>
@@ -66,14 +66,19 @@ class DisassemblerBreakpointMarker : public TextMark
 {
 public:
     DisassemblerBreakpointMarker(const Breakpoint &bp, int lineNumber)
-        : TextMark(QString(), lineNumber, Constants::TEXT_MARK_CATEGORY_BREAKPOINT), m_bp(bp)
+        : TextMark(Utils::FilePath(), lineNumber, Constants::TEXT_MARK_CATEGORY_BREAKPOINT), m_bp(bp)
     {
-        setIcon(bp.icon());
+        setIcon(bp->icon());
         setPriority(TextMark::NormalPriority);
     }
 
-    bool isClickable() const { return true; }
-    void clicked() { m_bp.removeBreakpoint(); }
+    bool isClickable() const final { return true; }
+
+    void clicked() final
+    {
+        QTC_ASSERT(m_bp, return);
+        m_bp->deleteGlobalOrThisBreakpoint();
+    }
 
 public:
     Breakpoint m_bp;
@@ -88,24 +93,24 @@ public:
 class FrameKey
 {
 public:
-    FrameKey() : startAddress(0), endAddress(0) {}
+    FrameKey() = default;
     inline bool matches(const Location &loc) const;
 
     QString functionName;
     QString fileName;
-    quint64 startAddress;
-    quint64 endAddress;
+    quint64 startAddress = 0;
+    quint64 endAddress = 0;
 };
 
 bool FrameKey::matches(const Location &loc) const
 {
     return loc.address() >= startAddress
             && loc.address() <= endAddress
-            && loc.fileName() == fileName
+            && loc.fileName().toString() == fileName
             && loc.functionName() == functionName;
 }
 
-typedef QPair<FrameKey, DisassemblerLines> CacheEntry;
+using CacheEntry = QPair<FrameKey, DisassemblerLines>;
 
 
 ///////////////////////////////////////////////////////////////////////
@@ -134,17 +139,17 @@ public:
 };
 
 DisassemblerAgentPrivate::DisassemblerAgentPrivate(DebuggerEngine *engine)
-  : document(0),
+  : document(nullptr),
     engine(engine),
-    locationMark(engine, QString(), 0),
+    locationMark(engine, Utils::FilePath(), 0),
     mimeType("text/x-qtcreator-generic-asm"),
     resetLocationScheduled(false)
 {}
 
 DisassemblerAgentPrivate::~DisassemblerAgentPrivate()
 {
-    EditorManager::closeDocuments(QList<IDocument *>() << document);
-    document = 0;
+    EditorManager::closeDocuments({document});
+    document = nullptr;
     qDeleteAll(breakpointMarks);
 }
 
@@ -175,12 +180,15 @@ int DisassemblerAgentPrivate::lineForAddress(quint64 address) const
 
 DisassemblerAgent::DisassemblerAgent(DebuggerEngine *engine)
     : d(new DisassemblerAgentPrivate(engine))
-{}
+{
+    connect(action(IntelFlavor), &Utils::SavedAction::valueChanged,
+            this, &DisassemblerAgent::reload);
+}
 
 DisassemblerAgent::~DisassemblerAgent()
 {
     delete d;
-    d = 0;
+    d = nullptr;
 }
 
 int DisassemblerAgent::indexOf(const Location &loc) const
@@ -230,8 +238,8 @@ void DisassemblerAgent::setLocation(const Location &loc)
         // Refresh when not displaying a function and there is not sufficient
         // context left past the address.
         if (d->cache.at(index).first.endAddress - loc.address() < 24) {
-            index = -1;
             d->cache.removeAt(index);
+            index = -1;
         }
     }
     if (index != -1) {
@@ -240,7 +248,7 @@ void DisassemblerAgent::setLocation(const Location &loc)
             QString("Using cached disassembly for 0x%1 (0x%2-0x%3) in \"%4\"/ \"%5\"")
                 .arg(loc.address(), 0, 16)
                 .arg(key.startAddress, 0, 16).arg(key.endAddress, 0, 16)
-                .arg(loc.functionName(), QDir::toNativeSeparators(loc.fileName()));
+                .arg(loc.functionName(), loc.fileName().toUserOutput());
         d->engine->showMessage(msg);
         setContentsToDocument(d->cache.at(index).second);
         d->resetLocationScheduled = false; // In case reset from previous run still pending.
@@ -258,7 +266,7 @@ void DisassemblerAgentPrivate::configureMimeType()
     Utils::MimeType mtype = Utils::mimeTypeForName(mimeType);
     if (mtype.isValid()) {
         foreach (IEditor *editor, DocumentModel::editorsForDocument(document))
-            if (TextEditorWidget *widget = qobject_cast<TextEditorWidget *>(editor->widget()))
+            if (auto widget = TextEditorWidget::fromEditor(editor))
                 widget->configureGenericHighlighter();
     } else {
         qWarning("Assembler mimetype '%s' not found.", qPrintable(mimeType));
@@ -287,7 +295,7 @@ void DisassemblerAgent::setContents(const DisassemblerLines &contents)
         const quint64 endAddress = contents.endAddress();
         if (startAddress) {
             FrameKey key;
-            key.fileName = d->location.fileName();
+            key.fileName = d->location.fileName().toString();
             key.functionName = d->location.functionName();
             key.startAddress = startAddress;
             key.endAddress = endAddress;
@@ -301,12 +309,12 @@ void DisassemblerAgent::setContentsToDocument(const DisassemblerLines &contents)
 {
     QTC_ASSERT(d, return);
     if (!d->document) {
-        QString titlePattern = QLatin1String("Disassembler");
+        QString titlePattern = "Disassembler";
         IEditor *editor = EditorManager::openEditorWithContents(
                 Core::Constants::K_DEFAULT_TEXT_EDITOR_ID,
                 &titlePattern);
         QTC_ASSERT(editor, return);
-        if (TextEditorWidget *widget = qobject_cast<TextEditorWidget *>(editor->widget())) {
+        if (auto widget = TextEditorWidget::fromEditor(editor)) {
             widget->setReadOnly(true);
             widget->setRequestMarkEnabled(true);
         }
@@ -317,7 +325,7 @@ void DisassemblerAgent::setContentsToDocument(const DisassemblerLines &contents)
         // Make that a proper TextDocument reimplementation.
         d->document->setProperty(Debugger::Constants::OPENED_BY_DEBUGGER, true);
         d->document->setProperty(Debugger::Constants::OPENED_WITH_DISASSEMBLY, true);
-        d->document->setProperty(Debugger::Constants::DISASSEMBLER_SOURCE_FILE, d->location.fileName());
+        d->document->setProperty(Debugger::Constants::DISASSEMBLER_SOURCE_FILE, d->location.fileName().toString());
         d->configureMimeType();
     } else {
         EditorManager::activateEditorForDocument(d->document);
@@ -328,8 +336,8 @@ void DisassemblerAgent::setContentsToDocument(const DisassemblerLines &contents)
     d->document->setPreferredDisplayName(QString("Disassembler (%1)")
         .arg(d->location.functionName()));
 
-    Breakpoints bps = breakHandler()->engineBreakpoints(d->engine);
-    foreach (Breakpoint bp, bps)
+    const Breakpoints bps = d->engine->breakHandler()->breakpoints();
+    for (const Breakpoint bp : bps)
         updateBreakpointMarker(bp);
 
     updateLocationMarker();
@@ -337,7 +345,9 @@ void DisassemblerAgent::setContentsToDocument(const DisassemblerLines &contents)
 
 void DisassemblerAgent::updateLocationMarker()
 {
-    QTC_ASSERT(d->document, return);
+    if (!d->document)
+        return;
+
     int lineNumber = d->lineForAddress(d->location.address());
     if (d->location.needsMarker()) {
         d->document->removeMark(&d->locationMark);
@@ -345,9 +355,11 @@ void DisassemblerAgent::updateLocationMarker()
         d->document->addMark(&d->locationMark);
     }
 
+    d->locationMark.updateIcon();
+
     // Center cursor.
     if (EditorManager::currentDocument() == d->document)
-        if (BaseTextEditor *textEditor = qobject_cast<BaseTextEditor *>(EditorManager::currentEditor()))
+        if (auto textEditor = qobject_cast<BaseTextEditor *>(EditorManager::currentEditor()))
             textEditor->gotoLine(lineNumber);
 }
 
@@ -356,9 +368,8 @@ void DisassemblerAgent::removeBreakpointMarker(const Breakpoint &bp)
     if (!d->document)
         return;
 
-    BreakpointModelId id = bp.id();
-    foreach (DisassemblerBreakpointMarker *marker, d->breakpointMarks) {
-        if (marker->m_bp.id() == id) {
+    for (DisassemblerBreakpointMarker *marker : d->breakpointMarks) {
+        if (marker->m_bp == bp) {
             d->breakpointMarks.removeOne(marker);
             d->document->removeMark(marker);
             delete marker;
@@ -370,7 +381,7 @@ void DisassemblerAgent::removeBreakpointMarker(const Breakpoint &bp)
 void DisassemblerAgent::updateBreakpointMarker(const Breakpoint &bp)
 {
     removeBreakpointMarker(bp);
-    const quint64 address = bp.response().address;
+    const quint64 address = bp->address();
     if (!address)
         return;
 
@@ -381,7 +392,7 @@ void DisassemblerAgent::updateBreakpointMarker(const Breakpoint &bp)
     // HACK: If it's a FileAndLine breakpoint, and there's a source line
     // above, move the marker up there. That allows setting and removing
     // normal breakpoints from within the disassembler view.
-    if (bp.type() == BreakpointByFileAndLine) {
+    if (bp->type() == BreakpointByFileAndLine) {
         ContextData context = getLocationContext(d->document, lineNumber - 1);
         if (context.type == LocationByFile)
             --lineNumber;
@@ -389,6 +400,7 @@ void DisassemblerAgent::updateBreakpointMarker(const Breakpoint &bp)
 
     auto marker = new DisassemblerBreakpointMarker(bp, lineNumber);
     d->breakpointMarks.append(marker);
+    QTC_ASSERT(d->document, return);
     d->document->addMark(marker);
 }
 

@@ -27,6 +27,8 @@
 
 #include <coreplugin/core_global.h>
 
+#include <utils/fileutils.h>
+
 #include <QDialog>
 
 namespace Core {
@@ -57,22 +59,22 @@ public:
         RO_SaveAs = SaveAs
     };
 
-    explicit ReadOnlyFilesDialog(const QList<QString> &fileNames,
-                                 QWidget *parent = 0);
-    explicit ReadOnlyFilesDialog(const QString &fileName,
-                                 QWidget * parent = 0);
+    explicit ReadOnlyFilesDialog(const Utils::FilePaths &filePaths,
+                                 QWidget *parent = nullptr);
+    explicit ReadOnlyFilesDialog(const Utils::FilePath &filePath,
+                                 QWidget * parent = nullptr);
     explicit ReadOnlyFilesDialog(IDocument *document,
-                                 QWidget * parent = 0,
+                                 QWidget * parent = nullptr,
                                  bool displaySaveAs = false);
     explicit ReadOnlyFilesDialog(const QList<IDocument *> &documents,
-                                 QWidget * parent = 0);
+                                 QWidget * parent = nullptr);
 
-    ~ReadOnlyFilesDialog();
+    ~ReadOnlyFilesDialog() override;
 
     void setMessage(const QString &message);
     void setShowFailWarning(bool show, const QString &warning = QString());
 
-    int exec();
+    int exec() override;
 
 private:
     friend class Internal::ReadOnlyFilesDialogPrivate;

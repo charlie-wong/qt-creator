@@ -3,22 +3,60 @@ ThemeName=Flat
 PreferredStyles=
 
 [Palette]
-shadowBackground=ff404244
+shadowBackground=ff404142
 text=ff000000
 textDisabled=55000000
-toolBarItem=b6fbfdff
-toolBarItemDisabled=60a4a6a8
+toolBarItem=bcfbfdff
+toolBarItemDisabled=56a5a6a7
 fancyBarsNormalTextColor=ffffffff
 fancyBarsBoldTextColor=b6fbfdff
-hoverBackground=22ffffff
-selectedBackground=66000000
+hoverBackground=28ffffff
+selectedBackground=7a000000
 normalBackground=ffffffff
 alternateBackground=ff515151
 error=ffdf4f4f
 warning=ffecbc1c
 splitter=ff313131
+qmlDesignerButtonColor=ff4c4e50
 
 [Colors]
+
+;DS controls theme START
+DScontrolBackground=ff404040
+DScontrolOutline=ff595959
+DStextColor=ffffffff
+DSdisabledTextColor=ff909090
+DSpanelBackground=ff454444
+DShoverHighlight=ff313131
+DScolumnBackground=ff363636
+DSfocusEdit=ff444444
+DSfocusDrag=ff565656
+DScontrolBackgroundPressed=ff7a7a7a
+DScontrolBackgroundChecked=ff565656
+DSinteraction=ff3f91c4
+DSsliderActiveTrack=ff7a7a7a
+DSsliderInactiveTrack=ff4d4d4d
+DSsliderHandle=ff505050
+DSsliderActiveTrackHover=ff7f7f7f
+DSsliderInactiveTrackHover=ff505050
+DSsliderHandleHover=ff7a7a7a
+DSsliderActiveTrackFocus=ffaaaaaa
+DSsliderInactiveTrackFocus=ff7a7a7a
+DSsliderHandleFocus=ff3f91c4
+DSerrorColor=ffdf3a3a
+DScontrolBackgroundDisabled=ff363636
+DScontrolOutlineDisabled=ff4d4d4d
+DStextColorDisabled=ff7a7a7a
+DStextSelectionColor=ff3f91c4
+DStextSelectedTextColor=ffffffff
+DSscrollBarTrack=ff4d4d4d
+DSscrollBarHandle=ff505050
+DScontrolBackgroundInteraction=ff4d4d4d
+DStranslationIndicatorBorder=ff7f7f7f
+DSsectionHeadBackground=ff424242
+DSchangedStateText=ff99ccff
+;DS controls theme END
+
 BackgroundColorAlternate=alternateBackground
 BackgroundColorDark=shadowBackground
 BackgroundColorHover=hoverBackground
@@ -47,6 +85,7 @@ DoubleTabWidget2ndTabInactiveTextColor=ff000000
 EditorPlaceholderColor=ffdddddd
 FancyToolBarSeparatorColor=toolBarItemDisabled
 FancyTabBarBackgroundColor=shadowBackground
+FancyTabBarSelectedBackgroundColor=selectedBackground
 FancyTabWidgetDisabledSelectedTextColor=toolBarItemDisabled
 FancyTabWidgetDisabledUnselectedTextColor=toolBarItemDisabled
 FancyTabWidgetEnabledSelectedTextColor=fancyBarsBoldTextColor
@@ -104,7 +143,7 @@ MiniProjectTargetSelectorBorderColor=shadowBackground
 MiniProjectTargetSelectorSummaryBackgroundColor=shadowBackground
 MiniProjectTargetSelectorTextColor=fancyBarsNormalTextColor
 PanelStatusBarBackgroundColor=shadowBackground
-PanelsWidgetSeparatorLineColor=0
+PanelsWidgetSeparatorLineColor=000000
 PanelTextColorDark=text
 PanelTextColorMid=ff666666
 PanelTextColorLight=fancyBarsNormalTextColor
@@ -156,13 +195,14 @@ Debugger_WatchItem_ValueChanged=ffbf0303
 Debugger_Breakpoint_TextMarkColor=ffff4040
 
 Welcome_TextColor=ff000000
-Welcome_ForegroundPrimaryColor=ff404244
+Welcome_ForegroundPrimaryColor=shadowBackground
 Welcome_ForegroundSecondaryColor=ff727476
 Welcome_BackgroundColor=normalBackground
 Welcome_ButtonBackgroundColor=normalBackground
 Welcome_DividerColor=ffd6d6d6
 Welcome_HoverColor=fff6f6f6
 Welcome_LinkColor=ff5caa15
+Welcome_DisabledLinkColor=textDisabled
 
 Timeline_TextColor=text
 Timeline_BackgroundColor1=normalBackground
@@ -189,13 +229,22 @@ TextEditor_CurrentLine_ScrollBarColor=ff404040
 ProjectExplorer_TaskError_TextMarkColor=error
 ProjectExplorer_TaskWarn_TextMarkColor=warning
 
-ClangCodeModel_Error_TextMarkColor=error
-ClangCodeModel_Warning_TextMarkColor=warning
+CodeModel_Error_TextMarkColor=error
+CodeModel_Warning_TextMarkColor=warning
 
-QmlDesigner_BackgroundColor=ff4c4e50
+QmlDesigner_BackgroundColor=qmlDesignerButtonColor
 QmlDesigner_HighlightColor=ff46a2da
 QmlDesigner_FormEditorSelectionColor=ff4ba2ff
 QmlDesigner_FormEditorForegroundColor=ffffffff
+QmlDesigner_BackgroundColorDarkAlternate=qmlDesignerButtonColor
+QmlDesigner_BackgroundColorDarker=ff262728
+QmlDesigner_BorderColor=splitter
+QmlDesigner_ButtonColor=ff595b5c
+QmlDesigner_TabDark=shadowBackground
+QmlDesigner_TabLight=ffffffff
+QmlDesigner_FormeditorBackgroundColor=qmlDesignerButtonColor
+QmlDesigner_AlternateBackgroundColor=qmlDesignerButtonColor
+QmlDesigner_ScrollBarHandleColor=ff595b5c
 
 [Flags]
 ComboBoxDrawTextShadow=false
@@ -212,8 +261,9 @@ FlatProjectsMode=false
 FlatMenuBar=false
 ToolBarIconShadow=true
 WindowColorAsBase=false
+DarkUserInterface=false
 
 [Gradients]
-DetailsWidgetHeaderGradient\1\color=0
+DetailsWidgetHeaderGradient\1\color=00000000
 DetailsWidgetHeaderGradient\1\pos=1
 DetailsWidgetHeaderGradient\size=1

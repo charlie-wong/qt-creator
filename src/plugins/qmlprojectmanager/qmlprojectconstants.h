@@ -30,8 +30,10 @@
 namespace QmlProjectManager {
 namespace Constants {
 
-const char PROJECTCONTEXT[]     = "QmlProject.ProjectContext";
 const char * const QMLPROJECT_MIMETYPE = QmlJSTools::Constants::QMLPROJECT_MIMETYPE;
+const char customFileSelectorsData[] = "CustomFileSelectorsData";
+const char customForceFreeTypeData[] = "CustomForceFreeType";
+const char customQtForMCUs[] = "CustomQtForMCUs";
 
 } // namespace Constants
 } // namespace QmlProjectManager

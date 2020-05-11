@@ -28,53 +28,46 @@
 #include "remotelinux_export.h"
 
 #include <projectexplorer/devicesupport/idevice.h>
-
-#include <QCoreApplication>
-
-namespace QSsh { class SshConnectionParameters; }
-namespace Utils { class PortList; }
+#include <projectexplorer/devicesupport/idevicefactory.h>
 
 namespace RemoteLinux {
-namespace Internal { class LinuxDevicePrivate; }
 
 class REMOTELINUX_EXPORT LinuxDevice : public ProjectExplorer::IDevice
 {
     Q_DECLARE_TR_FUNCTIONS(RemoteLinux::Internal::LinuxDevice)
 
 public:
-    typedef QSharedPointer<LinuxDevice> Ptr;
-    typedef QSharedPointer<const LinuxDevice> ConstPtr;
+    using Ptr = QSharedPointer<LinuxDevice>;
+    using ConstPtr = QSharedPointer<const LinuxDevice>;
 
-    static Ptr create();
-    static Ptr create(const QString &name, Core::Id type, MachineType machineType,
-                      Origin origin = ManuallyAdded, Core::Id id = Core::Id());
+    static Ptr create() { return Ptr(new LinuxDevice); }
 
-    QString displayType() const;
-    ProjectExplorer::IDeviceWidget *createWidget();
-    QList<Core::Id> actionIds() const;
-    QString displayNameForActionId(Core::Id actionId) const;
-    void executeAction(Core::Id actionId, QWidget *parent);
-    ProjectExplorer::IDevice::Ptr clone() const;
+    ProjectExplorer::IDeviceWidget *createWidget() override;
 
-    bool canCreateProcess() const { return true; }
-    ProjectExplorer::DeviceProcess *createProcess(QObject *parent) const;
-    bool canAutoDetectPorts() const;
-    ProjectExplorer::PortsGatheringMethod::Ptr portsGatheringMethod() const;
-    bool canCreateProcessModel() const { return true; }
-    ProjectExplorer::DeviceProcessList *createProcessListModel(QObject *parent) const;
-    bool hasDeviceTester() const { return true; }
-    ProjectExplorer::DeviceTester *createDeviceTester() const;
-    ProjectExplorer::DeviceProcessSignalOperation::Ptr signalOperation() const;
-    ProjectExplorer::DeviceEnvironmentFetcher::Ptr environmentFetcher() const;
+    bool canCreateProcess() const override { return true; }
+    ProjectExplorer::DeviceProcess *createProcess(QObject *parent) const override;
+    bool canAutoDetectPorts() const override;
+    ProjectExplorer::PortsGatheringMethod::Ptr portsGatheringMethod() const override;
+    bool canCreateProcessModel() const override { return true; }
+    ProjectExplorer::DeviceProcessList *createProcessListModel(QObject *parent) const override;
+    bool hasDeviceTester() const override { return true; }
+    ProjectExplorer::DeviceTester *createDeviceTester() const override;
+    ProjectExplorer::DeviceProcessSignalOperation::Ptr signalOperation() const override;
+    ProjectExplorer::DeviceEnvironmentFetcher::Ptr environmentFetcher() const override;
 
 protected:
-    LinuxDevice() {}
-    LinuxDevice(const QString &name, Core::Id type,
-                             MachineType machineType, Origin origin, Core::Id id);
-    LinuxDevice(const LinuxDevice &other);
-
-private:
-    LinuxDevice &operator=(const LinuxDevice &);
+    LinuxDevice();
 };
 
+namespace Internal {
+
+class LinuxDeviceFactory final : public ProjectExplorer::IDeviceFactory
+{
+public:
+    LinuxDeviceFactory();
+
+    ProjectExplorer::IDevice::Ptr create() const override;
+};
+
+} // namespace Internal
 } // namespace RemoteLinux

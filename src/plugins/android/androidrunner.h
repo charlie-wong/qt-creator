@@ -26,10 +26,10 @@
 #pragma once
 
 #include "androidconfigurations.h"
-#include "androidrunnable.h"
 
-#include <projectexplorer/runconfiguration.h>
+#include <projectexplorer/runcontrol.h>
 #include <qmldebug/qmldebugcommandlinearguments.h>
+#include <qmldebug/qmloutputparser.h>
 
 #include <QFutureInterface>
 #include <QObject>
@@ -49,45 +49,44 @@ class AndroidRunner : public ProjectExplorer::RunWorker
     Q_OBJECT
 
 public:
-    explicit AndroidRunner(ProjectExplorer::RunControl *runControl);
+    explicit AndroidRunner(ProjectExplorer::RunControl *runControl,
+                           const QString &intentName = QString());
     ~AndroidRunner() override;
 
-    void setRunnable(const AndroidRunnable &runnable);
-    const AndroidRunnable &runnable() const { return m_androidRunnable; }
-
-    Utils::Port gdbServerPort() const { return m_gdbServerPort; }
-    Utils::Port qmlServerPort() const { return m_qmlServerPort; }
+    Utils::Port debugServerPort() const { return m_debugServerPort; } // GDB or LLDB
+    QUrl qmlServer() const { return m_qmlServer; }
     Utils::ProcessHandle pid() const { return m_pid; }
 
     void start() override;
     void stop() override;
 
-    virtual void remoteOutput(const QString &output);
-    virtual void remoteErrorOutput(const QString &output);
-
 signals:
-    void asyncStart(const QString &intentName, const QVector<QStringList> &adbCommands);
-    void asyncStop(const QVector<QStringList> &adbCommands);
-    void remoteDebuggerRunning();
-
-    void adbParametersChanged(const QString &packageName, const QStringList &selector);
+    void asyncStart();
+    void asyncStop();
+    void qmlServerReady(const QUrl &serverUrl);
+    void androidDeviceInfoChanged(const Android::AndroidDeviceInfo &deviceInfo);
     void avdDetected();
 
 private:
-    void handleRemoteProcessStarted(Utils::Port gdbServerPort, Utils::Port qmlServerPort, int pid);
+    void qmlServerPortReady(Utils::Port port);
+    void remoteOutput(const QString &output);
+    void remoteErrorOutput(const QString &output);
+    void gotRemoteOutput(const QString &output);
+    void handleRemoteProcessStarted(Utils::Port debugServerPort, const QUrl &qmlServer, qint64 pid);
     void handleRemoteProcessFinished(const QString &errString = QString());
     void checkAVD();
     void launchAVD();
 
-    AndroidRunnable m_androidRunnable;
+    QString m_packageName;
     QString m_launchedAVDName;
     QThread m_thread;
     QTimer m_checkAVDTimer;
     QScopedPointer<AndroidRunnerWorker> m_worker;
     QPointer<ProjectExplorer::Target> m_target;
-    Utils::Port m_gdbServerPort;
-    Utils::Port m_qmlServerPort;
+    Utils::Port m_debugServerPort;
+    QUrl m_qmlServer;
     Utils::ProcessHandle m_pid;
+    QmlDebug::QmlOutputParser m_outputParser;
 };
 
 } // namespace Internal

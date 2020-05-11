@@ -23,79 +23,391 @@
 **
 ****************************************************************************/
 
-#include "miniprojecttargetselector.h"
+#include "buildconfiguration.h"
+#include "buildmanager.h"
+#include "deployconfiguration.h"
 #include "kit.h"
-#include "kitconfigwidget.h"
 #include "kitmanager.h"
-#include "target.h"
+#include "miniprojecttargetselector.h"
+#include "projectexplorer.h"
 #include "projectexplorericons.h"
+#include "project.h"
+#include "projectmodels.h"
+#include "runconfiguration.h"
+#include "session.h"
+#include "target.h"
 
 #include <utils/algorithm.h>
+#include <utils/itemviews.h>
+#include <utils/stringutils.h>
 #include <utils/styledbar.h>
 #include <utils/stylehelper.h>
 #include <utils/theme/theme.h>
+#include <utils/utilsicons.h>
 
 #include <coreplugin/icore.h>
 #include <coreplugin/coreconstants.h>
 #include <coreplugin/modemanager.h>
 
-#include <projectexplorer/projectexplorer.h>
-#include <projectexplorer/session.h>
-#include <projectexplorer/project.h>
-#include <projectexplorer/buildconfiguration.h>
-#include <projectexplorer/deployconfiguration.h>
-#include <projectexplorer/kitmanager.h>
-#include <projectexplorer/projectmodels.h>
-#include <projectexplorer/runconfiguration.h>
-
 #include <QGuiApplication>
 #include <QTimer>
 #include <QLayout>
 #include <QLabel>
+#include <QList>
 #include <QListWidget>
 #include <QStatusBar>
 #include <QKeyEvent>
 #include <QPainter>
+#include <QPixmap>
 #include <QStyleFactory>
 #include <QAction>
 #include <QItemDelegate>
+
+using namespace Utils;
+
+namespace ProjectExplorer {
+namespace Internal {
 
 static QIcon createCenteredIcon(const QIcon &icon, const QIcon &overlay)
 {
     QPixmap targetPixmap;
     const qreal appDevicePixelRatio = qApp->devicePixelRatio();
-    int deviceSpaceIconSize = Core::Constants::TARGET_ICON_SIZE * appDevicePixelRatio;
+    const auto deviceSpaceIconSize = static_cast<int>(Core::Constants::MODEBAR_ICON_SIZE * appDevicePixelRatio);
     targetPixmap = QPixmap(deviceSpaceIconSize, deviceSpaceIconSize);
     targetPixmap.setDevicePixelRatio(appDevicePixelRatio);
     targetPixmap.fill(Qt::transparent);
     QPainter painter(&targetPixmap); // painter in user space
 
-    QPixmap pixmap = icon.pixmap(Core::Constants::TARGET_ICON_SIZE); // already takes app devicePixelRatio into account
+    QPixmap pixmap = icon.pixmap(Core::Constants::MODEBAR_ICON_SIZE); // already takes app devicePixelRatio into account
     qreal pixmapDevicePixelRatio = pixmap.devicePixelRatio();
-    painter.drawPixmap((Core::Constants::TARGET_ICON_SIZE - pixmap.width() / pixmapDevicePixelRatio) / 2,
-                       (Core::Constants::TARGET_ICON_SIZE - pixmap.height() / pixmapDevicePixelRatio) / 2, pixmap);
+    painter.drawPixmap((Core::Constants::MODEBAR_ICON_SIZE - pixmap.width() / pixmapDevicePixelRatio) / 2,
+                       (Core::Constants::MODEBAR_ICON_SIZE - pixmap.height() / pixmapDevicePixelRatio) / 2, pixmap);
     if (!overlay.isNull()) {
-        pixmap = overlay.pixmap(Core::Constants::TARGET_ICON_SIZE); // already takes app devicePixelRatio into account
+        pixmap = overlay.pixmap(Core::Constants::MODEBAR_ICON_SIZE); // already takes app devicePixelRatio into account
         pixmapDevicePixelRatio = pixmap.devicePixelRatio();
-        painter.drawPixmap((Core::Constants::TARGET_ICON_SIZE - pixmap.width() / pixmapDevicePixelRatio) / 2,
-                           (Core::Constants::TARGET_ICON_SIZE - pixmap.height() / pixmapDevicePixelRatio) / 2, pixmap);
+        painter.drawPixmap((Core::Constants::MODEBAR_ICON_SIZE - pixmap.width() / pixmapDevicePixelRatio) / 2,
+                           (Core::Constants::MODEBAR_ICON_SIZE - pixmap.height() / pixmapDevicePixelRatio) / 2, pixmap);
     }
 
     return QIcon(targetPixmap);
 }
 
-using namespace ProjectExplorer;
-using namespace ProjectExplorer::Internal;
-using namespace Utils;
-
-static bool projectLesserThan(Project *p1, Project *p2)
+class GenericItem : public TreeItem
 {
-    int result = caseFriendlyCompare(p1->displayName(), p2->displayName());
+public:
+    GenericItem() = default;
+    GenericItem(QObject *object) : m_object(object) {}
+    QObject *object() const { return m_object; }
+    QString rawDisplayName() const
+    {
+        if (const auto p = qobject_cast<Project *>(object()))
+            return p->displayName();
+        if (const auto t = qobject_cast<Target *>(object()))
+            return t->displayName();
+        return static_cast<ProjectConfiguration *>(object())->displayName();
+
+    }
+    QString displayName() const
+    {
+        if (const auto p = qobject_cast<Project *>(object())) {
+            const auto hasSameProjectName = [this](TreeItem *ti) {
+                return ti != this
+                        && static_cast<GenericItem *>(ti)->rawDisplayName() == rawDisplayName();
+            };
+            QString displayName = p->displayName();
+            if (parent()->findAnyChild(hasSameProjectName)) {
+                displayName.append(" (").append(p->projectFilePath().toUserOutput())
+                        .append(')');
+            }
+            return displayName;
+        }
+        return rawDisplayName();
+    }
+
+private:
+    QVariant toolTip() const
+    {
+        if (qobject_cast<Project *>(object()))
+            return {};
+        if (const auto t = qobject_cast<Target *>(object()))
+            return t->toolTip();
+        return static_cast<ProjectConfiguration *>(object())->toolTip();
+    }
+
+    QVariant data(int column, int role) const override
+    {
+        if (column == 1 && role == Qt::ToolTipRole)
+            return QCoreApplication::translate("RunConfigSelector", "Run Without Deployment");
+        if (column != 0)
+            return {};
+        switch (role) {
+        case Qt::DisplayRole:
+            return displayName();
+        case Qt::ToolTipRole:
+            return toolTip();
+        default:
+            break;
+        }
+        return {};
+    }
+
+    QObject *m_object = nullptr;
+};
+
+static bool compareItems(const TreeItem *ti1, const TreeItem *ti2)
+{
+    const int result = caseFriendlyCompare(static_cast<const GenericItem *>(ti1)->rawDisplayName(),
+                                           static_cast<const GenericItem *>(ti2)->rawDisplayName());
     if (result != 0)
         return result < 0;
-    else
-        return p1 < p2;
+    return ti1 < ti2;
 }
+
+class GenericModel : public TreeModel<GenericItem, GenericItem>
+{
+    Q_OBJECT
+public:
+    GenericModel(QObject *parent) : TreeModel(parent) { }
+
+    void rebuild(const QList<QObject *> &objects)
+    {
+        clear();
+        for (QObject * const e : objects)
+            addItemForObject(e);
+    }
+
+    const GenericItem *addItemForObject(QObject *object)
+    {
+        const auto item = new GenericItem(object);
+        rootItem()->insertOrderedChild(item, &compareItems);
+        if (const auto project = qobject_cast<Project *>(object)) {
+            connect(project, &Project::displayNameChanged,
+                    this, &GenericModel::displayNameChanged);
+        } else if (const auto target = qobject_cast<Target *>(object)) {
+            connect(target, &Target::kitChanged, this, &GenericModel::displayNameChanged);
+        } else {
+            const auto pc = qobject_cast<ProjectConfiguration *>(object);
+            QTC_CHECK(pc);
+            connect(pc, &ProjectConfiguration::displayNameChanged,
+                    this, &GenericModel::displayNameChanged);
+            connect(pc, &ProjectConfiguration::toolTipChanged,
+                    this, &GenericModel::updateToolTips);
+        }
+        return item;
+    }
+
+    GenericItem *itemForObject(const QObject *object) const
+    {
+        return findItemAtLevel<1>([object](const GenericItem *item) {
+            return item->object() == object;
+        });
+    }
+
+    void setColumnCount(int columns) { m_columnCount = columns; }
+
+signals:
+    void displayNameChanged();
+
+private:
+    void updateToolTips()
+    {
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {Qt::ToolTipRole});
+    }
+};
+
+class SelectorView : public TreeView
+{
+    Q_OBJECT
+
+public:
+    SelectorView(QWidget *parent);
+
+    void setMaxCount(int maxCount);
+    int maxCount();
+
+    int optimalWidth() const;
+    void setOptimalWidth(int width);
+
+    int padding();
+
+    GenericModel *theModel() const { return static_cast<GenericModel *>(model()); }
+
+protected:
+    void resetOptimalWidth()
+    {
+        int width = 0;
+        QFontMetrics fn(font());
+        theModel()->forItemsAtLevel<1>([this, &width, &fn](const GenericItem *item) {
+            width = qMax(fn.horizontalAdvance(item->displayName()) + padding(), width);
+        });
+        setOptimalWidth(width);
+    }
+
+private:
+    void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
+
+    int m_maxCount = 0;
+    int m_optimalWidth = 0;
+};
+
+class ProjectListView : public SelectorView
+{
+    Q_OBJECT
+
+public:
+    explicit ProjectListView(QWidget *parent = nullptr) : SelectorView(parent)
+    {
+        const auto model = new GenericModel(this);
+        model->rebuild(transform<QList<QObject *>>(SessionManager::projects(),
+                                                   [](Project *p) { return p; }));
+        connect(SessionManager::instance(), &SessionManager::projectAdded,
+                this, [this, model](Project *project) {
+            const GenericItem *projectItem = model->addItemForObject(project);
+            QFontMetrics fn(font());
+            const int width = fn.horizontalAdvance(projectItem->displayName()) + padding();
+            if (width > optimalWidth())
+                setOptimalWidth(width);
+            restoreCurrentIndex();
+        });
+        connect(SessionManager::instance(), &SessionManager::aboutToRemoveProject,
+                this, [this, model](const Project *project) {
+            GenericItem * const item = model->itemForObject(project);
+            if (!item)
+                return;
+            model->destroyItem(item);
+            resetOptimalWidth();
+        });
+        connect(SessionManager::instance(), &SessionManager::startupProjectChanged,
+                this, [this, model](const Project *project) {
+            const GenericItem * const item = model->itemForObject(project);
+            if (item)
+                setCurrentIndex(item->index());
+        });
+        connect(model, &GenericModel::displayNameChanged, this, [this, model] {
+            model->rootItem()->sortChildren(&compareItems);
+            resetOptimalWidth();
+            restoreCurrentIndex();
+        });
+        setModel(model);
+        connect(selectionModel(), &QItemSelectionModel::currentChanged,
+                this, [model](const QModelIndex &index) {
+            const GenericItem * const item = model->itemForIndex(index);
+            if (item && item->object())
+                SessionManager::setStartupProject(qobject_cast<Project *>(item->object()));
+        });
+    }
+
+private:
+    void restoreCurrentIndex()
+    {
+        const GenericItem * const itemForStartupProject
+                = theModel()->itemForObject(SessionManager::startupProject());
+        if (itemForStartupProject)
+            setCurrentIndex(theModel()->indexForItem(itemForStartupProject));
+    }
+};
+
+class GenericListWidget : public SelectorView
+{
+    Q_OBJECT
+
+public:
+    explicit GenericListWidget(QWidget *parent = nullptr) : SelectorView(parent)
+    {
+        const auto model = new GenericModel(this);
+        connect(model, &GenericModel::displayNameChanged, this, [this, model] {
+            const GenericItem * const activeItem = model->itemForIndex(currentIndex());
+            model->rootItem()->sortChildren(&compareItems);
+            resetOptimalWidth();
+            if (activeItem)
+                setCurrentIndex(activeItem->index());
+        });
+        setModel(model);
+        connect(selectionModel(), &QItemSelectionModel::currentChanged,
+                this, &GenericListWidget::rowChanged);
+    }
+
+signals:
+    void changeActiveProjectConfiguration(QObject *pc);
+
+public:
+    void setProjectConfigurations(const QList<QObject *> &list, QObject *active)
+    {
+        theModel()->rebuild(list);
+        resetOptimalWidth();
+        setActiveProjectConfiguration(active);
+    }
+
+    void setActiveProjectConfiguration(QObject *active)
+    {
+        if (const GenericItem * const item = theModel()->itemForObject(active))
+            setCurrentIndex(item->index());
+    }
+
+    void addProjectConfiguration(QObject *pc)
+    {
+        const auto activeItem = theModel()->itemForIndex(currentIndex());
+        const auto item = theModel()->addItemForObject(pc);
+        QFontMetrics fn(font());
+        const int width = fn.horizontalAdvance(item->displayName()) + padding();
+        if (width > optimalWidth())
+            setOptimalWidth(width);
+        if (activeItem)
+            setCurrentIndex(activeItem->index());
+    }
+
+    void removeProjectConfiguration(QObject *pc)
+    {
+        const auto activeItem = theModel()->itemForIndex(currentIndex());
+        if (GenericItem * const item = theModel()->itemForObject(pc)) {
+            theModel()->destroyItem(item);
+            resetOptimalWidth();
+            if (activeItem && activeItem != item)
+                setCurrentIndex(activeItem->index());
+        }
+    }
+
+private:
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        const QModelIndex pressedIndex = indexAt(event->pos());
+        if (pressedIndex.column() == 1) {
+            m_pressedIndex = pressedIndex;
+            return; // Clicking on the run button should not change the current index
+        }
+        m_pressedIndex = QModelIndex();
+        TreeView::mousePressEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        const QModelIndex pressedIndex = m_pressedIndex;
+        m_pressedIndex = QModelIndex();
+        if (pressedIndex.isValid() && pressedIndex == indexAt(event->pos())) {
+            const auto rc = qobject_cast<RunConfiguration *>(
+                        theModel()->itemForIndex(pressedIndex)->object());
+            QTC_ASSERT(rc, return);
+            if (!BuildManager::isBuilding(rc->project()))
+                ProjectExplorerPlugin::runRunConfiguration(rc, Constants::NORMAL_RUN_MODE, true);
+            return;
+        }
+        TreeView::mouseReleaseEvent(event);
+    }
+
+    QObject *objectAt(const QModelIndex &index) const
+    {
+        return theModel()->itemForIndex(index)->object();
+    }
+
+    void rowChanged(const QModelIndex &index)
+    {
+        if (index.isValid())
+            emit changeActiveProjectConfiguration(objectAt(index));
+    }
+
+    QModelIndex m_pressedIndex;
+};
 
 ////////
 // TargetSelectorDelegate
@@ -103,20 +415,20 @@ static bool projectLesserThan(Project *p1, Project *p2)
 class TargetSelectorDelegate : public QItemDelegate
 {
 public:
-    TargetSelectorDelegate(ListWidget *parent) : QItemDelegate(parent), m_listWidget(parent) { }
+    TargetSelectorDelegate(SelectorView *parent) : QItemDelegate(parent), m_view(parent) { }
 private:
-    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
     void paint(QPainter *painter,
                const QStyleOptionViewItem &option,
-               const QModelIndex &index) const;
-    ListWidget *m_listWidget;
+               const QModelIndex &index) const override;
+    SelectorView *m_view;
 };
 
 QSize TargetSelectorDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
     Q_UNUSED(option)
     Q_UNUSED(index)
-    return QSize(m_listWidget->size().width(), 30);
+    return QSize(m_view->size().width(), 30);
 }
 
 void TargetSelectorDelegate::paint(QPainter *painter,
@@ -126,10 +438,16 @@ void TargetSelectorDelegate::paint(QPainter *painter,
     painter->save();
     painter->setClipping(false);
 
+    QColor textColor = creatorTheme()->color(Theme::MiniProjectTargetSelectorTextColor);
     if (option.state & QStyle::State_Selected) {
-        const QColor color = (option.state & QStyle::State_HasFocus) ?
-                    option.palette.highlight().color() :
-                    option.palette.dark().color();
+        QColor color;
+        if (m_view->hasFocus()) {
+            color = option.palette.highlight().color();
+            textColor = option.palette.highlightedText().color();
+        } else {
+            color = option.palette.dark().color();
+        }
+
         if (creatorTheme()->flag(Theme::FlatToolBars)) {
             painter->fillRect(option.rect, color);
         } else {
@@ -148,7 +466,7 @@ void TargetSelectorDelegate::paint(QPainter *painter,
 
     QFontMetrics fm(option.font);
     QString text = index.data(Qt::DisplayRole).toString();
-    painter->setPen(creatorTheme()->color(Theme::MiniProjectTargetSelectorTextColor));
+    painter->setPen(textColor);
     QString elidedText = fm.elidedText(text, Qt::ElideMiddle, option.rect.width() - 12);
     if (elidedText != text)
         const_cast<QAbstractItemModel *>(index.model())->setData(index, text, Qt::ToolTipRole);
@@ -156,6 +474,16 @@ void TargetSelectorDelegate::paint(QPainter *painter,
         const_cast<QAbstractItemModel *>(index.model())
             ->setData(index, index.model()->data(index, Qt::UserRole + 1).toString(), Qt::ToolTipRole);
     painter->drawText(option.rect.left() + 6, option.rect.top() + (option.rect.height() - fm.height()) / 2 + fm.ascent(), elidedText);
+    if (index.column() == 1 && option.state & QStyle::State_MouseOver) {
+        const QIcon icon = Utils::Icons::RUN_SMALL.icon();
+        QRect iconRect(option.rect.right() - option.rect.height(),
+                       option.rect.top(),
+                       option.rect.height() / painter->device()->devicePixelRatio(),
+                       option.rect.height() / painter->device()->devicePixelRatio());
+        iconRect.translate((option.rect.width() - iconRect.width()) / 2,
+                           (option.rect.height() - iconRect.height()) / 2);
+        icon.paint(painter, iconRect, Qt::AlignHCenter | Qt::AlignVCenter);
+    }
 
     painter->restore();
 }
@@ -163,474 +491,152 @@ void TargetSelectorDelegate::paint(QPainter *painter,
 ////////
 // ListWidget
 ////////
-ListWidget::ListWidget(QWidget *parent) : QListWidget(parent)
+SelectorView::SelectorView(QWidget *parent) : TreeView(parent)
 {
     setFocusPolicy(Qt::NoFocus);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setAlternatingRowColors(false);
+    setUniformRowHeights(true);
+    setIndentation(0);
     setFocusPolicy(Qt::WheelFocus);
     setItemDelegate(new TargetSelectorDelegate(this));
+    setSelectionBehavior(SelectRows);
     setAttribute(Qt::WA_MacShowFocusRect, false);
+    setHeaderHidden(true);
     const QColor bgColor = creatorTheme()->color(Theme::MiniProjectTargetSelectorBackgroundColor);
     const QString bgColorName = creatorTheme()->flag(Theme::FlatToolBars)
             ? bgColor.lighter(120).name() : bgColor.name();
-    setStyleSheet(QString::fromLatin1("QListWidget { background: %1; border-style: none; }").arg(bgColorName));
+    setStyleSheet(QString::fromLatin1("QAbstractItemView { background: %1; border-style: none; }").arg(bgColorName));
     setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
 }
 
-void ListWidget::keyPressEvent(QKeyEvent *event)
+void SelectorView::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Left)
         focusPreviousChild();
     else if (event->key() == Qt::Key_Right)
         focusNextChild();
     else
-        QListWidget::keyPressEvent(event);
+        TreeView::keyPressEvent(event);
 }
 
-void ListWidget::keyReleaseEvent(QKeyEvent *event)
+void SelectorView::keyReleaseEvent(QKeyEvent *event)
 {
     if (event->key() != Qt::Key_Left && event->key() != Qt::Key_Right)
-        QListWidget::keyReleaseEvent(event);
+        TreeView::keyReleaseEvent(event);
 }
 
-void ListWidget::setMaxCount(int maxCount)
+void SelectorView::setMaxCount(int maxCount)
 {
     m_maxCount = maxCount;
     updateGeometry();
 }
 
-int ListWidget::maxCount()
+int SelectorView::maxCount()
 {
     return m_maxCount;
 }
 
-int ListWidget::optimalWidth() const
+int SelectorView::optimalWidth() const
 {
     return m_optimalWidth;
 }
 
-void ListWidget::setOptimalWidth(int width)
+void SelectorView::setOptimalWidth(int width)
 {
     m_optimalWidth = width;
     updateGeometry();
 }
 
-int ListWidget::padding()
+int SelectorView::padding()
 {
     // there needs to be enough extra pixels to show a scrollbar
-    return 2 * style()->pixelMetric(QStyle::PM_FocusFrameHMargin, 0, this)
-            + style()->pixelMetric(QStyle::PM_ScrollBarExtent, 0, this)
+    return 2 * style()->pixelMetric(QStyle::PM_FocusFrameHMargin, nullptr, this)
+            + style()->pixelMetric(QStyle::PM_ScrollBarExtent, nullptr, this)
             + 10;
-}
-
-////////
-// ProjectListWidget
-////////
-ProjectListWidget::ProjectListWidget(QWidget *parent)
-    : ListWidget(parent), m_ignoreIndexChange(false)
-{
-    SessionManager *sessionManager = SessionManager::instance();
-    connect(sessionManager, &SessionManager::projectAdded,
-            this, &ProjectListWidget::addProject);
-    connect(sessionManager, &SessionManager::aboutToRemoveProject,
-            this, &ProjectListWidget::removeProject);
-    connect(sessionManager, &SessionManager::startupProjectChanged,
-            this, &ProjectListWidget::changeStartupProject);
-    connect(sessionManager, &SessionManager::projectDisplayNameChanged,
-            this, &ProjectListWidget::projectDisplayNameChanged);
-    connect(this, &QListWidget::currentRowChanged,
-            this, &ProjectListWidget::setProject);
-}
-
-QListWidgetItem *ProjectListWidget::itemForProject(Project *project)
-{
-    for (int i = 0; i < count(); ++i) {
-        QListWidgetItem *currentItem = item(i);
-        if (currentItem->data(Qt::UserRole).value<Project*>() == project)
-            return currentItem;
-    }
-    return nullptr;
-}
-
-QString ProjectListWidget::fullName(Project *project)
-{
-    return tr("%1 (%2)").arg(project->displayName(), project->projectFilePath().toUserOutput());
-}
-
-void ProjectListWidget::addProject(Project *project)
-{
-    m_ignoreIndexChange = true;
-
-    int pos = count();
-    for (int i = 0; i < count(); ++i) {
-        Project *p = item(i)->data(Qt::UserRole).value<Project*>();
-        if (projectLesserThan(project, p)) {
-            pos = i;
-            break;
-        }
-    }
-
-    bool useFullName = false;
-    for (int i = 0; i < count(); ++i) {
-        Project *p = item(i)->data(Qt::UserRole).value<Project*>();
-        if (p->displayName() == project->displayName()) {
-            useFullName = true;
-            item(i)->setText(fullName(p));
-        }
-    }
-
-    QString displayName = useFullName ? fullName(project) : project->displayName();
-    QListWidgetItem *item = new QListWidgetItem();
-    item->setData(Qt::UserRole, QVariant::fromValue(project));
-    item->setText(displayName);
-    insertItem(pos, item);
-
-    if (project == SessionManager::startupProject())
-        setCurrentItem(item);
-
-    QFontMetrics fn(font());
-    int width = fn.width(displayName) + padding();
-    if (width > optimalWidth())
-        setOptimalWidth(width);
-
-    m_ignoreIndexChange = false;
-}
-
-void ProjectListWidget::removeProject(Project *project)
-{
-    m_ignoreIndexChange = true;
-
-    QListWidgetItem *listItem = itemForProject(project);
-    delete listItem;
-
-    // Update display names
-    QString name = project->displayName();
-    int countDisplayName = 0;
-    int otherIndex = -1;
-    for (int i = 0; i < count(); ++i) {
-        Project *p = item(i)->data(Qt::UserRole).value<Project *>();
-        if (p->displayName() == name) {
-            ++countDisplayName;
-            otherIndex = i;
-        }
-    }
-    if (countDisplayName == 1) {
-        Project *p = item(otherIndex)->data(Qt::UserRole).value<Project *>();
-        item(otherIndex)->setText(p->displayName());
-    }
-
-    QFontMetrics fn(font());
-
-    // recheck optimal width
-    int width = 0;
-    for (int i = 0; i < count(); ++i)
-        width = qMax(fn.width(item(i)->text()) + padding(), width);
-    setOptimalWidth(width);
-
-    m_ignoreIndexChange = false;
-}
-
-void ProjectListWidget::projectDisplayNameChanged(Project *project)
-{
-    m_ignoreIndexChange = true;
-
-    int oldPos = 0;
-    bool useFullName = false;
-    for (int i = 0; i < count(); ++i) {
-        Project *p = item(i)->data(Qt::UserRole).value<Project*>();
-        if (p == project) {
-            oldPos = i;
-        } else if (p->displayName() == project->displayName()) {
-            useFullName = true;
-            item(i)->setText(fullName(p));
-        }
-    }
-
-    bool isCurrentItem = (oldPos == currentRow());
-    QListWidgetItem *projectItem = takeItem(oldPos);
-
-    int pos = count();
-    for (int i = 0; i < count(); ++i) {
-        Project *p = item(i)->data(Qt::UserRole).value<Project*>();
-        if (projectLesserThan(project, p)) {
-            pos = i;
-            break;
-        }
-    }
-
-    QString displayName = useFullName ? fullName(project) : project->displayName();
-    projectItem->setText(displayName);
-    insertItem(pos, projectItem);
-    if (isCurrentItem)
-        setCurrentRow(pos);
-
-    // recheck optimal width
-    QFontMetrics fn(font());
-    int width = 0;
-    for (int i = 0; i < count(); ++i)
-        width = qMax(fn.width(item(i)->text()) + padding(), width);
-    setOptimalWidth(width);
-
-    m_ignoreIndexChange = false;
-}
-
-void ProjectListWidget::setProject(int index)
-{
-    if (m_ignoreIndexChange)
-        return;
-    if (index < 0)
-        return;
-    Project *p = item(index)->data(Qt::UserRole).value<Project *>();
-    SessionManager::setStartupProject(p);
-}
-
-void ProjectListWidget::changeStartupProject(Project *project)
-{
-    setCurrentItem(itemForProject(project));
-}
-
-/////////
-// GenericListWidget
-/////////
-
-GenericListWidget::GenericListWidget(QWidget *parent)
-    : ListWidget(parent), m_ignoreIndexChange(false)
-{
-    connect(this, &QListWidget::currentRowChanged,
-            this, &GenericListWidget::rowChanged);
-}
-
-void GenericListWidget::setProjectConfigurations(const QList<ProjectConfiguration *> &list, ProjectConfiguration *active)
-{
-    m_ignoreIndexChange = true;
-    clear();
-
-    for (int i = 0; i < count(); ++i) {
-        ProjectConfiguration *p = item(i)->data(Qt::UserRole).value<ProjectConfiguration *>();
-        disconnect(p, &ProjectConfiguration::displayNameChanged,
-                   this, &GenericListWidget::displayNameChanged);
-    }
-
-    QFontMetrics fn(font());
-    int width = 0;
-    foreach (ProjectConfiguration *pc, list) {
-        addProjectConfiguration(pc);
-        width = qMax(width, fn.width(pc->displayName()) + padding());
-    }
-    setOptimalWidth(width);
-    setActiveProjectConfiguration(active);
-
-    m_ignoreIndexChange = false;
-}
-
-void GenericListWidget::setActiveProjectConfiguration(ProjectConfiguration *active)
-{
-    QListWidgetItem *item = itemForProjectConfiguration(active);
-    setCurrentItem(item);
-}
-
-void GenericListWidget::addProjectConfiguration(ProjectConfiguration *pc)
-{
-    m_ignoreIndexChange = true;
-    auto lwi = new QListWidgetItem();
-    lwi->setText(pc->displayName());
-    lwi->setData(Qt::ToolTipRole, pc->toolTip());
-    lwi->setData(Qt::UserRole + 1, pc->toolTip());
-    lwi->setData(Qt::UserRole, QVariant::fromValue(pc));
-
-    // Figure out pos
-    int pos = count();
-    for (int i = 0; i < count(); ++i) {
-        ProjectConfiguration *p = item(i)->data(Qt::UserRole).value<ProjectConfiguration *>();
-        if (caseFriendlyCompare(pc->displayName(), p->displayName()) < 0) {
-            pos = i;
-            break;
-        }
-    }
-    insertItem(pos, lwi);
-
-    connect(pc, &ProjectConfiguration::displayNameChanged,
-            this, &GenericListWidget::displayNameChanged);
-    connect(pc, &ProjectConfiguration::toolTipChanged, this, &GenericListWidget::toolTipChanged);
-
-    QFontMetrics fn(font());
-    int width = fn.width(pc->displayName()) + padding();
-    if (width > optimalWidth())
-        setOptimalWidth(width);
-
-    m_ignoreIndexChange = false;
-}
-
-void GenericListWidget::removeProjectConfiguration(ProjectConfiguration *pc)
-{
-    m_ignoreIndexChange = true;
-    disconnect(pc, &ProjectConfiguration::displayNameChanged,
-               this, &GenericListWidget::displayNameChanged);
-    delete itemForProjectConfiguration(pc);
-
-    QFontMetrics fn(font());
-    int width = 0;
-    for (int i = 0; i < count(); ++i) {
-        ProjectConfiguration *p = item(i)->data(Qt::UserRole).value<ProjectConfiguration *>();
-        width = qMax(width, fn.width(p->displayName()) + padding());
-    }
-    setOptimalWidth(width);
-
-    m_ignoreIndexChange = false;
-}
-
-void GenericListWidget::rowChanged(int index)
-{
-    if (m_ignoreIndexChange)
-        return;
-    if (index < 0)
-        return;
-    emit changeActiveProjectConfiguration(item(index)->data(Qt::UserRole).value<ProjectConfiguration *>());
-}
-
-void GenericListWidget::displayNameChanged()
-{
-    m_ignoreIndexChange = true;
-    ProjectConfiguration *activeProjectConfiguration = nullptr;
-    if (currentItem())
-        activeProjectConfiguration = currentItem()->data(Qt::UserRole).value<ProjectConfiguration *>();
-
-    ProjectConfiguration *pc = qobject_cast<ProjectConfiguration *>(sender());
-    int index = -1;
-    int i = 0;
-    for (; i < count(); ++i) {
-        QListWidgetItem *lwi = item(i);
-        if (lwi->data(Qt::UserRole).value<ProjectConfiguration *>() == pc) {
-            index = i;
-            break;
-        }
-    }
-    if (index == -1)
-        return;
-    QListWidgetItem *lwi = takeItem(i);
-    lwi->setText(pc->displayName());
-    int pos = count();
-    for (int i = 0; i < count(); ++i) {
-        ProjectConfiguration *p = item(i)->data(Qt::UserRole).value<ProjectConfiguration *>();
-        if (caseFriendlyCompare(pc->displayName(), p->displayName()) < 0) {
-            pos = i;
-            break;
-        }
-    }
-    insertItem(pos, lwi);
-    if (activeProjectConfiguration)
-        setCurrentItem(itemForProjectConfiguration(activeProjectConfiguration));
-
-    QFontMetrics fn(font());
-    int width = 0;
-    for (int i = 0; i < count(); ++i) {
-        ProjectConfiguration *p = item(i)->data(Qt::UserRole).value<ProjectConfiguration *>();
-        width = qMax(width, fn.width(p->displayName()) + padding());
-    }
-    setOptimalWidth(width);
-
-    m_ignoreIndexChange = false;
-}
-
-void GenericListWidget::toolTipChanged()
-{
-    ProjectConfiguration *pc = qobject_cast<ProjectConfiguration *>(sender());
-    if (QListWidgetItem *lwi = itemForProjectConfiguration(pc)) {
-        lwi->setData(Qt::ToolTipRole, pc->toolTip());
-        lwi->setData(Qt::UserRole + 1, pc->toolTip());
-    }
-}
-
-QListWidgetItem *GenericListWidget::itemForProjectConfiguration(ProjectConfiguration *pc)
-{
-    for (int i = 0; i < count(); ++i) {
-        QListWidgetItem *lwi = item(i);
-        if (lwi->data(Qt::UserRole).value<ProjectConfiguration *>() == pc)
-            return lwi;
-    }
-    return nullptr;
 }
 
 /////////
 // KitAreaWidget
 /////////
-
-KitAreaWidget::KitAreaWidget(QWidget *parent) : QWidget(parent),
-    m_layout(new QGridLayout(this))
+class KitAreaWidget : public QWidget
 {
-    m_layout->setMargin(3);
-    setAutoFillBackground(true);
-    connect(KitManager::instance(), &KitManager::kitUpdated, this, &KitAreaWidget::updateKit);
-}
+    Q_OBJECT
+public:
+    explicit KitAreaWidget(QWidget *parent = nullptr)
+        : QWidget(parent), m_layout(new QGridLayout(this))
+    {
+        m_layout->setContentsMargins(3, 3, 3, 3);
+        connect(KitManager::instance(), &KitManager::kitUpdated, this, &KitAreaWidget::updateKit);
+    }
 
-KitAreaWidget::~KitAreaWidget()
-{
-    setKit(nullptr);
-}
+    ~KitAreaWidget() override { setKit(nullptr); }
 
-void KitAreaWidget::setKit(Kit *k)
-{
-    foreach (KitConfigWidget *w, m_widgets)
-        delete(w);
-    m_widgets.clear();
+    void setKit(ProjectExplorer::Kit *k)
+    {
+        qDeleteAll(m_widgets);
+        m_widgets.clear();
 
-    if (!k)
-        return;
+        if (!k)
+            return;
 
-    foreach (QLabel *l, m_labels)
-        l->deleteLater();
-    m_labels.clear();
+        foreach (QLabel *l, m_labels)
+            l->deleteLater();
+        m_labels.clear();
 
-    int row = 0;
-    foreach (KitInformation *ki, KitManager::kitInformation()) {
-        if (k && k->isMutable(ki->id())) {
-            KitConfigWidget *widget = ki->createConfigWidget(k);
-            m_widgets << widget;
-            QLabel *label = new QLabel(widget->displayName());
-            m_labels << label;
+        int row = 0;
+        for (KitAspect *aspect : KitManager::kitAspects()) {
+            if (k && k->isMutable(aspect->id())) {
+                KitAspectWidget *widget = aspect->createConfigWidget(k);
+                m_widgets << widget;
+                QLabel *label = new QLabel(aspect->displayName());
+                m_labels << label;
 
-            widget->setStyle(QStyleFactory::create(QLatin1String("fusion")));
-            widget->setPalette(palette());
+                m_layout->addWidget(label, row, 0);
+                m_layout->addWidget(widget->mainWidget(), row, 1);
+                m_layout->addWidget(widget->buttonWidget(), row, 2);
 
-            m_layout->addWidget(label, row, 0);
-            m_layout->addWidget(widget->mainWidget(), row, 1);
-            m_layout->addWidget(widget->buttonWidget(), row, 2);
+                ++row;
+            }
+        }
+        m_kit = k;
 
-            ++row;
+        setHidden(m_widgets.isEmpty());
+    }
+
+private:
+    void updateKit(ProjectExplorer::Kit *k)
+    {
+        if (!m_kit || m_kit != k)
+            return;
+
+        bool addedMutables = false;
+        QList<Core::Id> knownIdList = Utils::transform(m_widgets, &KitAspectWidget::kitInformationId);
+
+        for (KitAspect *aspect : KitManager::kitAspects()) {
+            const Core::Id currentId = aspect->id();
+            if (m_kit->isMutable(currentId) && !knownIdList.removeOne(currentId)) {
+                addedMutables = true;
+                break;
+            }
+        }
+        const bool removedMutables = !knownIdList.isEmpty();
+
+        if (addedMutables || removedMutables) {
+            // Redo whole setup if the number of mutable settings did change
+            setKit(m_kit);
+        } else {
+            // Refresh all widgets if the number of mutable settings did not change
+            foreach (KitAspectWidget *w, m_widgets)
+                w->refresh();
         }
     }
-    m_kit = k;
 
-    setHidden(m_widgets.isEmpty());
-}
-
-void KitAreaWidget::updateKit(Kit *k)
-{
-    if (!m_kit || m_kit != k)
-        return;
-
-    bool addedMutables = false;
-    QList<Core::Id> knownIdList = Utils::transform(m_widgets, &KitConfigWidget::kitInformationId);
-
-    foreach (KitInformation *ki, KitManager::kitInformation()) {
-        Core::Id currentId = ki->id();
-        if (m_kit->isMutable(currentId) && !knownIdList.removeOne(currentId)) {
-            addedMutables = true;
-            break;
-        }
-    }
-    const bool removedMutables = !knownIdList.isEmpty();
-
-    if (addedMutables || removedMutables) {
-        // Redo whole setup if the number of mutable settings did change
-        setKit(m_kit);
-    } else {
-        // Refresh all widgets if the number of mutable settings did not change
-        foreach (KitConfigWidget *w, m_widgets)
-            w->refresh();
-    }
-}
+    QGridLayout *m_layout;
+    Kit *m_kit = nullptr;
+    QList<KitAspectWidget *> m_widgets;
+    QList<QLabel *> m_labels;
+};
 
 /////////
 // MiniProjectTargetSelector
@@ -638,9 +644,9 @@ void KitAreaWidget::updateKit(Kit *k)
 
 QWidget *MiniProjectTargetSelector::createTitleLabel(const QString &text)
 {
-    StyledBar *bar = new StyledBar(this);
+    auto *bar = new StyledBar(this);
     bar->setSingleRow(true);
-    QVBoxLayout *toolLayout = new QVBoxLayout(bar);
+    auto *toolLayout = new QVBoxLayout(bar);
     toolLayout->setContentsMargins(6, 0, 6, 0);
     toolLayout->setSpacing(0);
 
@@ -672,10 +678,11 @@ MiniProjectTargetSelector::MiniProjectTargetSelector(QAction *targetSelectorActi
     m_kitAreaWidget = new KitAreaWidget(this);
 
     m_summaryLabel = new QLabel(this);
-    m_summaryLabel->setMargin(3);
+    m_summaryLabel->setContentsMargins(3, 3, 3, 3);
     m_summaryLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    m_summaryLabel->setStyleSheet(QString::fromLatin1("background: %1;")
-        .arg(creatorTheme()->color(Theme::MiniProjectTargetSelectorSummaryBackgroundColor).name()));
+    QPalette pal = m_summaryLabel->palette();
+    pal.setColor(QPalette::Window, Utils::StyleHelper().baseColor());
+    m_summaryLabel->setPalette(pal);
     m_summaryLabel->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
     m_summaryLabel->setTextInteractionFlags(m_summaryLabel->textInteractionFlags() | Qt::LinksAccessibleByMouse);
 
@@ -684,7 +691,9 @@ MiniProjectTargetSelector::MiniProjectTargetSelector(QAction *targetSelectorActi
     m_listWidgets[PROJECT] = nullptr; //project is not a generic list widget
 
     m_titleWidgets[PROJECT] = createTitleLabel(tr("Project"));
-    m_projectListWidget = new ProjectListWidget(this);
+    m_projectListWidget = new ProjectListView(this);
+    connect(m_projectListWidget, &QAbstractItemView::doubleClicked,
+            this, &MiniProjectTargetSelector::hide);
 
     QStringList titles;
     titles << tr("Kit") << tr("Build")
@@ -693,12 +702,16 @@ MiniProjectTargetSelector::MiniProjectTargetSelector(QAction *targetSelectorActi
     for (int i = TARGET; i < LAST; ++i) {
         m_titleWidgets[i] = createTitleLabel(titles.at(i -1));
         m_listWidgets[i] = new GenericListWidget(this);
+        connect(m_listWidgets[i], &QAbstractItemView::doubleClicked,
+                this, &MiniProjectTargetSelector::hide);
     }
+    m_listWidgets[RUN]->theModel()->setColumnCount(2);
+    m_listWidgets[RUN]->viewport()->setAttribute(Qt::WA_Hover);
 
+    // Validate state: At this point the session is still empty!
     Project *startup = SessionManager::startupProject();
-    changeStartupProject(startup);
-    if (startup)
-        activeTargetChanged(startup->activeTarget());
+    QTC_CHECK(!startup);
+    QTC_CHECK(SessionManager::projects().isEmpty());
 
     connect(m_summaryLabel, &QLabel::linkActivated,
             this, &MiniProjectTargetSelector::switchToProjectsMode);
@@ -719,13 +732,23 @@ MiniProjectTargetSelector::MiniProjectTargetSelector(QAction *targetSelectorActi
             this, &MiniProjectTargetSelector::kitChanged);
 
     connect(m_listWidgets[TARGET], &GenericListWidget::changeActiveProjectConfiguration,
-            this, &MiniProjectTargetSelector::setActiveTarget);
+            this, [this](QObject *pc) {
+                SessionManager::setActiveTarget(m_project, static_cast<Target *>(pc), SetActive::Cascade);
+            });
     connect(m_listWidgets[BUILD], &GenericListWidget::changeActiveProjectConfiguration,
-            this, &MiniProjectTargetSelector::setActiveBuildConfiguration);
+            this, [this](QObject *pc) {
+                 SessionManager::setActiveBuildConfiguration(m_project->activeTarget(),
+                                                             static_cast<BuildConfiguration *>(pc), SetActive::Cascade);
+            });
     connect(m_listWidgets[DEPLOY], &GenericListWidget::changeActiveProjectConfiguration,
-            this, &MiniProjectTargetSelector::setActiveDeployConfiguration);
+            this, [this](QObject *pc) {
+                 SessionManager::setActiveDeployConfiguration(m_project->activeTarget(),
+                                                              static_cast<DeployConfiguration *>(pc), SetActive::Cascade);
+            });
     connect(m_listWidgets[RUN], &GenericListWidget::changeActiveProjectConfiguration,
-            this, &MiniProjectTargetSelector::setActiveRunConfiguration);
+            this, [this](QObject *pc) {
+                 m_project->activeTarget()->setActiveRunConfiguration(static_cast<RunConfiguration *>(pc));
+            });
 }
 
 bool MiniProjectTargetSelector::event(QEvent *event)
@@ -816,9 +839,9 @@ QVector<int> MiniProjectTargetSelector::listWidgetWidths(int minSize, int maxSiz
 
         int delta;
         if (tooSmall)
-            delta = qMin(next - first, widthToDistribute / i);
+            delta = qMin(next - first, widthToDistribute / qMax(i, 1));
         else
-            delta = qMin(first - next, widthToDistribute / i);
+            delta = qMin(first - next, widthToDistribute / qMax(i, 1));
 
         if (delta == 0)
             return result;
@@ -846,7 +869,7 @@ void MiniProjectTargetSelector::doLayout(bool keepSize)
     // if there's a configured project in the seesion
     // that could be improved
     static QStatusBar *statusBar = Core::ICore::statusBar();
-    static QWidget *actionBar = Core::ICore::mainWindow()->findChild<QWidget*>(QLatin1String("actionbar"));
+    static auto *actionBar = Core::ICore::mainWindow()->findChild<QWidget*>(QLatin1String("actionbar"));
     Q_ASSERT(actionBar);
 
     m_kitAreaWidget->move(0, 0);
@@ -926,6 +949,8 @@ void MiniProjectTargetSelector::doLayout(bool keepSize)
         }
 
         QVector<int> widths = listWidgetWidths(minWidth, 1000);
+
+        const int runColumnWidth = widths[RUN] == -1 ? 0 : 30;
         int x = 0;
         for (int i = PROJECT; i < LAST; ++i) {
             int optimalWidth = widths[i];
@@ -933,6 +958,8 @@ void MiniProjectTargetSelector::doLayout(bool keepSize)
                 m_projectListWidget->resize(optimalWidth, listHeight);
                 m_projectListWidget->move(x, listY);
             } else {
+                if (i == RUN)
+                    optimalWidth += runColumnWidth;
                 m_listWidgets[i]->resize(optimalWidth, listHeight);
                 m_listWidgets[i]->move(x, listY);
             }
@@ -941,6 +968,8 @@ void MiniProjectTargetSelector::doLayout(bool keepSize)
             x += optimalWidth + 1; //1 extra pixel for the separators or the right border
         }
 
+        m_listWidgets[RUN]->setColumnWidth(0, m_listWidgets[RUN]->size().width() - runColumnWidth);
+        m_listWidgets[RUN]->setColumnWidth(1, runColumnWidth);
         m_summaryLabel->resize(x - 1, summaryLabelHeight);
         m_kitAreaWidget->resize(x - 1, kitAreaHeight);
         setFixedSize(x, heightWithoutKitArea + kitAreaHeight);
@@ -959,34 +988,12 @@ void MiniProjectTargetSelector::doLayout(bool keepSize)
     move(moveTo);
 }
 
-void MiniProjectTargetSelector::setActiveTarget(ProjectConfiguration *pc)
-{
-    SessionManager::setActiveTarget(m_project, static_cast<Target *>(pc),
-                                    SetActive::Cascade);
-}
-
-void MiniProjectTargetSelector::setActiveBuildConfiguration(ProjectConfiguration *pc)
-{
-    SessionManager::setActiveBuildConfiguration(m_target, static_cast<BuildConfiguration *>(pc), SetActive::Cascade);
-}
-
-void MiniProjectTargetSelector::setActiveDeployConfiguration(ProjectConfiguration *pc)
-{
-    SessionManager::setActiveDeployConfiguration(m_target, static_cast<DeployConfiguration *>(pc), SetActive::Cascade);
-}
-
-void MiniProjectTargetSelector::setActiveRunConfiguration(ProjectConfiguration *pc)
-{
-    m_target->setActiveRunConfiguration(static_cast<RunConfiguration *>(pc));
-}
-
 void MiniProjectTargetSelector::projectAdded(Project *project)
 {
     connect(project, &Project::addedTarget,
-            this, &MiniProjectTargetSelector::slotAddedTarget);
-
+            this, &MiniProjectTargetSelector::handleNewTarget);
     connect(project, &Project::removedTarget,
-            this, &MiniProjectTargetSelector::slotRemovedTarget);
+            this, &MiniProjectTargetSelector::handleRemovalOfTarget);
 
     foreach (Target *t, project->targets())
         addedTarget(t);
@@ -1001,10 +1008,9 @@ void MiniProjectTargetSelector::projectAdded(Project *project)
 void MiniProjectTargetSelector::projectRemoved(Project *project)
 {
     disconnect(project, &Project::addedTarget,
-               this, &MiniProjectTargetSelector::slotAddedTarget);
-
+               this, &MiniProjectTargetSelector::handleNewTarget);
     disconnect(project, &Project::removedTarget,
-               this, &MiniProjectTargetSelector::slotRemovedTarget);
+               this, &MiniProjectTargetSelector::handleRemovalOfTarget);
 
     foreach (Target *t, project->targets())
         removedTarget(t);
@@ -1016,35 +1022,7 @@ void MiniProjectTargetSelector::projectRemoved(Project *project)
     updateRunListVisible();
 }
 
-void MiniProjectTargetSelector::addedTarget(Target *target)
-{
-    connect(target, &Target::addedBuildConfiguration,
-            this, &MiniProjectTargetSelector::slotAddedBuildConfiguration);
-    connect(target, &Target::removedBuildConfiguration,
-            this, &MiniProjectTargetSelector::slotRemovedBuildConfiguration);
-
-    connect(target, &Target::addedDeployConfiguration,
-            this, &MiniProjectTargetSelector::slotAddedDeployConfiguration);
-    connect(target, &Target::removedDeployConfiguration,
-            this, &MiniProjectTargetSelector::slotRemovedDeployConfiguration);
-
-    connect(target, &Target::addedRunConfiguration,
-            this, &MiniProjectTargetSelector::slotAddedRunConfiguration);
-    connect(target, &Target::removedRunConfiguration,
-            this, &MiniProjectTargetSelector::slotRemovedRunConfiguration);
-
-    if (target->project() == m_project)
-        m_listWidgets[TARGET]->addProjectConfiguration(target);
-
-    foreach (BuildConfiguration *bc, target->buildConfigurations())
-        addedBuildConfiguration(bc);
-    foreach (DeployConfiguration *dc, target->deployConfigurations())
-        addedDeployConfiguration(dc);
-    foreach (RunConfiguration *rc, target->runConfigurations())
-        addedRunConfiguration(rc);
-}
-
-void MiniProjectTargetSelector::slotAddedTarget(Target *target)
+void MiniProjectTargetSelector::handleNewTarget(Target *target)
 {
     addedTarget(target);
     updateTargetListVisible();
@@ -1053,35 +1031,7 @@ void MiniProjectTargetSelector::slotAddedTarget(Target *target)
     updateRunListVisible();
 }
 
-void MiniProjectTargetSelector::removedTarget(Target *target)
-{
-    disconnect(target, &Target::addedBuildConfiguration,
-               this, &MiniProjectTargetSelector::slotAddedBuildConfiguration);
-    disconnect(target, &Target::removedBuildConfiguration,
-               this, &MiniProjectTargetSelector::slotRemovedBuildConfiguration);
-
-    disconnect(target, &Target::addedDeployConfiguration,
-               this, &MiniProjectTargetSelector::slotAddedDeployConfiguration);
-    disconnect(target, &Target::removedDeployConfiguration,
-               this, &MiniProjectTargetSelector::slotRemovedDeployConfiguration);
-
-    disconnect(target, &Target::addedRunConfiguration,
-               this, &MiniProjectTargetSelector::slotAddedRunConfiguration);
-    disconnect(target, &Target::removedRunConfiguration,
-               this, &MiniProjectTargetSelector::slotRemovedRunConfiguration);
-
-    if (target->project() == m_project)
-        m_listWidgets[TARGET]->removeProjectConfiguration(target);
-
-    foreach (BuildConfiguration *bc, target->buildConfigurations())
-        removedBuildConfiguration(bc);
-    foreach (DeployConfiguration *dc, target->deployConfigurations())
-        removedDeployConfiguration(dc);
-    foreach (RunConfiguration *rc, target->runConfigurations())
-        removedRunConfiguration(rc);
-}
-
-void MiniProjectTargetSelector::slotRemovedTarget(Target *target)
+void MiniProjectTargetSelector::handleRemovalOfTarget(Target *target)
 {
     removedTarget(target);
 
@@ -1091,83 +1041,94 @@ void MiniProjectTargetSelector::slotRemovedTarget(Target *target)
     updateRunListVisible();
 }
 
-
-void MiniProjectTargetSelector::addedBuildConfiguration(BuildConfiguration *bc)
+void MiniProjectTargetSelector::addedTarget(Target *target)
 {
-    if (bc->target() == m_target)
-        m_listWidgets[BUILD]->addProjectConfiguration(bc);
+    if (target->project() != m_project)
+        return;
+
+    m_listWidgets[TARGET]->addProjectConfiguration(target);
+
+    for (BuildConfiguration *bc : target->buildConfigurations())
+        addedBuildConfiguration(bc, false);
+    for (DeployConfiguration *dc : target->deployConfigurations())
+        addedDeployConfiguration(dc, false);
+    for (RunConfiguration *rc : target->runConfigurations())
+        addedRunConfiguration(rc, false);
 }
 
-void MiniProjectTargetSelector::slotAddedBuildConfiguration(BuildConfiguration *bc)
+void MiniProjectTargetSelector::removedTarget(Target *target)
 {
-    if (bc->target() == m_target)
-        m_listWidgets[BUILD]->addProjectConfiguration(bc);
-    updateBuildListVisible();
+    if (target->project() != m_project)
+        return;
+
+    m_listWidgets[TARGET]->removeProjectConfiguration(target);
+
+    for (BuildConfiguration *bc : target->buildConfigurations())
+        removedBuildConfiguration(bc, false);
+    for (DeployConfiguration *dc : target->deployConfigurations())
+        removedDeployConfiguration(dc, false);
+    for (RunConfiguration *rc : target->runConfigurations())
+        removedRunConfiguration(rc, false);
 }
 
-void MiniProjectTargetSelector::removedBuildConfiguration(BuildConfiguration *bc)
+void MiniProjectTargetSelector::addedBuildConfiguration(BuildConfiguration *bc, bool update)
 {
-    if (bc->target() == m_target)
-        m_listWidgets[BUILD]->removeProjectConfiguration(bc);
+    if (!m_project || bc->target() != m_project->activeTarget())
+        return;
+
+    m_listWidgets[BUILD]->addProjectConfiguration(bc);
+    if (update)
+        updateBuildListVisible();
 }
 
-void MiniProjectTargetSelector::slotRemovedBuildConfiguration(BuildConfiguration *bc)
+void MiniProjectTargetSelector::removedBuildConfiguration(BuildConfiguration *bc, bool update)
 {
-    if (bc->target() == m_target)
-        m_listWidgets[BUILD]->removeProjectConfiguration(bc);
-    updateBuildListVisible();
+    if (!m_project || bc->target() != m_project->activeTarget())
+        return;
+
+    m_listWidgets[BUILD]->removeProjectConfiguration(bc);
+    if (update)
+        updateBuildListVisible();
 }
 
-void MiniProjectTargetSelector::addedDeployConfiguration(DeployConfiguration *dc)
+void MiniProjectTargetSelector::addedDeployConfiguration(DeployConfiguration *dc, bool update)
 {
-    if (dc->target() == m_target)
-        m_listWidgets[DEPLOY]->addProjectConfiguration(dc);
+    if (!m_project || dc->target() != m_project->activeTarget())
+        return;
+
+    m_listWidgets[DEPLOY]->addProjectConfiguration(dc);
+    if (update)
+        updateDeployListVisible();
 }
 
-void MiniProjectTargetSelector::slotAddedDeployConfiguration(DeployConfiguration *dc)
+void MiniProjectTargetSelector::removedDeployConfiguration(DeployConfiguration *dc, bool update)
 {
-    if (dc->target() == m_target)
-        m_listWidgets[DEPLOY]->addProjectConfiguration(dc);
-    updateDeployListVisible();
+    if (!m_project || dc->target() != m_project->activeTarget())
+        return;
+
+    m_listWidgets[DEPLOY]->removeProjectConfiguration(dc);
+    if (update)
+        updateDeployListVisible();
 }
 
-void MiniProjectTargetSelector::removedDeployConfiguration(DeployConfiguration *dc)
+void MiniProjectTargetSelector::addedRunConfiguration(RunConfiguration *rc, bool update)
 {
-    if (dc->target() == m_target)
-        m_listWidgets[DEPLOY]->removeProjectConfiguration(dc);
+    if (!m_project || rc->target() != m_project->activeTarget())
+        return;
+
+    m_listWidgets[RUN]->addProjectConfiguration(rc);
+    if (update)
+        updateRunListVisible();
 }
 
-void MiniProjectTargetSelector::slotRemovedDeployConfiguration(DeployConfiguration *dc)
+void MiniProjectTargetSelector::removedRunConfiguration(RunConfiguration *rc, bool update)
 {
-    if (dc->target() == m_target)
-        m_listWidgets[DEPLOY]->removeProjectConfiguration(dc);
-    updateDeployListVisible();
-}
+    if (!m_project || rc->target() != m_project->activeTarget())
+        return;
 
-void MiniProjectTargetSelector::addedRunConfiguration(RunConfiguration *rc)
-{
-    if (rc->target() == m_target)
-        m_listWidgets[RUN]->addProjectConfiguration(rc);
-}
-
-void MiniProjectTargetSelector::slotAddedRunConfiguration(RunConfiguration *rc)
-{
-    if (rc->target() == m_target)
-        m_listWidgets[RUN]->addProjectConfiguration(rc);
-    updateRunListVisible();
-}
-
-void MiniProjectTargetSelector::removedRunConfiguration(RunConfiguration *rc)
-{
-    if (rc->target() == m_target)
-        m_listWidgets[RUN]->removeProjectConfiguration(rc);
-}
-
-void MiniProjectTargetSelector::slotRemovedRunConfiguration(RunConfiguration *rc)
-{
-    if (rc->target() == m_target)
-        m_listWidgets[RUN]->removeProjectConfiguration(rc);
-    updateRunListVisible();
+    m_listWidgets[RUN]->removeProjectConfiguration(rc);
+    if (update)
+        updateRunListVisible();
 }
 
 void MiniProjectTargetSelector::updateProjectListVisible()
@@ -1253,12 +1214,12 @@ void MiniProjectTargetSelector::changeStartupProject(Project *project)
     }
 
     if (project) {
-        QList<ProjectConfiguration *> list;
+        QList<QObject *> list;
         foreach (Target *t, project->targets())
             list.append(t);
         m_listWidgets[TARGET]->setProjectConfigurations(list, project->activeTarget());
     } else {
-        m_listWidgets[TARGET]->setProjectConfigurations(QList<ProjectConfiguration *>(), nullptr);
+        m_listWidgets[TARGET]->setProjectConfigurations(QList<QObject *>(), nullptr);
     }
 
     updateActionAndSummary();
@@ -1267,9 +1228,7 @@ void MiniProjectTargetSelector::changeStartupProject(Project *project)
 void MiniProjectTargetSelector::activeTargetChanged(Target *target)
 {
     if (m_target) {
-        disconnect(m_target, &ProjectConfiguration::displayNameChanged,
-                   this, &MiniProjectTargetSelector::updateActionAndSummary);
-        disconnect(m_target, &Target::toolTipChanged,
+        disconnect(m_target, &Target::kitChanged,
                    this, &MiniProjectTargetSelector::updateActionAndSummary);
         disconnect(m_target, &Target::iconChanged,
                    this, &MiniProjectTargetSelector::updateActionAndSummary);
@@ -1299,18 +1258,18 @@ void MiniProjectTargetSelector::activeTargetChanged(Target *target)
                    this, &MiniProjectTargetSelector::updateActionAndSummary);
 
     if (m_target) {
-        QList<ProjectConfiguration *> bl;
-        foreach (BuildConfiguration *bc, target->buildConfigurations())
+        QList<QObject *> bl;
+        for (BuildConfiguration *bc : target->buildConfigurations())
             bl.append(bc);
         m_listWidgets[BUILD]->setProjectConfigurations(bl, target->activeBuildConfiguration());
 
-        QList<ProjectConfiguration *> dl;
-        foreach (DeployConfiguration *dc, target->deployConfigurations())
+        QList<QObject *> dl;
+        for (DeployConfiguration *dc : target->deployConfigurations())
             dl.append(dc);
         m_listWidgets[DEPLOY]->setProjectConfigurations(dl, target->activeDeployConfiguration());
 
-        QList<ProjectConfiguration *> rl;
-        foreach (RunConfiguration *rc, target->runConfigurations())
+        QList<QObject *> rl;
+        for (RunConfiguration *rc : target->runConfigurations())
             rl.append(rc);
         m_listWidgets[RUN]->setProjectConfigurations(rl, target->activeRunConfiguration());
 
@@ -1327,9 +1286,7 @@ void MiniProjectTargetSelector::activeTargetChanged(Target *target)
             connect(m_runConfiguration, &ProjectConfiguration::displayNameChanged,
                     this, &MiniProjectTargetSelector::updateActionAndSummary);
 
-        connect(m_target, &ProjectConfiguration::displayNameChanged,
-                this, &MiniProjectTargetSelector::updateActionAndSummary);
-        connect(m_target, &Target::toolTipChanged,
+        connect(m_target, &Target::kitChanged,
                 this, &MiniProjectTargetSelector::updateActionAndSummary);
         connect(m_target, &Target::iconChanged,
                 this, &MiniProjectTargetSelector::updateActionAndSummary);
@@ -1340,9 +1297,9 @@ void MiniProjectTargetSelector::activeTargetChanged(Target *target)
         connect(m_target, &Target::activeRunConfigurationChanged,
                 this, &MiniProjectTargetSelector::activeRunConfigurationChanged);
     } else {
-        m_listWidgets[BUILD]->setProjectConfigurations(QList<ProjectConfiguration *>(), nullptr);
-        m_listWidgets[DEPLOY]->setProjectConfigurations(QList<ProjectConfiguration *>(), nullptr);
-        m_listWidgets[RUN]->setProjectConfigurations(QList<ProjectConfiguration *>(), nullptr);
+        m_listWidgets[BUILD]->setProjectConfigurations(QList<QObject *>(), nullptr);
+        m_listWidgets[DEPLOY]->setProjectConfigurations(QList<QObject *>(), nullptr);
+        m_listWidgets[RUN]->setProjectConfigurations(QList<QObject *>(), nullptr);
         m_buildConfiguration = nullptr;
         m_deployConfiguration = nullptr;
         m_runConfiguration = nullptr;
@@ -1426,11 +1383,11 @@ void MiniProjectTargetSelector::nextOrShow()
     } else {
         m_hideOnRelease = true;
         m_earliestHidetime = QDateTime::currentDateTime().addMSecs(800);
-        if (ListWidget *lw = qobject_cast<ListWidget *>(focusWidget())) {
-            if (lw->currentRow() < lw->count() -1)
-                lw->setCurrentRow(lw->currentRow() + 1);
+        if (auto *lw = qobject_cast<SelectorView *>(focusWidget())) {
+            if (lw->currentIndex().row() < lw->model()->rowCount() -1)
+                lw->setCurrentIndex(lw->model()->index(lw->currentIndex().row() + 1, 0));
             else
-                lw->setCurrentRow(0);
+                lw->setCurrentIndex(lw->model()->index(0, 0));
         }
     }
 }
@@ -1549,7 +1506,7 @@ void MiniProjectTargetSelector::updateActionAndSummary()
         lines << tr("<b>Run:</b> %1").arg(runConfig);
     if (!targetToolTipText.isEmpty())
         lines << tr("%1").arg(targetToolTipText);
-    QString toolTip = tr("<html><nobr>%1</html>")
+    QString toolTip = QString("<html><nobr>%1</html>")
             .arg(lines.join(QLatin1String("<br/>")));
     m_projectAction->setToolTip(toolTip);
     updateSummary();
@@ -1596,8 +1553,7 @@ void MiniProjectTargetSelector::updateSummary()
 void MiniProjectTargetSelector::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
-    painter.setBrush(creatorTheme()->color(Theme::MiniProjectTargetSelectorBackgroundColor));
-    painter.drawRect(rect());
+    painter.fillRect(rect(), Utils::StyleHelper().baseColor());
     painter.setPen(creatorTheme()->color(Theme::MiniProjectTargetSelectorBorderColor));
     // draw border on top and right
     QRectF borderRect = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
@@ -1616,3 +1572,8 @@ void MiniProjectTargetSelector::switchToProjectsMode()
     Core::ModeManager::activateMode(Constants::MODE_SESSION);
     hide();
 }
+
+} // namespace Internal
+} // namespace ProjectExplorer
+
+#include <miniprojecttargetselector.moc>

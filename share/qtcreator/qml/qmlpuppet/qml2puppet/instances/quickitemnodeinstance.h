@@ -38,15 +38,16 @@ namespace Internal {
 class QuickItemNodeInstance : public ObjectNodeInstance
 {
 public:
-    typedef QSharedPointer<QuickItemNodeInstance> Pointer;
-    typedef QWeakPointer<QuickItemNodeInstance> WeakPointer;
+    using Pointer = QSharedPointer<QuickItemNodeInstance>;
+    using WeakPointer = QWeakPointer<QuickItemNodeInstance>;
 
-    ~QuickItemNodeInstance();
+    ~QuickItemNodeInstance() override;
 
     static Pointer create(QObject *objectToBeWrapped);
     static void createEffectItem(bool createEffectItem);
 
-    void initialize(const ObjectNodeInstance::Pointer &objectNodeInstance) override;
+    void initialize(const ObjectNodeInstance::Pointer &objectNodeInstance,
+                    InstanceContainer::NodeFlags flags) override;
 
     QQuickItem *contentItem() const override;
     bool hasContent() const override;
@@ -95,6 +96,7 @@ public:
     void doComponentComplete() override;
 
     QList<QQuickItem*> allItemsRecursive() const override;
+    QStringList allStates() const override;
 
 protected:
     explicit QuickItemNodeInstance(QQuickItem*);

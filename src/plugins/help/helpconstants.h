@@ -39,8 +39,6 @@ static const QLatin1String PreviousFilterNameKey("UnfilteredFilterName");
 const int  P_MODE_HELP    = 70;
 const char ID_MODE_HELP  [] = "Help";
 const char HELP_CATEGORY[] = "H.Help";
-const char HELP_CATEGORY_ICON[] = ":/help/images/category_help.png";
-const char HELP_TR_CATEGORY[] = QT_TRANSLATE_NOOP("Help", "Help");
 
 const char C_MODE_HELP   [] = "Help Mode";
 const char C_HELP_SIDEBAR[] = "Help Sidebar";
@@ -51,6 +49,7 @@ const char HELP_HOME[] = "Help.Home";
 const char HELP_PREVIOUS[] = "Help.Previous";
 const char HELP_NEXT[] = "Help.Next";
 const char HELP_ADDBOOKMARK[] = "Help.AddBookmark";
+const char HELP_OPENONLINE[] = "Help.OpenOnline";
 const char HELP_INDEX[] = "Help.Index";
 const char HELP_CONTENTS[] = "Help.Contents";
 const char HELP_SEARCH[] = "Help.Search";

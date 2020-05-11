@@ -55,9 +55,7 @@ Protocol::Protocol()
 {
 }
 
-Protocol::~Protocol()
-{
-}
+Protocol::~Protocol() = default;
 
 bool Protocol::hasSettings() const
 {
@@ -71,7 +69,7 @@ bool Protocol::checkConfiguration(QString *)
 
 Core::IOptionsPage *Protocol::settingsPage() const
 {
-    return 0;
+    return nullptr;
 }
 
 void Protocol::list()
@@ -95,6 +93,7 @@ Protocol::ContentType Protocol::contentType(const QString &mt)
         || mt == QLatin1String(CppTools::Constants::OBJECTIVE_CPP_SOURCE_MIMETYPE))
         return Cpp;
     if (mt == QLatin1String(QmlJSTools::Constants::QML_MIMETYPE)
+        || mt == QLatin1String(QmlJSTools::Constants::QMLUI_MIMETYPE)
         || mt == QLatin1String(QmlJSTools::Constants::QMLPROJECT_MIMETYPE)
         || mt == QLatin1String(QmlJSTools::Constants::QBS_MIMETYPE)
         || mt == QLatin1String(QmlJSTools::Constants::JS_MIMETYPE)
@@ -204,9 +203,7 @@ QNetworkReply *NetworkProtocol::httpPost(const QString &link, const QByteArray &
     return Utils::NetworkAccessManager::instance()->post(r, data);
 }
 
-NetworkProtocol::~NetworkProtocol()
-{
-}
+NetworkProtocol::~NetworkProtocol() = default;
 
 bool NetworkProtocol::httpStatus(QString url, QString *errorMessage, bool useHttps)
 {

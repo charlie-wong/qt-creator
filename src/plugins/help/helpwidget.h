@@ -25,15 +25,16 @@
 
 #pragma once
 
+#include <coreplugin/helpmanager.h>
 #include <coreplugin/icontext.h>
 
-#include <qglobal.h>
+#include <QAbstractTableModel>
 #include <QWidget>
+#include <qglobal.h>
 
 QT_BEGIN_NAMESPACE
 class QAction;
 class QComboBox;
-class QFont;
 class QMenu;
 class QPrinter;
 class QStackedWidget;
@@ -48,6 +49,24 @@ namespace Help {
 namespace Internal {
 
 class HelpViewer;
+class HelpWidget;
+class OpenPagesManager;
+
+class OpenPagesModel : public QAbstractTableModel
+{
+public:
+    OpenPagesModel(HelpWidget *parent);
+
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    int columnCount(const QModelIndex &parent = QModelIndex()) const override;
+
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+
+private:
+    HelpWidget *m_parent;
+
+    friend class HelpWidget;
+};
 
 class HelpWidget : public QWidget
 {
@@ -59,47 +78,59 @@ public:
         ExternalWindow
     };
 
-    HelpWidget(const Core::Context &context, WidgetStyle style, QWidget *parent = 0);
-    ~HelpWidget();
+    HelpWidget(const Core::Context &context, WidgetStyle style, QWidget *parent = nullptr);
+    ~HelpWidget() override;
+
+    QAbstractItemModel *model();
+    WidgetStyle widgetStyle() const;
 
     HelpViewer *currentViewer() const;
-    void setCurrentViewer(HelpViewer *viewer);
     int currentIndex() const;
-    void addViewer(HelpViewer *viewer);
+    void setCurrentIndex(int index);
+    HelpViewer *addViewer(const QUrl &url, qreal zoom = 0);
     void removeViewerAt(int index);
 
-    // so central widget can save the state
     int viewerCount() const;
     HelpViewer *viewerAt(int index) const;
 
     void open(const QUrl &url, bool newPage = false);
+    HelpViewer *openNewPage(const QUrl &url);
     void openFromSearch(const QUrl &url, const QStringList &searchTerms, bool newPage = false);
-    void showTopicChooser(const QMap<QString, QUrl> &links, const QString &key,
+    void showLinks(const QMultiMap<QString, QUrl> &links, const QString &key,
                           bool newPage = false);
     void activateSideBarItem(const QString &id);
+
+    OpenPagesManager *openPagesManager() const;
 
 public:
     void setSource(const QUrl &url);
     void updateCloseButton();
 
 protected:
-    void closeEvent(QCloseEvent *);
+    void closeEvent(QCloseEvent *) override;
 
 signals:
-    void openHelpMode(const QUrl &url);
+    void requestShowHelpUrl(const QUrl &url, Core::HelpManager::HelpViewerLocation location);
     void closeButtonClicked();
     void aboutToClose();
-    void sourceChanged(const QUrl &url);
     void filterActivated(const QString &name);
+    void currentIndexChanged(int index);
 
 private:
+    int indexOf(HelpViewer *viewer) const;
+    HelpViewer *insertViewer(int index, const QUrl &url, qreal zoom);
     void updateBackMenu();
     void updateForwardMenu();
     void updateWindowTitle();
-    void helpModeButtonClicked();
+    void postRequestShowHelpUrl(Core::HelpManager::HelpViewerLocation location);
+    void closeCurrentPage();
+    void saveState() const;
+    bool supportsPages() const;
+    void closeWindow();
 
     void goHome();
     void addBookmark();
+    void openOnlineDocumentation();
     void copy();
     void forward();
     void backward();
@@ -111,6 +142,14 @@ private:
     void addSideBar();
     QString sideBarSettingsKey() const;
 
+#ifdef HELP_NEW_FILTER_ENGINE
+    void setupFilterCombo();
+    void filterDocumentation(int filterIndex);
+    void currentFilterChanged(const QString &filter);
+#endif
+
+    OpenPagesModel m_model;
+    OpenPagesManager *m_openPagesManager = nullptr;
     Core::IContext *m_context = nullptr;
     WidgetStyle m_style;
     QAction *m_toggleSideBarAction = nullptr;
@@ -121,6 +160,7 @@ private:
     QAction *m_backAction = nullptr;
     QAction *m_forwardAction = nullptr;
     QAction *m_addBookmarkAction = nullptr;
+    QAction *m_openOnlineDocumentationAction = nullptr;
     QComboBox *m_filterComboBox = nullptr;
     QAction *m_closeAction = nullptr;
     QAction *m_scaleUp = nullptr;
@@ -128,6 +168,8 @@ private:
     QAction *m_resetScale = nullptr;
     QAction *m_printAction = nullptr;
     QAction *m_copy = nullptr;
+    QAction *m_gotoPrevious = nullptr;
+    QAction *m_gotoNext = nullptr;
 
     QStackedWidget *m_viewerStack = nullptr;
     QPrinter *m_printer = nullptr;

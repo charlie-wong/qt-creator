@@ -27,13 +27,11 @@
 
 #include "remotelinux_export.h"
 
+#include "abstractremotelinuxdeployservice.h"
+
 #include <projectexplorer/buildstep.h>
 
-#include <QVariantMap>
-
 namespace RemoteLinux {
-class AbstractRemoteLinuxDeployService;
-class RemoteLinuxDeployConfiguration;
 
 namespace Internal { class AbstractRemoteLinuxDeployStepPrivate; }
 
@@ -43,24 +41,29 @@ class REMOTELINUX_EXPORT AbstractRemoteLinuxDeployStep : public ProjectExplorer:
 
 public:
     ~AbstractRemoteLinuxDeployStep() override;
-    bool fromMap(const QVariantMap &map) override;
-    QVariantMap toMap() const override;
-    bool init(QList<const BuildStep *> &earlierSteps) override;
-    void run(QFutureInterface<bool> &fi) override;
-    bool runInGuiThread() const override { return true; }
-    void cancel() override;
-    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
-    RemoteLinuxDeployConfiguration *deployConfiguration() const;
-
-    virtual AbstractRemoteLinuxDeployService *deployService() const = 0;
 
 protected:
-    AbstractRemoteLinuxDeployStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
-    AbstractRemoteLinuxDeployStep(ProjectExplorer::BuildStepList *bsl,
-        AbstractRemoteLinuxDeployStep *other);
-    virtual bool initInternal(QString *error = 0) = 0;
+    bool fromMap(const QVariantMap &map) override;
+    QVariantMap toMap() const override;
+    bool init() override;
+    void doRun() final;
+    void doCancel() override;
+
+    explicit AbstractRemoteLinuxDeployStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
+
+    void setInternalInitializer(const std::function<CheckResult()> &init);
+    void setRunPreparer(const std::function<void()> &prep);
+
+    template <class T>
+    T *createDeployService()
+    {
+        T *service = new T;
+        setDeployService(service);
+        return service;
+    }
 
 private:
+    void setDeployService(AbstractRemoteLinuxDeployService *service);
     void handleProgressMessage(const QString &message);
     void handleErrorMessage(const QString &message);
     void handleWarningMessage(const QString &message);

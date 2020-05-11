@@ -28,8 +28,9 @@
 #include "iassistproposalmodel.h"
 #include "assistenums.h"
 
+#include <texteditor/completionsettings.h>
 #include <texteditor/texteditor_global.h>
-
+#include <utils/fuzzymatcher.h>
 
 #include <QHash>
 #include <QList>
@@ -44,7 +45,7 @@ class TEXTEDITOR_EXPORT GenericProposalModel : public IAssistProposalModel
 {
 public:
     GenericProposalModel();
-    ~GenericProposalModel();
+    ~GenericProposalModel() override;
 
     void reset() override;
     int size() const override;
@@ -52,6 +53,7 @@ public:
 
     virtual QIcon icon(int index) const;
     virtual QString detail(int index) const;
+    virtual Qt::TextFormat detailFormat(int index) const;
     virtual int persistentId(int index) const;
     virtual bool containsDuplicates() const;
     virtual void removeDuplicates();
@@ -71,6 +73,8 @@ public:
     bool isPrefiltered(const QString &prefix) const;
     void setPrefilterPrefix(const QString &prefix);
 
+    FuzzyMatcher::CaseSensitivity convertCaseSensitivity(TextEditor::CaseSensitivity textEditorCaseSensitivity);
+
 protected:
     QList<AssistProposalItemInterface *> m_currentItems;
 
@@ -80,4 +84,7 @@ private:
     QString m_prefilterPrefix;
     bool m_duplicatesRemoved = false;
 };
+
+using GenericProposalModelPtr = QSharedPointer<GenericProposalModel>;
+
 } // TextEditor

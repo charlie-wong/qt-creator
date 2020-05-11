@@ -25,8 +25,10 @@
 
 #include "navigatortreemodel.h"
 #include "navigatorview.h"
+#include "qmldesignerplugin.h"
 
 #include <bindingproperty.h>
+#include <designersettings.h>
 #include <nodeabstractproperty.h>
 #include <nodehints.h>
 #include <nodelistproperty.h>
@@ -48,6 +50,7 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QPointF>
+#include <QDir>
 
 #include <coreplugin/messagebox.h>
 
@@ -74,8 +77,10 @@ static QList<ModelNode> modelNodesFromMimeData(const QMimeData *mineData, Abstra
 bool fitsToTargetProperty(const NodeAbstractProperty &targetProperty,
                           const QList<ModelNode> &modelNodeList)
 {
+    bool const canBeContainer =
+        NodeHints::fromModelNode(targetProperty.parentModelNode()).canBeContainerFor(modelNodeList.first());
     return !(targetProperty.isNodeProperty() &&
-             modelNodeList.count() > 1);
+             modelNodeList.count() > 1) && canBeContainer;
 }
 
 static inline QString msgUnknownItem(const QString &t)
@@ -175,9 +180,7 @@ NavigatorTreeModel::NavigatorTreeModel(QObject *parent) : QAbstractItemModel(par
 {
 }
 
-NavigatorTreeModel::~NavigatorTreeModel()
-{
-}
+NavigatorTreeModel::~NavigatorTreeModel() = default;
 
 QVariant NavigatorTreeModel::data(const QModelIndex &index, int role) const
 {
@@ -207,7 +210,8 @@ QVariant NavigatorTreeModel::data(const QModelIndex &index, int role) const
         } else if (role == Qt::ToolTipRole) {
             if (currentQmlObjectNode.hasError()) {
                 QString errorString = currentQmlObjectNode.error();
-                if (currentQmlObjectNode.isRootNode())
+                if (DesignerSettings::getValue(DesignerSettingsKey::STANDALONE_MODE).toBool() &&
+                        currentQmlObjectNode.isRootNode())
                     errorString.append(QString("\n%1").arg(tr("Changing the setting \"%1\" might solve the issue.").arg(
                                                                tr("Use QML emulation layer that is built with the selected Qt"))));
 
@@ -224,14 +228,14 @@ QVariant NavigatorTreeModel::data(const QModelIndex &index, int role) const
         if (role == Qt::CheckStateRole)
             return currentQmlObjectNode.isAliasExported()  ? Qt::Checked : Qt::Unchecked;
         else if (role == Qt::ToolTipRole)
-            return tr("Toggles the visibility of this item in the form editor.\n"
-                      "This is independent of the visibility property in QML.");
+            return tr("Toggles whether this item is exported as an "
+                      "alias property of the root item.");
     } else if (index.column() == 2) { //visible
         if (role == Qt::CheckStateRole)
             return m_view->isNodeInvisible(modelNode) ? Qt::Unchecked : Qt::Checked;
         else if (role == Qt::ToolTipRole)
-            return tr("Toggles whether this item is exported as an "
-                      "alias property of the root item.");
+            return tr("Toggles the visibility of this item in the form editor.\n"
+                      "This is independent of the visibility property in QML.");
     }
 
     return QVariant();
@@ -246,11 +250,37 @@ Qt::ItemFlags NavigatorTreeModel::flags(const QModelIndex &index) const
             | Qt::ItemNeverHasChildren;
 }
 
+void static appendForcedNodes(const NodeListProperty &property, QList<ModelNode> &list)
+{
+    const QStringList visibleProperties = NodeHints::fromModelNode(property.parentModelNode()).visibleNonDefaultProperties();
+    for (const ModelNode &node : property.parentModelNode().directSubModelNodes()) {
+        if (!list.contains(node) && visibleProperties.contains(QString::fromUtf8(node.parentProperty().name())))
+            list.append(node);
+    }
+}
+
+QList<ModelNode> filteredList(const NodeListProperty &property, bool filter)
+{
+    QList<ModelNode> list;
+
+    if (filter) {
+        list.append(Utils::filtered(property.toModelNodeList(), [] (const ModelNode &arg) {
+            return QmlItemNode::isValidQmlItemNode(arg) || NodeHints::fromModelNode(arg).visibleInNavigator();
+        }));
+    } else {
+        list = property.toModelNodeList();
+    }
+
+    appendForcedNodes(property, list);
+
+    return list;
+}
+
 QModelIndex NavigatorTreeModel::index(int row, int column,
                                       const QModelIndex &parent) const
 {
     if (!m_view->model())
-        return QModelIndex();
+        return {};
 
     if (!hasIndex(row, column, parent))
         return QModelIndex();
@@ -262,7 +292,7 @@ QModelIndex NavigatorTreeModel::index(int row, int column,
 
     ModelNode modelNode;
     if (parentModelNode.defaultNodeListProperty().isValid())
-        modelNode = parentModelNode.defaultNodeListProperty().at(row);
+        modelNode = filteredList(parentModelNode.defaultNodeListProperty(), m_showOnlyVisibleItems).at(row);
 
     if (!modelNode.isValid())
         return QModelIndex();
@@ -278,7 +308,7 @@ QVariant NavigatorTreeModel::headerData(int, Qt::Orientation, int) const
 QModelIndex NavigatorTreeModel::parent(const QModelIndex &index) const
 {
     if (!index.isValid())
-        return QModelIndex();
+        return {};
 
     const ModelNode modelNode = modelNodeForIndex(index);
 
@@ -293,7 +323,7 @@ QModelIndex NavigatorTreeModel::parent(const QModelIndex &index) const
     int row = 0;
 
     if (!parentModelNode.isRootNode() && parentModelNode.parentProperty().isNodeListProperty())
-        row = parentModelNode.parentProperty().toNodeListProperty().indexOf(parentModelNode);
+        row = filteredList(parentModelNode.parentProperty().toNodeListProperty(), m_showOnlyVisibleItems).indexOf(parentModelNode);
 
     return createIndexFromModelNode(row, 0, parentModelNode);
 }
@@ -313,7 +343,7 @@ int NavigatorTreeModel::rowCount(const QModelIndex &parent) const
     int rows = 0;
 
     if (modelNode.defaultNodeListProperty().isValid())
-        rows =  modelNode.defaultNodeListProperty().count();
+        rows = filteredList(modelNode.defaultNodeListProperty(), m_showOnlyVisibleItems).count();
 
     return rows;
 }
@@ -329,6 +359,9 @@ int NavigatorTreeModel::columnCount(const QModelIndex &parent) const
 ModelNode NavigatorTreeModel::modelNodeForIndex(const QModelIndex &index) const
 {
     if (!index.isValid())
+        return ModelNode();
+
+    if (!m_view || !m_view->model())
         return ModelNode();
 
     return m_view->modelNodeForInternalId(index.internalId());
@@ -358,7 +391,7 @@ QStringList NavigatorTreeModel::mimeTypes() const
 
 QMimeData *NavigatorTreeModel::mimeData(const QModelIndexList &modelIndexList) const
 {
-    QMimeData *mimeData = new QMimeData();
+    auto mimeData = new QMimeData();
 
     QByteArray encodedModelNodeData;
     QDataStream encodedModelNodeDataStream(&encodedModelNodeData, QIODevice::WriteOnly);
@@ -418,7 +451,8 @@ bool NavigatorTreeModel::dropMimeData(const QMimeData *mimeData,
 static bool findTargetProperty(const QModelIndex &rowModelIndex,
                                NavigatorTreeModel *navigatorTreeModel,
                                NodeAbstractProperty *targetProperty,
-                               int *targetRowNumber)
+                               int *targetRowNumber,
+                               const PropertyName &propertyName = {})
 {
     QModelIndex targetItemIndex;
     PropertyName targetPropertyName;
@@ -432,7 +466,10 @@ static bool findTargetProperty(const QModelIndex &rowModelIndex,
         if (!targetNode.metaInfo().hasDefaultProperty())
             return false;
 
-        targetPropertyName = targetNode.metaInfo().defaultPropertyName();
+        if (propertyName.isEmpty() || !targetNode.metaInfo().hasProperty(propertyName))
+            targetPropertyName = targetNode.metaInfo().defaultPropertyName();
+        else
+            targetPropertyName = propertyName;
     }
 
     // Disallow dropping items between properties, which are listed first.
@@ -481,23 +518,30 @@ void NavigatorTreeModel::handleItemLibraryItemDrop(const QMimeData *mimeData, in
     int targetRowNumber = rowNumber;
     NodeAbstractProperty targetProperty;
 
-    bool foundTarget = findTargetProperty(rowModelIndex, this, &targetProperty, &targetRowNumber);
+    const ItemLibraryEntry itemLibraryEntry =
+        createItemLibraryEntryFromMimeData(mimeData->data("application/vnd.bauhaus.itemlibraryinfo"));
+
+    const NodeHints hints = NodeHints::fromItemLibraryEntry(itemLibraryEntry);
+
+    const QString targetPropertyName = hints.forceNonDefaultProperty();
+
+    bool foundTarget = findTargetProperty(rowModelIndex, this, &targetProperty, &targetRowNumber, targetPropertyName.toUtf8());
 
     if (foundTarget) {
-        const ItemLibraryEntry itemLibraryEntry =
-                createItemLibraryEntryFromMimeData(mimeData->data("application/vnd.bauhaus.itemlibraryinfo"));
-
         if (!NodeHints::fromItemLibraryEntry(itemLibraryEntry).canBeDroppedInNavigator())
             return;
 
-        const QmlItemNode newQmlItemNode = QmlItemNode::createQmlItemNode(m_view, itemLibraryEntry, QPointF(), targetProperty);
+        const QmlObjectNode newQmlObjectNode = QmlItemNode::createQmlObjectNode(m_view, itemLibraryEntry, QPointF(), targetProperty);
 
-        if (newQmlItemNode.isValid() && targetProperty.isNodeListProperty()) {
+        if (newQmlObjectNode.isValid() && targetProperty.isNodeListProperty()) {
             QList<ModelNode> newModelNodeList;
-            newModelNodeList.append(newQmlItemNode);
+            newModelNodeList.append(newQmlObjectNode);
 
             moveNodesInteractive(targetProperty, newModelNodeList, targetRowNumber);
         }
+
+        if (newQmlObjectNode.isValid())
+            m_view->setSelectedModelNode(newQmlObjectNode.modelNode());
     }
 }
 
@@ -509,16 +553,47 @@ void NavigatorTreeModel::handleItemLibraryImageDrop(const QMimeData *mimeData, i
     NodeAbstractProperty targetProperty;
 
     bool foundTarget = findTargetProperty(rowModelIndex, this, &targetProperty, &targetRowNumber);
-
     if (foundTarget) {
-        const QString imageFileName = QString::fromUtf8(mimeData->data("application/vnd.bauhaus.libraryresource"));
-        const QmlItemNode newQmlItemNode = QmlItemNode::createQmlItemNodeFromImage(m_view, imageFileName, QPointF(), targetProperty);
+        ModelNode targetNode(modelNodeForIndex(rowModelIndex));
 
-        if (newQmlItemNode.isValid()) {
-            QList<ModelNode> newModelNodeList;
-            newModelNodeList.append(newQmlItemNode);
+        const QString imageSource = QString::fromUtf8(mimeData->data("application/vnd.bauhaus.libraryresource")); // absolute path
+        const QString imagePath = QmlDesignerPlugin::instance()->documentManager().currentFilePath().toFileInfo().dir().relativeFilePath(imageSource); // relative to .ui.qml file
 
-            moveNodesInteractive(targetProperty, newModelNodeList, targetRowNumber);
+        ModelNode newModelNode;
+
+        if (targetNode.isSubclassOf("QtQuick3D.DefaultMaterial")) {
+            // if dropping an image on a default material, create a texture instead of image
+            m_view->executeInTransaction("QmlItemNode::createQmlItemNode", [&] {
+                // create a texture item lib
+                ItemLibraryEntry itemLibraryEntry;
+                itemLibraryEntry.setName("Texture");
+                itemLibraryEntry.setType("QtQuick3D.Texture", 1, 0);
+
+                // set texture source
+                PropertyName prop = "source";
+                QString type = "QUrl";
+                QVariant val = imagePath;
+                itemLibraryEntry.addProperty(prop, type, val);
+
+                // create a texture
+                newModelNode = QmlItemNode::createQmlObjectNode(m_view, itemLibraryEntry, {}, targetProperty, false);
+
+                // set the texture to parent material's diffuseMap property
+                // TODO: allow the user to choose which map property to set the texture for
+                targetNode.bindingProperty("diffuseMap").setExpression(newModelNode.validId());
+            });
+        } else if (targetNode.isSubclassOf("QtQuick3D.Texture")) {
+            // if dropping an image on a texture, set the texture source
+            targetNode.variantProperty("source").setValue(imagePath);
+        } else {
+
+            // create an image
+            newModelNode = QmlItemNode::createQmlItemNodeFromImage(m_view, imageSource , QPointF(), targetProperty);
+        }
+
+        if (newModelNode.isValid()) {
+            moveNodesInteractive(targetProperty, {newModelNode}, targetRowNumber);
+            m_view->setSelectedModelNode(newModelNode);
         }
     }
 }
@@ -526,10 +601,9 @@ void NavigatorTreeModel::handleItemLibraryImageDrop(const QMimeData *mimeData, i
 void NavigatorTreeModel::moveNodesInteractive(NodeAbstractProperty &parentProperty, const QList<ModelNode> &modelNodes, int targetIndex)
 {
     QTC_ASSERT(m_view, return);
-    try {
-        const TypeName propertyQmlType = parentProperty.parentModelNode().metaInfo().propertyTypeName(parentProperty.name());
 
-        RewriterTransaction transaction = m_view->beginRewriterTransaction(QByteArrayLiteral("NavigatorTreeModel::moveNodesInteractive"));
+    m_view->executeInTransaction("NavigatorTreeModel::moveNodesInteractive",[&parentProperty, modelNodes, targetIndex](){
+        const TypeName propertyQmlType = parentProperty.parentModelNode().metaInfo().propertyTypeName(parentProperty.name());
         foreach (const ModelNode &modelNode, modelNodes) {
             if (modelNode.isValid()
                     && modelNode != parentProperty.parentModelNode()
@@ -546,10 +620,7 @@ void NavigatorTreeModel::moveNodesInteractive(NodeAbstractProperty &parentProper
                 }
             }
         }
-        transaction.commit();
-    }  catch (const RewritingException &exception) { //better safe than sorry! There always might be cases where we fail
-        exception.showException();
-    }
+    });
 }
 
 Qt::DropActions NavigatorTreeModel::supportedDropActions() const
@@ -569,10 +640,7 @@ bool NavigatorTreeModel::setData(const QModelIndex &index, const QVariant &value
         QTC_ASSERT(m_view, return false);
         m_view->handleChangedExport(modelNode, value.toInt() != 0);
     } else if (index.column() == 2 && role == Qt::CheckStateRole) {
-        if (value.toInt() == 0)
-            modelNode.setAuxiliaryData("invisible", true);
-        else
-            modelNode.removeAuxiliaryData("invisible");
+        QmlVisualNode(modelNode).setVisibilityOverride(value.toInt() == 0);
     }
 
     return true;
@@ -581,7 +649,9 @@ bool NavigatorTreeModel::setData(const QModelIndex &index, const QVariant &value
 void NavigatorTreeModel::notifyDataChanged(const ModelNode &modelNode)
 {
     const QModelIndex index = indexForModelNode(modelNode);
-    dataChanged(index, index);
+    const QAbstractItemModel *model = index.model();
+    const QModelIndex sibling = model ? model->sibling(index.row(), 2, index) : QModelIndex();
+    emit dataChanged(index, sibling);
 }
 
 static QList<ModelNode> collectParents(const QList<ModelNode> &modelNodes)
@@ -594,7 +664,7 @@ static QList<ModelNode> collectParents(const QList<ModelNode> &modelNodes)
         }
     }
 
-    return parents.toList();
+    return Utils::toList(parents);
 }
 
 QList<QPersistentModelIndex> NavigatorTreeModel::nodesToPersistentIndex(const QList<ModelNode> &modelNodes)
@@ -607,22 +677,40 @@ QList<QPersistentModelIndex> NavigatorTreeModel::nodesToPersistentIndex(const QL
 void NavigatorTreeModel::notifyModelNodesRemoved(const QList<ModelNode> &modelNodes)
 {
     QList<QPersistentModelIndex> indexes = nodesToPersistentIndex(collectParents(modelNodes));
-    layoutAboutToBeChanged(indexes);
-    layoutChanged(indexes);
+    emit layoutAboutToBeChanged(indexes);
+    emit layoutChanged(indexes);
 }
 
 void NavigatorTreeModel::notifyModelNodesInserted(const QList<ModelNode> &modelNodes)
 {
     QList<QPersistentModelIndex> indexes = nodesToPersistentIndex(collectParents(modelNodes));
-    layoutAboutToBeChanged(indexes);
-    layoutChanged(indexes);
+    emit layoutAboutToBeChanged(indexes);
+    emit layoutChanged(indexes);
 }
 
 void NavigatorTreeModel::notifyModelNodesMoved(const QList<ModelNode> &modelNodes)
 {
     QList<QPersistentModelIndex> indexes = nodesToPersistentIndex(collectParents(modelNodes));
-    layoutAboutToBeChanged(indexes);
-    layoutChanged(indexes);
+    emit layoutAboutToBeChanged(indexes);
+    emit layoutChanged(indexes);
+}
+
+void NavigatorTreeModel::notifyIconsChanged()
+{
+    emit dataChanged(index(0, 0), index(rowCount(), 0), {Qt::DecorationRole});
+}
+
+void NavigatorTreeModel::setFilter(bool showOnlyVisibleItems)
+{
+    m_showOnlyVisibleItems = showOnlyVisibleItems;
+    resetModel();
+}
+
+void NavigatorTreeModel::resetModel()
+{
+    beginResetModel();
+    m_nodeIndexHash.clear();
+    endResetModel();
 }
 
 } // QmlDesigner

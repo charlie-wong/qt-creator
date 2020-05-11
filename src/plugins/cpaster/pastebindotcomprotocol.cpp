@@ -99,14 +99,18 @@ static inline QByteArray expirySpecification(int expiryDays)
     return QByteArray("N");
 }
 
-void PasteBinDotComProtocol::paste(const QString &text,
-                                   ContentType ct, int expiryDays,
-                                   const QString & /* username */, // Not used unless registered user
-                                   const QString &comment,
-                                   const QString &description)
+void PasteBinDotComProtocol::paste(
+        const QString &text,
+        ContentType ct,
+        int expiryDays,
+        bool publicPaste,
+        const QString & /* username */, // Not used unless registered user
+        const QString &comment,
+        const QString &description
+        )
 {
-    Q_UNUSED(comment);
-    Q_UNUSED(description);
+    Q_UNUSED(comment)
+    Q_UNUSED(description)
     QTC_ASSERT(!m_pasteReply, return);
 
     // Format body
@@ -118,6 +122,7 @@ void PasteBinDotComProtocol::paste(const QString &text,
     pasteData += format(ct);
     pasteData += "api_paste_name="; // Title or name.
     pasteData += QUrl::toPercentEncoding(description);
+    pasteData.append("&api_paste_private=").append(QByteArray(publicPaste ? "0" : "1"));
     pasteData += "&api_paste_code=";
     pasteData += QUrl::toPercentEncoding(fixNewLines(text));
     // fire request
@@ -135,7 +140,7 @@ void PasteBinDotComProtocol::pasteFinished()
         emit pasteDone(QString::fromLatin1(m_pasteReply->readAll()));
 
     m_pasteReply->deleteLater();
-    m_pasteReply = 0;
+    m_pasteReply = nullptr;
 }
 
 void PasteBinDotComProtocol::fetch(const QString &id)

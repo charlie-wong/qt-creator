@@ -25,61 +25,17 @@
 
 #pragma once
 
-#include "ui_locatorsettingspage.h"
-
 #include <coreplugin/dialogs/ioptionspage.h>
-#include <utils/treemodel.h>
-
-#include <QHash>
-#include <QPointer>
-
-QT_BEGIN_NAMESPACE
-class QListWidgetItem;
-class QSortFilterProxyModel;
-QT_END_NAMESPACE
 
 namespace Core {
-
-class ILocatorFilter;
-
 namespace Internal {
-
-class Locator;
 
 class LocatorSettingsPage : public IOptionsPage
 {
     Q_OBJECT
 
 public:
-    explicit LocatorSettingsPage(Locator *plugin);
-
-    QWidget *widget();
-    void apply();
-    void finish();
-
-private:
-    void updateButtonStates();
-    void configureFilter(const QModelIndex &proxyIndex);
-    void addCustomFilter();
-    void removeCustomFilter();
-    void initializeModel();
-    void saveFilterStates();
-    void restoreFilterStates();
-    void requestRefresh();
-    void setFilter(const QString &text);
-
-    Ui::LocatorSettingsWidget m_ui;
-    Locator *m_plugin;
-    QPointer<QWidget> m_widget;
-    Utils::TreeModel<> *m_model;
-    QSortFilterProxyModel *m_proxyModel;
-    Utils::TreeItem *m_customFilterRoot;
-    QList<ILocatorFilter *> m_filters;
-    QList<ILocatorFilter *> m_addedFilters;
-    QList<ILocatorFilter *> m_removedFilters;
-    QList<ILocatorFilter *> m_customFilters;
-    QList<ILocatorFilter *> m_refreshFilters;
-    QHash<ILocatorFilter *, QByteArray> m_filterStates;
+    LocatorSettingsPage();
 };
 
 } // namespace Internal

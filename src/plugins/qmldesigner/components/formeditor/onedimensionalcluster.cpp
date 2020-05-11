@@ -53,17 +53,17 @@ double OneDimensionalCluster::mean() const
 
     if (m_coordinateList.size() == 1)
     {
-        return m_coordinateList.first();
+        return m_coordinateList.constFirst();
     }
 
     return sum(m_coordinateList) / m_coordinateList.size();
 }
 
-double OneDimensionalCluster::first() const
+double OneDimensionalCluster::constFirst() const
 {
     Q_ASSERT(!m_coordinateList.isEmpty());
 
-    return m_coordinateList.first();
+    return m_coordinateList.constFirst();
 }
 
 QList<OneDimensionalCluster> OneDimensionalCluster::createOneDimensionalClusterList(const QList<double> & oneDimensionalCoordinateList)
@@ -93,17 +93,16 @@ QList<OneDimensionalCluster> OneDimensionalCluster::reduceOneDimensionalClusterL
         Utils::sort(workingList);
         reducedList.clear();
         bool clusterMerged = false;
-        QListIterator<OneDimensionalCluster> clusterIterator(workingList);
-        while (clusterIterator.hasNext())
-        {
-            OneDimensionalCluster currentCluster = clusterIterator.next();
-            if (clusterIterator.hasNext())
-            {
-                OneDimensionalCluster nextCluster = clusterIterator.peekNext();
+
+        for (int i = 0, n = workingList.size(); i != n; ) {
+
+            OneDimensionalCluster currentCluster = workingList.at(i);
+            if (i + 1 < n) {
+                OneDimensionalCluster nextCluster = workingList.at(i + 1);
                 if ((nextCluster.mean() - currentCluster.mean()) < maximumDistance)
                 {
                     reducedList.append(currentCluster + nextCluster);
-                    clusterIterator.next();
+                    ++i;
                     clusterMerged = true;
                 }
                 else
@@ -136,7 +135,7 @@ QList<double> OneDimensionalCluster::reduceLines(const QList<double> & oneDimens
 
     QList<double> lineList;
     foreach (const OneDimensionalCluster &cluster, clusterList)
-        lineList.append(cluster.first());
+        lineList.append(cluster.constFirst());
 
     return lineList;
 }

@@ -41,7 +41,7 @@ namespace Debugger {
 namespace Internal {
 
 WatchTreeView::WatchTreeView(WatchType type)
-  : m_type(type), m_sliderPosition(0)
+  : m_type(type)
 {
     setObjectName("WatchWindow");
     setWindowTitle(tr("Locals and Expressions"));
@@ -53,6 +53,9 @@ WatchTreeView::WatchTreeView(WatchType type)
 
     connect(this, &QTreeView::expanded, this, &WatchTreeView::expandNode);
     connect(this, &QTreeView::collapsed, this, &WatchTreeView::collapseNode);
+
+    connect(action(LogTimeStamps), &QAction::triggered,
+            this, &WatchTreeView::updateTimeColumn);
 }
 
 void WatchTreeView::expandNode(const QModelIndex &idx)
@@ -78,7 +81,7 @@ void WatchTreeView::setModel(QAbstractItemModel *model)
     setRootIsDecorated(true);
     if (header()) {
         header()->setDefaultAlignment(Qt::AlignLeft);
-        if (m_type != LocalsType && m_type != InspectType)
+        if (m_type == ReturnType || m_type == TooltipType)
             header()->hide();
     }
 
@@ -96,6 +99,14 @@ void WatchTreeView::setModel(QAbstractItemModel *model)
         connect(watchModel, &WatchModelBase::updateFinished,
                 this, &WatchTreeView::hideProgressIndicator);
     }
+
+    updateTimeColumn();
+}
+
+void WatchTreeView::updateTimeColumn()
+{
+    if (header())
+        header()->setSectionHidden(WatchModelBase::TimeColumn, !boolSetting(LogTimeStamps));
 }
 
 void WatchTreeView::handleItemIsExpanded(const QModelIndex &idx)

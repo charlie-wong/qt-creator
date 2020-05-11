@@ -24,15 +24,13 @@
 ****************************************************************************/
 
 #include "googletest.h"
-#include "testenvironment.h"
+#include "unittest-utility-functions.h"
 
 #include <cursor.h>
 #include <clangdocument.h>
 #include <clangdocuments.h>
 #include <clangstring.h>
 #include <clangtranslationunit.h>
-#include <projectpart.h>
-#include <projects.h>
 #include <skippedsourceranges.h>
 #include <sourcelocation.h>
 #include <sourcerange.h>
@@ -47,7 +45,6 @@ using ClangBackEnd::Document;
 using ClangBackEnd::Documents;
 using ClangBackEnd::TranslationUnit;
 using ClangBackEnd::UnsavedFiles;
-using ClangBackEnd::ProjectPart;
 using ClangBackEnd::ClangString;
 using ClangBackEnd::SourceRange;
 using ClangBackEnd::SkippedSourceRanges;
@@ -74,9 +71,9 @@ MATCHER_P4(IsSourceLocation, filePath, line, column, offset,
            )
 {
     if (!arg.filePath().endsWith(filePath)
-     || arg.line() != uint(line)
-     || arg.column() != uint(column)
-     || arg.offset() != uint(offset)) {
+     || arg.line() != line
+     || arg.column() != column
+     || arg.offset() != offset) {
         return false;
     }
 
@@ -89,16 +86,12 @@ struct Data {
         document.parse();
     }
 
-    ClangBackEnd::ProjectParts projects;
     ClangBackEnd::UnsavedFiles unsavedFiles;
-    ClangBackEnd::Documents documents{projects, unsavedFiles};
+    ClangBackEnd::Documents documents{unsavedFiles};
     Utf8String filePath = Utf8StringLiteral(TESTDATA_DIR"/skippedsourceranges.cpp");
-    Document document{filePath,
-                      ProjectPart(Utf8StringLiteral("projectPartId"),
-                                 TestEnvironment::addPlatformArguments({Utf8StringLiteral("-std=c++11"),
-                                                                        Utf8StringLiteral("-DBLAH")})),
-                      {},
-                      documents};
+    Utf8StringVector compilationArguments{UnitTest::addPlatformArguments(
+        {Utf8StringLiteral("-std=c++11"), {}, Utf8StringLiteral("-DBLAH")})};
+    Document document{filePath, compilationArguments, {}, documents};
     TranslationUnit translationUnit{filePath,
                                     filePath,
                                     document.translationUnit().cxIndex(),
@@ -115,10 +108,27 @@ protected:
     static Data *d;
     const TranslationUnit &translationUnit = d->translationUnit;
     const Utf8String &filePath = d->filePath;
-    const ::SkippedSourceRanges skippedSourceRanges{d->translationUnit.skippedSourceRanges()};
+    ::SkippedSourceRanges skippedSourceRanges{d->translationUnit.skippedSourceRanges()};
+    ::SkippedSourceRanges otherSkippedSourceRanges{d->translationUnit.skippedSourceRanges()};
 };
 
 Data *SkippedSourceRanges::d;
+
+TEST_F(SkippedSourceRanges, MoveConstructor)
+{
+    const auto other = std::move(skippedSourceRanges);
+
+    ASSERT_TRUE(skippedSourceRanges.isNull());
+    ASSERT_FALSE(other.isNull());
+}
+
+TEST_F(SkippedSourceRanges, MoveAssignment)
+{
+    skippedSourceRanges = std::move(otherSkippedSourceRanges);
+
+    ASSERT_TRUE(otherSkippedSourceRanges.isNull());
+    ASSERT_FALSE(skippedSourceRanges.isNull());
+}
 
 TEST_F(SkippedSourceRanges, RangeWithZero)
 {
@@ -131,16 +141,16 @@ TEST_F(SkippedSourceRanges, DISABLED_ON_WINDOWS(RangeOne))
 {
     auto ranges = skippedSourceRanges.sourceRanges();
 
-    ASSERT_THAT(ranges[0].start(), IsSourceLocation(filePath, 1, 2, 1));
-    ASSERT_THAT(ranges[0].end(), IsSourceLocation(filePath, 5, 7, 24));
+    ASSERT_THAT(ranges[0].start(), IsSourceLocation(filePath, 1, 1, 0));
+    ASSERT_THAT(ranges[0].end(), IsSourceLocation(filePath, 5, 1, 18));
 }
 
 TEST_F(SkippedSourceRanges, DISABLED_ON_WINDOWS(RangeTwo))
 {
     auto ranges = skippedSourceRanges.sourceRanges();
 
-    ASSERT_THAT(ranges[1].start(), IsSourceLocation(filePath, 7, 2, 27));
-    ASSERT_THAT(ranges[1].end(), IsSourceLocation(filePath, 12, 7, 63));
+    ASSERT_THAT(ranges[1].start(), IsSourceLocation(filePath, 7, 1, 26));
+    ASSERT_THAT(ranges[1].end(), IsSourceLocation(filePath, 12, 1, 57));
 }
 
 TEST_F(SkippedSourceRanges, RangeContainerSize)

@@ -25,9 +25,7 @@
 
 #include "codeassistant.h"
 #include "completionassistprovider.h"
-#include "quickfixassistprovider.h"
 #include "iassistprocessor.h"
-#include "textdocument.h"
 #include "iassistproposal.h"
 #include "iassistproposalmodel.h"
 #include "iassistproposalwidget.h"
@@ -36,11 +34,13 @@
 #include "runner.h"
 #include "textdocumentmanipulator.h"
 
+#include <texteditor/textdocument.h>
 #include <texteditor/texteditor.h>
 #include <texteditor/texteditorsettings.h>
 #include <texteditor/completionsettings.h>
 #include <coreplugin/editormanager/editormanager.h>
 #include <extensionsystem/pluginmanager.h>
+#include <utils/algorithm.h>
 #include <utils/qtcassert.h>
 
 #include <QKeyEvent>
@@ -61,9 +61,9 @@ public:
     void configure(TextEditorWidget *editorWidget);
     bool isConfigured() const;
 
-    void invoke(AssistKind kind, IAssistProvider *provider = 0);
+    void invoke(AssistKind kind, IAssistProvider *provider = nullptr);
     void process();
-    void requestProposal(AssistReason reason, AssistKind kind, IAssistProvider *provider = 0);
+    void requestProposal(AssistReason reason, AssistKind kind, IAssistProvider *provider = nullptr);
     void cancelCurrentRequest();
     void invalidateCurrentRequestData();
     void displayProposal(IAssistProposal *newProposal, AssistReason reason);
@@ -74,6 +74,9 @@ public:
     bool hasContext() const;
     void destroyContext();
 
+    QVariant userData() const;
+    void setUserData(const QVariant &data);
+
     CompletionAssistProvider *identifyActivationSequence();
 
     void stopAutomaticProposalTimer();
@@ -82,29 +85,32 @@ public:
     void clearAbortedPosition();
     void updateFromCompletionSettings(const TextEditor::CompletionSettings &settings);
 
-    virtual bool eventFilter(QObject *o, QEvent *e);
+    bool eventFilter(QObject *o, QEvent *e) override;
 
 private:
     void processProposalItem(AssistProposalItemInterface *proposalItem);
     void handlePrefixExpansion(const QString &newPrefix);
     void finalizeProposal();
     void explicitlyAborted();
+    bool isDestroyEvent(int key, const QString &keyText);
 
 private:
-    CodeAssistant *q;
-    TextEditorWidget *m_editorWidget;
-    Internal::ProcessorRunner *m_requestRunner;
+    CodeAssistant *q = nullptr;
+    TextEditorWidget *m_editorWidget = nullptr;
+    Internal::ProcessorRunner *m_requestRunner = nullptr;
     QMetaObject::Connection m_runnerConnection;
-    IAssistProvider *m_requestProvider;
-    IAssistProcessor *m_asyncProcessor;
-    AssistKind m_assistKind;
-    IAssistProposalWidget *m_proposalWidget;
+    IAssistProvider *m_requestProvider = nullptr;
+    IAssistProcessor *m_asyncProcessor = nullptr;
+    AssistKind m_assistKind = TextEditor::Completion;
+    IAssistProposalWidget *m_proposalWidget = nullptr;
     QScopedPointer<IAssistProposal> m_proposal;
-    bool m_receivedContentWhileWaiting;
+    bool m_receivedContentWhileWaiting = false;
+    bool m_proposalItemProcessed = false;
     QTimer m_automaticProposalTimer;
     CompletionSettings m_settings;
-    int m_abortedBasePosition;
+    int m_abortedBasePosition = -1;
     static const QChar m_null;
+    QVariant m_userData;
 };
 
 // --------------------
@@ -114,14 +120,6 @@ const QChar CodeAssistantPrivate::m_null;
 
 CodeAssistantPrivate::CodeAssistantPrivate(CodeAssistant *assistant)
     : q(assistant)
-    , m_editorWidget(0)
-    , m_requestRunner(0)
-    , m_requestProvider(0)
-    , m_asyncProcessor(0)
-    , m_assistKind(TextEditor::Completion)
-    , m_proposalWidget(0)
-    , m_receivedContentWhileWaiting(false)
-    , m_abortedBasePosition(-1)
 {
     m_automaticProposalTimer.setSingleShot(true);
     connect(&m_automaticProposalTimer, &QTimer::timeout,
@@ -143,7 +141,7 @@ void CodeAssistantPrivate::configure(TextEditorWidget *editorWidget)
 
 bool CodeAssistantPrivate::isConfigured() const
 {
-    return m_editorWidget != 0;
+    return m_editorWidget != nullptr;
 }
 
 void CodeAssistantPrivate::invoke(AssistKind kind, IAssistProvider *provider)
@@ -196,6 +194,13 @@ void CodeAssistantPrivate::requestProposal(AssistReason reason,
     if (m_editorWidget->hasBlockSelection())
         return; // TODO
 
+    if (m_proposalItemProcessed
+            && reason == IdleEditor
+            && m_assistKind == TextEditor::Completion
+            && !identifyActivationSequence()) {
+        return;
+    }
+
     if (!provider) {
         if (kind == Completion)
             provider = m_editorWidget->textDocument()->completionAssistProvider();
@@ -211,6 +216,7 @@ void CodeAssistantPrivate::requestProposal(AssistReason reason,
         return;
 
     m_assistKind = kind;
+    m_requestProvider = provider;
     IAssistProcessor *processor = provider->createProcessor();
 
     switch (provider->runType()) {
@@ -224,7 +230,6 @@ void CodeAssistantPrivate::requestProposal(AssistReason reason,
         if (IAssistProposal *newProposal = processor->immediateProposal(assistInterface))
             displayProposal(newProposal, reason);
 
-        m_requestProvider = provider;
         m_requestRunner = new ProcessorRunner;
         m_runnerConnection = connect(m_requestRunner, &ProcessorRunner::finished,
                                      this, [this, reason](){
@@ -248,19 +253,25 @@ void CodeAssistantPrivate::requestProposal(AssistReason reason,
     }
     case IAssistProvider::Asynchronous: {
         processor->setAsyncCompletionAvailableHandler(
-            [this, processor, reason](IAssistProposal *newProposal){
-                QTC_CHECK(newProposal);
-                invalidateCurrentRequestData();
-                displayProposal(newProposal, reason);
+            [this, reason](IAssistProposal *newProposal){
+                if (m_asyncProcessor && m_asyncProcessor->needsRestart() && m_receivedContentWhileWaiting) {
+                    delete newProposal;
+                    m_receivedContentWhileWaiting = false;
+                    invalidateCurrentRequestData();
+                    requestProposal(reason, m_assistKind, m_requestProvider);
+                } else {
+                    invalidateCurrentRequestData();
+                    displayProposal(newProposal, reason);
 
-                emit q->finished();
+                    emit q->finished();
+                }
         });
 
         // If there is a proposal, nothing asynchronous happened...
         if (IAssistProposal *newProposal = processor->perform(assistInterface)) {
             displayProposal(newProposal, reason);
             delete processor;
-        } else if (!processor->performWasApplicable()) {
+        } else if (!processor->running()) {
             delete processor;
         } else { // ...async request was triggered
             m_asyncProcessor = processor;
@@ -277,6 +288,8 @@ void CodeAssistantPrivate::cancelCurrentRequest()
         m_requestRunner->setDiscardProposal(true);
         disconnect(m_runnerConnection);
     }
+    if (m_asyncProcessor)
+        m_asyncProcessor->cancel();
     invalidateCurrentRequestData();
 }
 
@@ -286,7 +299,6 @@ void CodeAssistantPrivate::displayProposal(IAssistProposal *newProposal, AssistR
         return;
 
     // TODO: The proposal should own the model until someone takes it explicitly away.
-    QScopedPointer<IAssistProposalModel> proposalCandidateModel(newProposal->model());
     QScopedPointer<IAssistProposal> proposalCandidate(newProposal);
 
     bool destroyCurrentContext = false;
@@ -311,8 +323,11 @@ void CodeAssistantPrivate::displayProposal(IAssistProposal *newProposal, AssistR
 
     const QString prefix = m_editorWidget->textAt(basePosition,
                                                   m_editorWidget->position() - basePosition);
-    if (!newProposal->hasItemsToPropose(prefix, reason))
+    if (!newProposal->hasItemsToPropose(prefix, reason)) {
+        if (newProposal->isCorrective(m_editorWidget))
+            newProposal->makeCorrection(m_editorWidget);
         return;
+    }
 
     if (destroyCurrentContext)
         destroyContext();
@@ -337,8 +352,9 @@ void CodeAssistantPrivate::displayProposal(IAssistProposal *newProposal, AssistR
     m_proposalWidget->setAssistant(q);
     m_proposalWidget->setReason(reason);
     m_proposalWidget->setKind(m_assistKind);
+    m_proposalWidget->setBasePosition(basePosition);
     m_proposalWidget->setUnderlyingWidget(m_editorWidget);
-    m_proposalWidget->setModel(proposalCandidateModel.take());
+    m_proposalWidget->setModel(m_proposal->model());
     m_proposalWidget->setDisplayRect(m_editorWidget->cursorRect(basePosition));
     m_proposalWidget->setIsSynchronized(!m_receivedContentWhileWaiting);
     m_proposalWidget->showProposal(prefix);
@@ -352,6 +368,16 @@ void CodeAssistantPrivate::processProposalItem(AssistProposalItemInterface *prop
     destroyContext();
     if (!proposalItem->isSnippet())
         process();
+    m_editorWidget->encourageApply();
+    m_proposalItemProcessed = true;
+
+    auto connection = std::make_shared<QMetaObject::Connection>();
+    *connection = connect(m_editorWidget->textDocument(),
+                          &Core::IDocument::contentsChanged,
+                          this, [this, connection] {
+        m_proposalItemProcessed = false;
+        disconnect(*connection);
+    });
 }
 
 void CodeAssistantPrivate::handlePrefixExpansion(const QString &newPrefix)
@@ -362,8 +388,21 @@ void CodeAssistantPrivate::handlePrefixExpansion(const QString &newPrefix)
     cursor.setPosition(m_proposal->basePosition());
     cursor.movePosition(QTextCursor::EndOfWord);
 
+    int currentPosition = m_editorWidget->position();
+    const QString textAfterCursor = m_editorWidget->textAt(currentPosition,
+                                                       cursor.position() - currentPosition);
+    if (!textAfterCursor.startsWith(newPrefix)) {
+        if (newPrefix.indexOf(textAfterCursor, currentPosition - m_proposal->basePosition()) >= 0)
+            currentPosition = cursor.position();
+        const QStringRef prefixAddition =
+                newPrefix.midRef(currentPosition - m_proposal->basePosition());
+        // If remaining string starts with the prefix addition
+        if (textAfterCursor.startsWith(prefixAddition))
+            currentPosition += prefixAddition.size();
+    }
+
     m_editorWidget->setCursorPosition(m_proposal->basePosition());
-    m_editorWidget->replace(cursor.position() - m_proposal->basePosition(), newPrefix);
+    m_editorWidget->replace(currentPosition - m_proposal->basePosition(), newPrefix);
     notifyChange();
 }
 
@@ -371,46 +410,52 @@ void CodeAssistantPrivate::finalizeProposal()
 {
     stopAutomaticProposalTimer();
     m_proposal.reset();
-    m_proposalWidget = 0;
+    m_proposalWidget = nullptr;
     if (m_receivedContentWhileWaiting)
         m_receivedContentWhileWaiting = false;
 }
 
 bool CodeAssistantPrivate::isDisplayingProposal() const
 {
-    return m_proposalWidget != 0;
+    return m_proposalWidget != nullptr;
 }
 
 bool CodeAssistantPrivate::isWaitingForProposal() const
 {
-    return m_requestRunner != 0 || m_asyncProcessor != 0;
+    return m_requestRunner != nullptr || m_asyncProcessor != nullptr;
 }
 
 void CodeAssistantPrivate::invalidateCurrentRequestData()
 {
-    m_asyncProcessor = 0;
-    m_requestRunner = 0;
-    m_requestProvider = 0;
+    m_asyncProcessor = nullptr;
+    m_requestRunner = nullptr;
+    m_requestProvider = nullptr;
 }
 
 CompletionAssistProvider *CodeAssistantPrivate::identifyActivationSequence()
 {
-    CompletionAssistProvider *completionProvider = m_editorWidget->textDocument()->completionAssistProvider();
-    if (!completionProvider)
-        return 0;
+    auto checkActivationSequence = [this](CompletionAssistProvider *provider) {
+        if (!provider)
+            return false;
+        const int length = provider->activationCharSequenceLength();
+        if (!length)
+            return false;
+        QString sequence = m_editorWidget->textAt(m_editorWidget->position() - length, length);
+        // In pretty much all cases the sequence will have the appropriate length. Only in the
+        // case of typing the very first characters in the document for providers that request a
+        // length greater than 1 (currently only C++, which specifies 3), the sequence needs to
+        // be prepended so it has the expected length.
+        const int lengthDiff = length - sequence.length();
+        for (int j = 0; j < lengthDiff; ++j)
+            sequence.prepend(m_null);
+        return provider->isActivationCharSequence(sequence);
+    };
 
-    const int length = completionProvider->activationCharSequenceLength();
-    if (length == 0)
-        return 0;
-    QString sequence = m_editorWidget->textAt(m_editorWidget->position() - length, length);
-    // In pretty much all cases the sequence will have the appropriate length. Only in the
-    // case of typing the very first characters in the document for providers that request a
-    // length greater than 1 (currently only C++, which specifies 3), the sequence needs to
-    // be prepended so it has the expected length.
-    const int lengthDiff = length - sequence.length();
-    for (int j = 0; j < lengthDiff; ++j)
-        sequence.prepend(m_null);
-    return completionProvider->isActivationCharSequence(sequence) ? completionProvider : 0;
+    auto provider = {
+        m_editorWidget->textDocument()->completionAssistProvider(),
+        m_editorWidget->textDocument()->functionHintAssistProvider()
+    };
+    return Utils::findOrDefault(provider, checkActivationSequence);
 }
 
 void CodeAssistantPrivate::notifyChange()
@@ -421,12 +466,13 @@ void CodeAssistantPrivate::notifyChange()
         QTC_ASSERT(m_proposal, return);
         if (m_editorWidget->position() < m_proposal->basePosition()) {
             destroyContext();
-        } else {
+        } else if (m_proposal->supportsPrefix()) {
             m_proposalWidget->updateProposal(
                 m_editorWidget->textAt(m_proposal->basePosition(),
                                      m_editorWidget->position() - m_proposal->basePosition()));
-            if (m_proposal->isFragile())
-                startAutomaticProposalTimer();
+        } else {
+            destroyContext();
+            requestProposal(ExplicitlyInvoked, m_assistKind, m_requestProvider);
         }
     }
 }
@@ -449,6 +495,16 @@ void CodeAssistantPrivate::destroyContext()
                    this, &CodeAssistantPrivate::finalizeProposal);
         finalizeProposal();
     }
+}
+
+QVariant CodeAssistantPrivate::userData() const
+{
+    return m_userData;
+}
+
+void CodeAssistantPrivate::setUserData(const QVariant &data)
+{
+    m_userData = data;
 }
 
 void CodeAssistantPrivate::startAutomaticProposalTimer()
@@ -489,31 +545,31 @@ void CodeAssistantPrivate::clearAbortedPosition()
     m_abortedBasePosition = -1;
 }
 
+bool CodeAssistantPrivate::isDestroyEvent(int key, const QString &keyText)
+{
+    if (keyText.isEmpty())
+        return key != Qt::LeftArrow && key != Qt::RightArrow && key != Qt::Key_Shift;
+    if (auto provider = qobject_cast<CompletionAssistProvider *>(m_requestProvider))
+        return !provider->isContinuationChar(keyText.at(0));
+    return false;
+}
+
 bool CodeAssistantPrivate::eventFilter(QObject *o, QEvent *e)
 {
-    Q_UNUSED(o);
+    Q_UNUSED(o)
 
     if (isWaitingForProposal()) {
         QEvent::Type type = e->type();
         if (type == QEvent::FocusOut) {
             destroyContext();
         } else if (type == QEvent::KeyPress) {
-            QKeyEvent *keyEvent = static_cast<QKeyEvent *>(e);
+            auto keyEvent = static_cast<QKeyEvent *>(e);
             const QString &keyText = keyEvent->text();
 
-            CompletionAssistProvider *completionProvider = 0;
-            if ((keyText.isEmpty()
-                 && keyEvent->key() != Qt::LeftArrow
-                 && keyEvent->key() != Qt::RightArrow
-                 && keyEvent->key() != Qt::Key_Shift)
-                || (!keyText.isEmpty()
-                    && (((completionProvider = dynamic_cast<CompletionAssistProvider *>(m_requestProvider))
-                            ? !completionProvider->isContinuationChar(keyText.at(0))
-                            : false)))) {
+            if (isDestroyEvent(keyEvent->key(), keyText))
                 destroyContext();
-            } else if (!keyText.isEmpty() && !m_receivedContentWhileWaiting) {
+            else if (!keyText.isEmpty() && !m_receivedContentWhileWaiting)
                 m_receivedContentWhileWaiting = true;
-            }
         }
     }
 
@@ -556,6 +612,16 @@ bool CodeAssistant::hasContext() const
 void CodeAssistant::destroyContext()
 {
     d->destroyContext();
+}
+
+QVariant CodeAssistant::userData() const
+{
+    return d->userData();
+}
+
+void CodeAssistant::setUserData(const QVariant &data)
+{
+    d->setUserData(data);
 }
 
 void CodeAssistant::invoke(AssistKind kind, IAssistProvider *provider)

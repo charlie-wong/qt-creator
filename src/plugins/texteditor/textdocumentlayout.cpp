@@ -28,30 +28,26 @@
 #include <utils/qtcassert.h>
 #include <QDebug>
 
-using namespace TextEditor;
+namespace TextEditor {
 
-
-CodeFormatterData::~CodeFormatterData()
-{
-}
+CodeFormatterData::~CodeFormatterData() = default;
 
 TextBlockUserData::~TextBlockUserData()
 {
-    foreach (TextMark *mrk, m_marks) {
+    for (TextMark *mrk : qAsConst(m_marks)) {
         mrk->baseTextDocument()->removeMarkFromMarksCache(mrk);
-        mrk->setBaseTextDocument(0);
+        mrk->setBaseTextDocument(nullptr);
         mrk->removedFromEditor();
     }
 
-    if (m_codeFormatterData)
-        delete m_codeFormatterData;
+    delete m_codeFormatterData;
 }
 
 int TextBlockUserData::braceDepthDelta() const
 {
     int delta = 0;
-    for (int i = 0; i < m_parentheses.size(); ++i) {
-        switch (m_parentheses.at(i).chr.unicode()) {
+    for (auto &parenthesis : m_parentheses) {
+        switch (parenthesis.chr.unicode()) {
         case '{': case '+': case '[': ++delta; break;
         case '}': case '-': case ']': --delta; break;
         default: break;
@@ -333,10 +329,8 @@ TextBlockUserData::MatchType TextBlockUserData::matchCursorBackward(QTextCursor 
     const Parentheses::const_iterator cend = parentheses.constEnd();
     for (Parentheses::const_iterator it = parentheses.constBegin();it != cend; ++it) {
         const Parenthesis &paren = *it;
-        if (paren.pos == relPos - 1
-            && paren.type == Parenthesis::Closed) {
+        if (paren.pos == relPos - 1 && paren.type == Parenthesis::Closed)
             return checkClosedParenthesis(cursor, paren.chr);
-        }
     }
     return NoMatch;
 }
@@ -383,11 +377,7 @@ void TextBlockUserData::addMark(TextMark *mark)
 
 
 TextDocumentLayout::TextDocumentLayout(QTextDocument *doc)
-    : QPlainTextDocumentLayout(doc),
-      lastSaveRevision(0),
-      hasMarks(false),
-      maxMarkWidthFactor(1.0),
-      m_requiredWidth(0)
+    : QPlainTextDocumentLayout(doc)
 {}
 
 TextDocumentLayout::~TextDocumentLayout()
@@ -398,7 +388,7 @@ TextDocumentLayout::~TextDocumentLayout()
 void TextDocumentLayout::setParentheses(const QTextBlock &block, const Parentheses &parentheses)
 {
     if (parentheses.isEmpty()) {
-        if (TextBlockUserData *userData = testUserData(block))
+        if (TextBlockUserData *userData = textUserData(block))
             userData->clearParentheses();
     } else {
         userData(block)->setParentheses(parentheses);
@@ -407,14 +397,14 @@ void TextDocumentLayout::setParentheses(const QTextBlock &block, const Parenthes
 
 Parentheses TextDocumentLayout::parentheses(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->parentheses();
     return Parentheses();
 }
 
 bool TextDocumentLayout::hasParentheses(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->hasParentheses();
     return false;
 }
@@ -426,21 +416,21 @@ bool TextDocumentLayout::setIfdefedOut(const QTextBlock &block)
 
 bool TextDocumentLayout::clearIfdefedOut(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->clearIfdefedOut();
     return false;
 }
 
 bool TextDocumentLayout::ifdefedOut(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->ifdefedOut();
     return false;
 }
 
 int TextDocumentLayout::braceDepthDelta(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->braceDepthDelta();
     return 0;
 }
@@ -471,7 +461,7 @@ void TextDocumentLayout::changeBraceDepth(QTextBlock &block, int delta)
 void TextDocumentLayout::setLexerState(const QTextBlock &block, int state)
 {
     if (state == 0) {
-        if (TextBlockUserData *userData = testUserData(block))
+        if (TextBlockUserData *userData = textUserData(block))
             userData->setLexerState(0);
     } else {
         userData(block)->setLexerState(qMax(0,state));
@@ -480,7 +470,7 @@ void TextDocumentLayout::setLexerState(const QTextBlock &block, int state)
 
 int TextDocumentLayout::lexerState(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->lexerState();
     return 0;
 }
@@ -488,7 +478,7 @@ int TextDocumentLayout::lexerState(const QTextBlock &block)
 void TextDocumentLayout::setFoldingIndent(const QTextBlock &block, int indent)
 {
     if (indent == 0) {
-        if (TextBlockUserData *userData = testUserData(block))
+        if (TextBlockUserData *userData = textUserData(block))
             userData->setFoldingIndent(0);
     } else {
         userData(block)->setFoldingIndent(indent);
@@ -497,7 +487,7 @@ void TextDocumentLayout::setFoldingIndent(const QTextBlock &block, int indent)
 
 int TextDocumentLayout::foldingIndent(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->foldingIndent();
     return 0;
 }
@@ -515,7 +505,7 @@ bool TextDocumentLayout::canFold(const QTextBlock &block)
 
 bool TextDocumentLayout::isFolded(const QTextBlock &block)
 {
-    if (TextBlockUserData *userData = testUserData(block))
+    if (TextBlockUserData *userData = textUserData(block))
         return userData->folded();
     return false;
 }
@@ -524,8 +514,13 @@ void TextDocumentLayout::setFolded(const QTextBlock &block, bool folded)
 {
     if (folded)
         userData(block)->setFolded(true);
-    else if (TextBlockUserData *userData = testUserData(block))
+    else if (TextBlockUserData *userData = textUserData(block))
         userData->setFolded(false);
+    else
+        return;
+
+    if (auto layout = qobject_cast<TextDocumentLayout *>(block.document()->documentLayout()))
+        emit layout->foldChanged(block.blockNumber(), folded);
 }
 
 void TextDocumentLayout::requestExtraAreaUpdate()
@@ -561,7 +556,7 @@ void TextDocumentLayout::setRequiredWidth(int width)
 {
     int oldw = m_requiredWidth;
     m_requiredWidth = width;
-    int dw = QPlainTextDocumentLayout::documentSize().width();
+    int dw = int(QPlainTextDocumentLayout::documentSize().width());
     if (oldw > dw || width > dw)
         emitDocumentSizeChanged();
 }
@@ -570,25 +565,23 @@ void TextDocumentLayout::setRequiredWidth(int width)
 QSizeF TextDocumentLayout::documentSize() const
 {
     QSizeF size = QPlainTextDocumentLayout::documentSize();
-    size.setWidth(qMax((qreal)m_requiredWidth, size.width()));
+    size.setWidth(qMax(qreal(m_requiredWidth), size.width()));
     return size;
 }
 
 TextMarks TextDocumentLayout::documentClosing()
 {
     TextMarks marks;
-    QTextBlock block = document()->begin();
-    while (block.isValid()) {
-        if (TextBlockUserData *data = static_cast<TextBlockUserData *>(block.userData()))
+    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+        if (auto data = static_cast<TextBlockUserData *>(block.userData()))
             marks.append(data->documentClosing());
-        block = block.next();
     }
     return marks;
 }
 
 void TextDocumentLayout::documentReloaded(TextMarks marks, TextDocument *baseTextDocument)
 {
-    foreach (TextMark *mark, marks) {
+    for (TextMark *mark : qAsConst(marks)) {
         int blockNumber = mark->lineNumber() - 1;
         QTextBlock block = document()->findBlockByNumber(blockNumber);
         if (block.isValid()) {
@@ -598,7 +591,7 @@ void TextDocumentLayout::documentReloaded(TextMarks marks, TextDocument *baseTex
             mark->updateBlock(block);
         } else {
             baseTextDocument->removeMarkFromMarksCache(mark);
-            mark->setBaseTextDocument(0);
+            mark->setBaseTextDocument(nullptr);
             mark->removedFromEditor();
         }
     }
@@ -612,9 +605,10 @@ void TextDocumentLayout::updateMarksLineNumber()
     QTextBlock block = document()->begin();
     int blockNumber = 0;
     while (block.isValid()) {
-        if (const TextBlockUserData *userData = testUserData(block))
-            foreach (TextMark *mrk, userData->marks())
+        if (const TextBlockUserData *userData = textUserData(block)) {
+            for (TextMark *mrk : userData->marks())
                 mrk->updateLineNumber(blockNumber + 1);
+        }
         block = block.next();
         ++blockNumber;
     }
@@ -622,16 +616,19 @@ void TextDocumentLayout::updateMarksLineNumber()
 
 void TextDocumentLayout::updateMarksBlock(const QTextBlock &block)
 {
-    if (const TextBlockUserData *userData = testUserData(block))
-        foreach (TextMark *mrk, userData->marks())
+    if (const TextBlockUserData *userData = textUserData(block)) {
+        for (TextMark *mrk : userData->marks())
             mrk->updateBlock(block);
+    }
 }
 
-TextDocumentLayout::FoldValidator::FoldValidator()
-    : m_layout(0)
-    , m_requestDocUpdate(false)
-    , m_insideFold(0)
-{}
+QRectF TextDocumentLayout::blockBoundingRect(const QTextBlock &block) const
+{
+    QRectF boundingRect = QPlainTextDocumentLayout::blockBoundingRect(block);
+    if (TextBlockUserData *userData = textUserData(block))
+        boundingRect.adjust(0, 0, 0, userData->additionalAnnotationHeight());
+    return boundingRect;
+}
 
 void TextDocumentLayout::FoldValidator::setup(TextDocumentLayout *layout)
 {
@@ -686,3 +683,5 @@ void TextDocumentLayout::FoldValidator::finalize()
         m_layout->emitDocumentSizeChanged();
     }
 }
+
+} // namespace TextEditor

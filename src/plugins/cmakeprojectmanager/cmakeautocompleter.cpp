@@ -25,13 +25,6 @@
 
 #include "cmakeautocompleter.h"
 
-#include <QRegExp>
-#include <QTextCursor>
-#include <QTextBlock>
-#include <QDebug>
-
-#include <texteditor/tabsettings.h>
-
 namespace CMakeProjectManager {
 namespace Internal {
 
@@ -45,10 +38,7 @@ bool CMakeAutoCompleter::isInComment(const QTextCursor &cursor) const
     // NOTE: This doesn't handle '#' inside quotes, nor multi-line comments
     QTextCursor moved = cursor;
     moved.movePosition(QTextCursor::StartOfLine, QTextCursor::KeepAnchor);
-    if (moved.selectedText().contains(QLatin1Char('#')))
-        return true;
-    else
-        return false;
+    return moved.selectedText().contains(QLatin1Char('#'));
 }
 
 bool CMakeAutoCompleter::isInString(const QTextCursor &cursor) const
@@ -117,11 +107,11 @@ QString CMakeAutoCompleter::insertMatchingQuote(const QTextCursor &cursor,
     return quote;
 }
 
-int CMakeAutoCompleter::paragraphSeparatorAboutToBeInserted(QTextCursor &cursor, const TextEditor::TabSettings &tabSettings)
+int CMakeAutoCompleter::paragraphSeparatorAboutToBeInserted(QTextCursor &cursor)
 {
     const QString line = cursor.block().text().trimmed();
     if (line.contains(QRegExp(QStringLiteral("^(endfunction|endmacro|endif|endforeach|endwhile)\\w*\\("))))
-        tabSettings.indentLine(cursor.block(), tabSettings.indentationColumn(cursor.block().text()));
+        tabSettings().indentLine(cursor.block(), tabSettings().indentationColumn(cursor.block().text()));
     return 0;
 }
 

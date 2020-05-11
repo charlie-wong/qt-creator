@@ -26,11 +26,10 @@
 import QtQuick 2.2
 import QtQuick.Controls 1.1
 import QtQuick.Controls.Styles 1.1
-import "../propertyEditorQmlSources/HelperWidgets"
+import HelperWidgets 2.0
 import QtQuickDesignerTheme 1.0
 
 Rectangle {
-    z: expressionTextField.visible ? 5 : 0
     border.width: 1
     property bool isBaseState
     property bool isCurrentState
@@ -40,6 +39,7 @@ Rectangle {
     property int delegateStateImageSize
     property bool delegateHasWhenCondition
     property string delegateWhenConditionString
+    readonly property bool isDefaultState: isDefault
 
     color: baseColor
     border.color: Theme.qmlDesignerBorderColor()
@@ -81,12 +81,17 @@ Rectangle {
         width: 16
         visible: !isBaseState
 
-        onClicked: root.deleteState(internalNodeId)
+        onClicked: {
+            if (isDefaultState)
+                statesEditorModel.resetDefaultState()
+
+            root.deleteState(internalNodeId)
+        }
     }
 
     Image {
         id: whenButton
-        visible: !isBaseState && expanded
+        visible: !isBaseState || (isBaseState && modelHasDefaultState)
         width: 14
         height: 14
         x: 4
@@ -109,38 +114,63 @@ Rectangle {
             id: contextMenu
 
             MenuItem {
+                visible: !isBaseState
                 text: qsTr("Set when Condition")
                 onTriggered: {
-                    expressionTextField.text = delegateWhenConditionString
-                    expressionTextField.visible = true
-                    expressionTextField.forceActiveFocus()
+                    var x = whenButton.mapToGlobal(0,0).x + 4
+                    var y = root.mapToGlobal(0,0).y - 32
+                    bindingEditor.showWidget(x, y)
+                    bindingEditor.text = delegateWhenConditionString
+                    bindingEditor.prepareBindings()
                 }
-
             }
 
             MenuItem {
-                visible: delegateHasWhenCondition
+                visible: !isBaseState && delegateHasWhenCondition
                 text: qsTr("Reset when Condition")
                 onTriggered: {
                    statesEditorModel.resetWhenCondition(internalNodeId)
                 }
+            }
 
+            MenuItem {
+                visible: !isBaseState && !isDefaultState
+                text: qsTr("Set as Default")
+                onTriggered: {
+                    statesEditorModel.setStateAsDefault(internalNodeId)
+                }
+            }
+
+            MenuItem {
+                visible: (!isBaseState && isDefaultState) || (isBaseState && modelHasDefaultState)
+                text: qsTr("Reset Default")
+                onTriggered: {
+                    statesEditorModel.resetDefaultState()
+                }
             }
         }
-
-
     }
 
     TextField {
         id: stateNameField
         y: 4
-        font.pixelSize: 9
+        font.pixelSize: Theme.smallFontPixelSize()
         anchors.left: whenButton.right
         // use the spacing which the image to the delegate rectangle has
         anchors.leftMargin: 4
         anchors.right: removeStateButton.left
         anchors.rightMargin: 4
-        style: DesignerTextFieldStyle {}
+        style: DesignerTextFieldStyle {
+            background: Rectangle {
+                implicitWidth: 100
+                implicitHeight: font.pixelSize + padding.top + padding.bottom
+                color: ((isBaseState && modelHasDefaultState) ? "transparent"
+                         : Theme.color(Theme.FancyToolButtonSelectedColor))
+                border.color: ((isBaseState && !modelHasDefaultState) || isDefaultState) ? "#ffd700"
+                                : (isBaseState && modelHasDefaultState) ? "transparent"
+                                : Theme.qmlDesignerBackgroundColorDarker()
+            }
+        }
         readOnly: isBaseState
 
         onActiveFocusChanged: {
@@ -150,20 +180,24 @@ Rectangle {
 
         Component.onCompleted: {
             text = delegateStateName
-            if (isBaseState)
-                __panel.visible = false
         }
+
+        property string oldValue
 
         onEditingFinished: {
-            if (text != delegateStateName)
-                statesEditorModel.renameState(internalNodeId, text)
-        }
+            if (stateNameField.oldValue === stateNameField.text)
+                return
 
+            stateNameField.oldValue = stateNameField.text
+
+            if (stateNameField.text != delegateStateName)
+                statesEditorModel.renameState(internalNodeId, stateNameField.text)
+        }
     }
 
     Item {
         id: stateImageArea
-        anchors.topMargin: 4
+        anchors.topMargin: 2
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: stateNameField.bottom
 
@@ -181,22 +215,52 @@ Rectangle {
             id: stateImage
             anchors.centerIn: parent
             source: delegateStateImageSource
+            sourceSize.width: delegateStateImageSize
+            sourceSize.height: delegateStateImageSize
         }
     }
 
-    ExpressionTextField {
-        id: expressionTextField
+    Text {
+        id: stateDefaultIndicator
+        anchors.left: whenButton.left
+        anchors.leftMargin: 0
+        anchors.right: removeStateButton.left
+        anchors.rightMargin: 4
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 4
 
-        parent: root
-        visible: false
-        onAccepted: {
-            visible = false
-            statesEditorModel.setWhenCondition(internalNodeId, expressionTextField.text.trim())
+        color: Theme.color(Theme.PanelTextColorLight)
+        font.italic: true
+        font.pixelSize: Theme.smallFontPixelSize()
+
+        visible: expanded && (isDefaultState || (isBaseState && !modelHasDefaultState))
+
+        text: ("* " + qsTr("Default"))
+    }
+
+    BindingEditor {
+        property string newWhenCondition
+
+        property Timer timer: Timer {
+            id: timer
+            running: false
+            interval: 50
+            repeat: false
+            onTriggered: statesEditorModel.setWhenCondition(internalNodeId, bindingEditor.newWhenCondition)
         }
 
-        onRejected: visible = false
+        id: bindingEditor
 
-        anchors.fill: parent
+        stateModelNodeProperty: statesEditorModel.stateModelNode()
+
+        onRejected: {
+            hideWidget()
+        }
+        onAccepted: {
+            bindingEditor.newWhenCondition = bindingEditor.text.trim()
+            timer.start()
+            hideWidget()
+        }
     }
 
 }

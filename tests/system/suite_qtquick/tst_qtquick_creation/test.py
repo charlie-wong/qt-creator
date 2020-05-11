@@ -26,59 +26,32 @@
 source("../../shared/qtcreator.py")
 
 def main():
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
 
-    available = [("5.3", False), ("5.3", True)]
-    if platform.system() != 'Darwin':
-        available.extend([("5.4", False), ("5.4", True)])
+    available = [("5.10", "Qt Quick Application - Empty", Targets.DESKTOP_5_10_1_DEFAULT),
+                 ("5.14", "Qt Quick Application - Swipe", Targets.DESKTOP_5_14_1_DEFAULT)]
 
-    for qtVersion, controls in available:
-        if qtVersion == "5.3":
-            targ = [Targets.DESKTOP_531_DEFAULT]
-            quick = "2.3"
-        else:
-            targ = [Targets.DESKTOP_541_GCC]
-            quick = "2.4"
+    for qtVersion, appTemplate, targ in available:
         # using a temporary directory won't mess up a potentially existing
         workingDir = tempDir()
-        checkedTargets, projectName = createNewQtQuickApplication(workingDir, targets=targ,
-                                                                  minimumQtVersion=qtVersion,
-                                                                  withControls = controls)
+        checkedTargets = createNewQtQuickApplication(workingDir, targets=[targ],
+                                                     minimumQtVersion=qtVersion,
+                                                     template=appTemplate)[0]
         if len(checkedTargets) == 0:
-            if controls and qtVersion < "5.7":
-                test.xfail("Could not check wanted target.", "Quick Controls 2 wizard needs Qt5.7+")
-            else:
-                test.fatal("Could not check wanted target")
+            test.fatal("Could not check wanted target")
             continue
-        additionalText = ''
-        if controls:
-            additionalText = ' Controls '
-        test.log("Building project Qt Quick%sApplication (%s)"
-                 % (additionalText, Targets.getStringForTarget(targ)))
-        result = modifyRunSettingsForHookInto(projectName, len(checkedTargets), 11223)
-        invokeMenuItem("Build", "Build All")
+        test.log("Building project %s (%s)"
+                 % (appTemplate, Targets.getStringForTarget(targ)))
+        invokeMenuItem("Build", "Build All Projects")
         waitForCompile()
         if not checkCompile():
             test.fatal("Compile failed")
         else:
             checkLastBuild()
             test.log("Running project (includes build)")
-            if result:
-                result = addExecutableAsAttachableAUT(projectName, 11223)
-                allowAppThroughWinFW(workingDir, projectName)
-                if result:
-                    function = "subprocessFunctionQuick2"
-                    result = runAndCloseApp(True, projectName, 11223, function,
-                                            SubprocessType.QT_QUICK_APPLICATION, quickVersion=quick)
-                else:
-                    result = runAndCloseApp(sType=SubprocessType.QT_QUICK_APPLICATION)
-                removeExecutableAsAttachableAUT(projectName, 11223)
-                deleteAppFromWinFW(workingDir, projectName)
-            else:
-                result = runAndCloseApp()
-            if result == None:
+            if runAndCloseApp() == None:
                 checkCompile()
             else:
                 appOutput = logApplicationOutput()
@@ -87,13 +60,3 @@ def main():
         invokeMenuItem("File", "Close All Projects and Editors")
 
     invokeMenuItem("File", "Exit")
-
-def subprocessFunctionGenericQuick(quickVersion):
-    helloWorldText = waitForObject("{container={type='QtQuick%dApplicationViewer' visible='1' "
-                                   "unnamed='1'} enabled='true' text='Hello World' type='Text' "
-                                   "unnamed='1' visible='true'}" % quickVersion)
-    test.log("Clicking 'Hello World' Text to close QtQuick%dApplicationViewer" % quickVersion)
-    mouseClick(helloWorldText, 5, 5, 0, Qt.LeftButton)
-
-def subprocessFunctionQuick2():
-    subprocessFunctionGenericQuick(2)

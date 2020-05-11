@@ -1,5 +1,5 @@
 
-#line 215 "./glsl.g"
+#line 210 "./glsl.g"
 
 /****************************************************************************
 **
@@ -25,6 +25,8 @@
 ** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ****************************************************************************/
+
+#pragma once
 
 #include "glslparsertable_p.h"
 #include "glsllexer.h"
@@ -89,13 +91,13 @@ public:
     TranslationUnitAST *parse() {
         if (AST *u = parse(T_FEED_GLSL))
             return u->asTranslationUnit();
-        return 0;
+        return nullptr;
     }
 
     ExpressionAST *parseExpression() {
         if (AST *u = parse(T_FEED_EXPRESSION))
             return u->asExpression();
-        return 0;
+        return nullptr;
     }
 
     AST *parse(int startToken);

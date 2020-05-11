@@ -25,22 +25,17 @@
 
 #pragma once
 
-#include <projectexplorer/runconfiguration.h>
+#include <projectexplorer/runcontrol.h>
 
 namespace Qnx {
 namespace Internal {
 
-class Slog2InfoRunner;
-
-class QnxAnalyzeSupport : public ProjectExplorer::RunWorker
+class QnxQmlProfilerSupport : public ProjectExplorer::SimpleTargetRunner
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(Qnx::Internal::QnxQmlProfilerSupport)
 
 public:
-    explicit QnxAnalyzeSupport(ProjectExplorer::RunControl *runControl);
-
-private:
-    void start() override;
+    explicit QnxQmlProfilerSupport(ProjectExplorer::RunControl *runControl);
 };
 
 } // namespace Internal

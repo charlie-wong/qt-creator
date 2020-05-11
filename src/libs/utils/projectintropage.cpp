@@ -58,34 +58,21 @@ namespace Utils {
 class ProjectIntroPagePrivate
 {
 public:
-    ProjectIntroPagePrivate();
     Ui::ProjectIntroPage m_ui;
-    bool m_complete;
+    bool m_complete = false;
     QRegularExpressionValidator m_projectNameValidator;
-    // Status label style sheets
-    const QString m_errorStyleSheet;
-    const QString m_warningStyleSheet;
-    const QString m_hintStyleSheet;
-    bool m_forceSubProject;
+    bool m_forceSubProject = false;
     QStringList m_projectDirectories;
 };
-
-ProjectIntroPagePrivate::  ProjectIntroPagePrivate() :
-    m_complete(false),
-    m_errorStyleSheet(QLatin1String("background : red;")),
-    m_warningStyleSheet(QLatin1String("background : yellow;")),
-    m_hintStyleSheet(),
-    m_forceSubProject(false)
-{
-}
 
 ProjectIntroPage::ProjectIntroPage(QWidget *parent) :
     WizardPage(parent),
     d(new ProjectIntroPagePrivate)
 {
     d->m_ui.setupUi(this);
+    d->m_ui.stateLabel->setFilled(true);
     hideStatusLabel();
-    d->m_ui.nameLineEdit->setInitialText(tr("<Enter_Name>"));
+    d->m_ui.nameLineEdit->setPlaceholderText(tr("Enter project name"));
     d->m_ui.nameLineEdit->setFocus();
     d->m_ui.nameLineEdit->setValidationFunction([this](FancyLineEdit *edit, QString *errorString) {
         return validateProjectName(edit->text(), errorString);
@@ -104,7 +91,7 @@ ProjectIntroPage::ProjectIntroPage(QWidget *parent) :
     connect(d->m_ui.nameLineEdit, &FancyLineEdit::validReturnPressed,
             this, &ProjectIntroPage::slotActivated);
     connect(d->m_ui.projectComboBox,
-            static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+            QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ProjectIntroPage::slotChanged);
 
     setProperty(SHORT_TITLE_PROPERTY, tr("Location"));
@@ -129,7 +116,7 @@ QString ProjectIntroPage::projectName() const
 
 QString ProjectIntroPage::path() const
 {
-    return d->m_ui.pathChooser->path();
+    return d->m_ui.pathChooser->filePath().toString();
 }
 
 void ProjectIntroPage::setPath(const QString &path)
@@ -174,17 +161,17 @@ bool ProjectIntroPage::validate()
     }
     // Validate and display status
     if (!d->m_ui.pathChooser->isValid()) {
-        displayStatusMessage(Error, d->m_ui.pathChooser->errorMessage());
+        displayStatusMessage(InfoLabel::Error, d->m_ui.pathChooser->errorMessage());
         return false;
     }
 
-    // Name valid? Ignore 'DisplayingInitialText' state.
+    // Name valid? Ignore 'DisplayingPlaceholderText' state.
     bool nameValid = false;
     switch (d->m_ui.nameLineEdit->state()) {
     case FancyLineEdit::Invalid:
-        displayStatusMessage(Error, d->m_ui.nameLineEdit->errorMessage());
+        displayStatusMessage(InfoLabel::Error, d->m_ui.nameLineEdit->errorMessage());
         return false;
-    case FancyLineEdit::DisplayingInitialText:
+    case FancyLineEdit::DisplayingPlaceholderText:
         break;
     case FancyLineEdit::Valid:
         nameValid = true;
@@ -200,11 +187,11 @@ bool ProjectIntroPage::validate()
     }
 
     if (projectDirFile.isDir()) {
-        displayStatusMessage(Warning, tr("The project already exists."));
+        displayStatusMessage(InfoLabel::Warning, tr("The project already exists."));
         return nameValid;
     }
     // Not a directory, but something else, likely causing directory creation to fail
-    displayStatusMessage(Error, tr("A file with that name already exists."));
+    displayStatusMessage(InfoLabel::Error, tr("A file with that name already exists."));
     return false;
 }
 
@@ -295,25 +282,15 @@ bool ProjectIntroPage::validateProjectName(const QString &name, QString *errorMe
     return true;
 }
 
-void ProjectIntroPage::displayStatusMessage(StatusLabelMode m, const QString &s)
+void ProjectIntroPage::displayStatusMessage(InfoLabel::InfoType t, const QString &s)
 {
-    switch (m) {
-    case Error:
-        d->m_ui.stateLabel->setStyleSheet(d->m_errorStyleSheet);
-        break;
-    case Warning:
-        d->m_ui.stateLabel->setStyleSheet(d->m_warningStyleSheet);
-        break;
-    case Hint:
-        d->m_ui.stateLabel->setStyleSheet(d->m_hintStyleSheet);
-        break;
-    }
+    d->m_ui.stateLabel->setType(t);
     d->m_ui.stateLabel->setText(s);
 }
 
 void ProjectIntroPage::hideStatusLabel()
 {
-    displayStatusMessage(Hint, QString());
+    displayStatusMessage(InfoLabel::None, {});
 }
 
 bool ProjectIntroPage::useAsDefaultPath() const

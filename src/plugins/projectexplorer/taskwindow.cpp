@@ -36,8 +36,9 @@
 #include <coreplugin/actionmanager/command.h>
 #include <coreplugin/icore.h>
 #include <coreplugin/icontext.h>
-#include <extensionsystem/pluginmanager.h>
+
 #include <utils/algorithm.h>
+#include <utils/fileinprojectfinder.h>
 #include <utils/qtcassert.h>
 #include <utils/itemviews.h>
 #include <utils/utilsicons.h>
@@ -56,14 +57,27 @@ const char SESSION_FILTER_WARNINGS[] = "TaskWindow.IncludeWarnings";
 }
 
 namespace ProjectExplorer {
+
+static QList<ITaskHandler *> g_taskHandlers;
+
+ITaskHandler::ITaskHandler()
+{
+    g_taskHandlers.append(this);
+}
+
+ITaskHandler::~ITaskHandler()
+{
+    g_taskHandlers.removeOne(this);
+}
+
 namespace Internal {
 
 class TaskView : public Utils::ListView
 {
 public:
-    TaskView(QWidget *parent = 0);
-    ~TaskView();
-    void resizeEvent(QResizeEvent *e);
+    TaskView(QWidget *parent = nullptr);
+    ~TaskView() override;
+    void resizeEvent(QResizeEvent *e) override;
 };
 
 class TaskWindowContext : public Core::IContext
@@ -79,10 +93,10 @@ class TaskDelegate : public QStyledItemDelegate
     friend class TaskView; // for using Positions::minimumSize()
 
 public:
-    TaskDelegate(QObject * parent = 0);
-    ~TaskDelegate();
-    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const;
-    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const;
+    TaskDelegate(QObject * parent = nullptr);
+    ~TaskDelegate() override;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override;
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override;
 
     // TaskView uses this method if the size of the taskview changes
     void emitSizeHintChanged(const QModelIndex &index);
@@ -92,7 +106,7 @@ public:
 private:
     void generateGradientPixmap(int width, int height, QColor color, bool selected) const;
 
-    mutable int m_cachedHeight;
+    mutable int m_cachedHeight = 0;
     mutable QFont m_cachedFont;
 
     /*
@@ -181,8 +195,7 @@ TaskView::TaskView(QWidget *parent)
     verticalScrollBar()->setSingleStep(vStepSize);
 }
 
-TaskView::~TaskView()
-{ }
+TaskView::~TaskView() = default;
 
 void TaskView::resizeEvent(QResizeEvent *e)
 {
@@ -197,16 +210,24 @@ void TaskView::resizeEvent(QResizeEvent *e)
 class TaskWindowPrivate
 {
 public:
+    ITaskHandler *handler(const QAction *action)
+    {
+        ITaskHandler *handler = m_actionToHandlerMap.value(action, nullptr);
+        return g_taskHandlers.contains(handler) ? handler : nullptr;
+    }
+
     Internal::TaskModel *m_model;
     Internal::TaskFilterModel *m_filter;
     Internal::TaskView *m_listview;
     Internal::TaskWindowContext *m_taskWindowContext;
     QMenu *m_contextMenu;
+    QMap<const QAction *, ITaskHandler *> m_actionToHandlerMap;
     ITaskHandler *m_defaultHandler = nullptr;
     QToolButton *m_filterWarningsButton;
     QToolButton *m_categoriesButton;
     QMenu *m_categoriesMenu;
     QList<QAction *> m_actions;
+    int m_visibleIssuesCount = 0;
 };
 
 static QToolButton *createFilterButton(const QIcon &icon, const QString &toolTip,
@@ -217,13 +238,12 @@ static QToolButton *createFilterButton(const QIcon &icon, const QString &toolTip
     button->setToolTip(toolTip);
     button->setCheckable(true);
     button->setChecked(true);
-    button->setAutoRaise(true);
     button->setEnabled(true);
     QObject::connect(button, &QToolButton::toggled, receiver, lambda);
     return button;
 }
 
-TaskWindow::TaskWindow() : d(new TaskWindowPrivate)
+TaskWindow::TaskWindow() : d(std::make_unique<TaskWindowPrivate>())
 {
     d->m_model = new Internal::TaskModel(this);
     d->m_filter = new Internal::TaskFilterModel(d->m_model);
@@ -233,7 +253,7 @@ TaskWindow::TaskWindow() : d(new TaskWindowPrivate)
     d->m_listview->setFrameStyle(QFrame::NoFrame);
     d->m_listview->setWindowTitle(displayName());
     d->m_listview->setSelectionMode(QAbstractItemView::SingleSelection);
-    Internal::TaskDelegate *tld = new Internal::TaskDelegate(this);
+    auto *tld = new Internal::TaskDelegate(this);
     d->m_listview->setItemDelegate(tld);
     d->m_listview->setWindowIcon(Icons::WINDOW.icon());
     d->m_listview->setContextMenuPolicy(Qt::ActionsContextMenu);
@@ -263,13 +283,15 @@ TaskWindow::TaskWindow() : d(new TaskWindowPrivate)
     d->m_categoriesButton->setIcon(Utils::Icons::FILTER.icon());
     d->m_categoriesButton->setToolTip(tr("Filter by categories"));
     d->m_categoriesButton->setProperty("noArrow", true);
-    d->m_categoriesButton->setAutoRaise(true);
     d->m_categoriesButton->setPopupMode(QToolButton::InstantPopup);
 
     d->m_categoriesMenu = new QMenu(d->m_categoriesButton);
     connect(d->m_categoriesMenu, &QMenu::aboutToShow, this, &TaskWindow::updateCategoriesMenu);
 
     d->m_categoriesButton->setMenu(d->m_categoriesMenu);
+
+    setupFilterUi("IssuesPane.Filter");
+    setFilteringEnabled(true);
 
     TaskHub *hub = TaskHub::instance();
     connect(hub, &TaskHub::categoryAdded, this, &TaskWindow::addCategory);
@@ -283,12 +305,20 @@ TaskWindow::TaskWindow() : d(new TaskWindowPrivate)
     connect(hub, &TaskHub::showTask, this, &TaskWindow::showTask);
     connect(hub, &TaskHub::openTask, this, &TaskWindow::openTask);
 
-    connect(d->m_filter, &TaskFilterModel::rowsRemoved,
-            [this]() { emit setBadgeNumber(d->m_filter->rowCount()); });
+    connect(d->m_filter, &TaskFilterModel::rowsAboutToBeRemoved,
+            [this](const QModelIndex &, int first, int last) {
+        d->m_visibleIssuesCount -= d->m_filter->issuesCount(first, last);
+        emit setBadgeNumber(d->m_visibleIssuesCount);
+    });
     connect(d->m_filter, &TaskFilterModel::rowsInserted,
-            [this]() { emit setBadgeNumber(d->m_filter->rowCount()); });
-    connect(d->m_filter, &TaskFilterModel::modelReset,
-            [this]() { emit setBadgeNumber(d->m_filter->rowCount()); });
+            [this](const QModelIndex &, int first, int last) {
+        d->m_visibleIssuesCount += d->m_filter->issuesCount(first, last);
+        emit setBadgeNumber(d->m_visibleIssuesCount);
+    });
+    connect(d->m_filter, &TaskFilterModel::modelReset, [this] {
+        d->m_visibleIssuesCount = d->m_filter->issuesCount(0, d->m_filter->rowCount());
+        emit setBadgeNumber(d->m_visibleIssuesCount);
+    });
 
     SessionManager *session = SessionManager::instance();
     connect(session, &SessionManager::aboutToSaveSession, this, &TaskWindow::saveSettings);
@@ -302,15 +332,6 @@ TaskWindow::~TaskWindow()
     delete d->m_listview;
     delete d->m_filter;
     delete d->m_model;
-    delete d;
-}
-
-static ITaskHandler *handler(QAction *action)
-{
-    QVariant prop = action->property("ITaskHandler");
-    ITaskHandler *handler = qobject_cast<ITaskHandler *>(prop.value<QObject *>());
-    QTC_CHECK(handler);
-    return handler;
 }
 
 void TaskWindow::delayedInitialization()
@@ -321,21 +342,20 @@ void TaskWindow::delayedInitialization()
 
     alreadyDone = true;
 
-    QList<ITaskHandler *> handlers = ExtensionSystem::PluginManager::getObjects<ITaskHandler>();
-    foreach (ITaskHandler *h, handlers) {
+    for (ITaskHandler *h : g_taskHandlers) {
         if (h->isDefaultHandler() && !d->m_defaultHandler)
             d->m_defaultHandler = h;
 
         QAction *action = h->createAction(this);
         QTC_ASSERT(action, continue);
-        action->setProperty("ITaskHandler", qVariantFromValue(qobject_cast<QObject*>(h)));
+        d->m_actionToHandlerMap.insert(action, h);
         connect(action, &QAction::triggered, this, &TaskWindow::actionTriggered);
         d->m_actions << action;
 
         Core::Id id = h->actionManagerId();
         if (id.isValid()) {
-            Core::Command *cmd = Core::ActionManager::instance()
-                    ->registerAction(action, id, d->m_taskWindowContext->context(), true);
+            Core::Command *cmd =
+                Core::ActionManager::registerAction(action, id, d->m_taskWindowContext->context(), true);
             action = cmd->action();
         }
         d->m_listview->addAction(action);
@@ -347,7 +367,7 @@ void TaskWindow::delayedInitialization()
 
 QList<QWidget*> TaskWindow::toolBarWidgets() const
 {
-    return {d->m_filterWarningsButton, d->m_categoriesButton};
+    return {d->m_filterWarningsButton, d->m_categoriesButton, filterWidget()};
 }
 
 QWidget *TaskWindow::outputWidget(QWidget *)
@@ -360,7 +380,6 @@ void TaskWindow::clearTasks(Core::Id categoryId)
     d->m_model->clearTasks(categoryId);
 
     emit tasksChanged();
-    emit tasksCleared();
     navigateStateChanged();
 }
 
@@ -383,7 +402,7 @@ void TaskWindow::currentChanged(const QModelIndex &index)
 {
     const Task task = index.isValid() ? d->m_filter->task(index) : Task();
     foreach (QAction *action, d->m_actions) {
-        ITaskHandler *h = handler(action);
+        ITaskHandler *h = d->handler(action);
         action->setEnabled((task.isNull() || !h) ? false : h->canHandle(task));
     }
 }
@@ -407,8 +426,7 @@ void TaskWindow::loadSettings()
     if (value.isValid()) {
         bool includeWarnings = value.toBool();
         d->m_filter->setFilterIncludesWarnings(includeWarnings);
-        d->m_filter->setFilterIncludesUnknowns(includeWarnings);
-        d->m_filterWarningsButton->setDown(d->m_filter->filterIncludesWarnings());
+        d->m_filterWarningsButton->setChecked(d->m_filter->filterIncludesWarnings());
     }
 }
 
@@ -435,14 +453,17 @@ void TaskWindow::addTask(const Task &task)
     emit tasksChanged();
     navigateStateChanged();
 
-    if (task.type == Task::Error && d->m_filter->filterIncludesErrors()
-            && !d->m_filter->filteredCategories().contains(task.category))
+    if ((task.options & Task::FlashWorthy)
+         && task.type == Task::Error
+         && d->m_filter->filterIncludesErrors()
+         && !d->m_filter->filteredCategories().contains(task.category)) {
         flash();
+    }
 }
 
 void TaskWindow::removeTask(const Task &task)
 {
-    d->m_model->removeTask(task);
+    d->m_model->removeTask(task.taskId);
 
     emit tasksChanged();
     navigateStateChanged();
@@ -486,6 +507,15 @@ void TaskWindow::triggerDefaultHandler(const QModelIndex &index)
     if (task.isNull())
         return;
 
+    if (!task.file.isEmpty() && !task.file.toFileInfo().isAbsolute()
+            && !task.fileCandidates.empty()) {
+        const Utils::FilePath userChoice = Utils::chooseFileFromList(task.fileCandidates);
+        if (!userChoice.isEmpty()) {
+            task.file = userChoice;
+            updatedTaskFileName(task.taskId, task.file.toString());
+        }
+    }
+
     if (d->m_defaultHandler->canHandle(task)) {
         d->m_defaultHandler->handle(task);
     } else {
@@ -499,7 +529,7 @@ void TaskWindow::actionTriggered()
     auto action = qobject_cast<QAction *>(sender());
     if (!action || !action->isEnabled())
         return;
-    ITaskHandler *h = handler(action);
+    ITaskHandler *h = d->handler(action);
     if (!h)
         return;
 
@@ -514,12 +544,11 @@ void TaskWindow::actionTriggered()
 void TaskWindow::setShowWarnings(bool show)
 {
     d->m_filter->setFilterIncludesWarnings(show);
-    d->m_filter->setFilterIncludesUnknowns(show); // "Unknowns" are often associated with warnings
 }
 
 void TaskWindow::updateCategoriesMenu()
 {
-    typedef QMap<QString, Core::Id>::ConstIterator NameToIdsConstIt;
+    using NameToIdsConstIt = QMap<QString, Core::Id>::ConstIterator;
 
     d->m_categoriesMenu->clear();
 
@@ -646,6 +675,12 @@ void TaskWindow::goToPrev()
     triggerDefaultHandler(currentIndex);
 }
 
+void TaskWindow::updateFilter()
+{
+    d->m_filter->updateFilterProperties(filterText(), filterCaseSensitivity(), filterUsesRegexp(),
+                                        filterIsInverted());
+}
+
 bool TaskWindow::canNavigate() const
 {
     return true;
@@ -656,13 +691,10 @@ bool TaskWindow::canNavigate() const
 /////
 
 TaskDelegate::TaskDelegate(QObject *parent) :
-    QStyledItemDelegate(parent),
-    m_cachedHeight(0)
+    QStyledItemDelegate(parent)
 { }
 
-TaskDelegate::~TaskDelegate()
-{
-}
+TaskDelegate::~TaskDelegate() = default;
 
 QSize TaskDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
@@ -749,8 +781,8 @@ void TaskDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
         painter->setBrush(opt.palette.highlight().color());
         backgroundColor = opt.palette.highlight().color();
     } else {
-        painter->setBrush(opt.palette.background().color());
-        backgroundColor = opt.palette.background().color();
+        painter->setBrush(opt.palette.window().color());
+        backgroundColor = opt.palette.window().color();
     }
     painter->setPen(Qt::NoPen);
     painter->drawRect(opt.rect);
@@ -777,7 +809,7 @@ void TaskDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
         QString bottom = index.data(TaskModel::Description).toString().split(QLatin1Char('\n')).first();
         painter->setClipRect(positions.textArea());
         painter->drawText(positions.textAreaLeft(), positions.top() + fm.ascent(), bottom);
-        if (fm.width(bottom) > positions.textAreaWidth()) {
+        if (fm.horizontalAdvance(bottom) > positions.textAreaWidth()) {
             // draw a gradient to mask the text
             int gradientStart = positions.textAreaRight() - ELLIPSIS_GRADIENT_WIDTH + 1;
             QLinearGradient lg(gradientStart, 0, gradientStart + ELLIPSIS_GRADIENT_WIDTH, 0);
@@ -831,7 +863,7 @@ void TaskDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
     const int pos = file.lastIndexOf(QLatin1Char('/'));
     if (pos != -1)
         file = file.mid(pos +1);
-    const int realFileWidth = fm.width(file);
+    const int realFileWidth = fm.horizontalAdvance(file);
     painter->setClipRect(positions.fileArea());
     painter->drawText(qMin(positions.fileAreaLeft(), positions.fileAreaRight() - realFileWidth),
                       positions.top() + fm.ascent(), file);
@@ -868,7 +900,7 @@ void TaskDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
     }
 
     painter->setClipRect(positions.lineArea());
-    const int realLineWidth = fm.width(lineText);
+    const int realLineWidth = fm.horizontalAdvance(lineText);
     painter->drawText(positions.lineAreaRight() - realLineWidth, positions.top() + fm.ascent(), lineText);
     painter->setClipRect(opt.rect);
 

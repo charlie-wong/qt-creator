@@ -85,6 +85,7 @@ ModelPrivate::ModelPrivate(Model *model) :
 {
     m_rootInternalNode = createNode("QtQuick.Item", 1, 0, PropertyListType(), PropertyListType(), QString(), ModelNode::NodeWithoutSource,true);
     m_currentStateNode = m_rootInternalNode;
+    m_currentTimelineNode = m_rootInternalNode;
 }
 
 ModelPrivate::~ModelPrivate()
@@ -112,7 +113,7 @@ void ModelPrivate::detachAllViews()
 
 Model *ModelPrivate::create(const TypeName &type, int major, int minor, Model *metaInfoPropxyModel)
 {
-    Model *model = new Model;
+    auto model = new Model;
 
     model->d->m_metaInfoProxyModel = metaInfoPropxyModel;
     model->d->rootNode()->setType(type);
@@ -167,6 +168,22 @@ void ModelPrivate::notifyImportsChanged(const QList<Import> &addedImports, const
 
     if (resetModel)
         resetModelByRewriter(description);
+}
+
+void ModelPrivate::notifyPossibleImportsChanged(const QList<Import> &possibleImports)
+{
+    for (const QPointer<AbstractView> &view : qAsConst(m_viewList)) {
+        Q_ASSERT(view != nullptr);
+        view->possibleImportsChanged(possibleImports);
+    }
+}
+
+void ModelPrivate::notifyUsedImportsChanged(const QList<Import> &usedImports)
+{
+    for (const QPointer<AbstractView> &view : qAsConst(m_viewList)) {
+        Q_ASSERT(view != nullptr);
+        view->usedImportsChanged(usedImports);
+    }
 }
 
 QUrl ModelPrivate::fileUrl() const
@@ -228,7 +245,7 @@ InternalNode::Pointer ModelPrivate::createNode(const TypeName &typeName,
     InternalNode::Pointer newInternalNodePointer = InternalNode::create(typeName, majorVersion, minorVersion, internalId);
     newInternalNodePointer->setNodeSourceType(nodeSourceType);
 
-    typedef QPair<PropertyName, QVariant> PropertyPair;
+    using PropertyPair = QPair<PropertyName, QVariant>;
 
     foreach (const PropertyPair &propertyPair, propertyList) {
         newInternalNodePointer->addVariantProperty(propertyPair.first);
@@ -259,6 +276,8 @@ void ModelPrivate::removeNodeFromModel(const InternalNodePointer &internalNodePo
 
     internalNodePointer->resetParentProperty();
 
+
+    m_selectedInternalNodeList.removeAll(internalNodePointer);
     if (!internalNodePointer->id().isEmpty())
         m_idNodeHash.remove(internalNodePointer->id());
     internalNodePointer->setValid(false);
@@ -365,7 +384,7 @@ void ModelPrivate::notifyAuxiliaryDataChanged(const InternalNodePointer &interna
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode node(internalNode, model(), view.data());
         view->auxiliaryDataChanged(node, name, data);
 
@@ -396,7 +415,7 @@ void ModelPrivate::notifyNodeSourceChanged(const InternalNodePointer &internalNo
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode node(internalNode, model(), view.data());
         view->nodeSourceChanged(node, newNodeSource);
 
@@ -428,7 +447,7 @@ void ModelPrivate::notifyRootNodeTypeChanged(const QString &type, int majorVersi
         nodeInstanceView()->rootNodeTypeChanged(type, majorVersion, minorVersion);
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->rootNodeTypeChanged(type, majorVersion, minorVersion);
 
     }
@@ -441,9 +460,9 @@ void ModelPrivate::notifyInstancePropertyChange(const QList<QPair<ModelNode, Pro
 {
     // no need to notify the rewriter or the instance view
 
-    typedef QPair<ModelNode, PropertyName> ModelNodePropertyPair;
+    using ModelNodePropertyPair = QPair<ModelNode, PropertyName>;
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
 
         QList<QPair<ModelNode, PropertyName> > adaptedPropertyList;
         foreach (const ModelNodePropertyPair &propertyPair, propertyPairList) {
@@ -461,7 +480,7 @@ void ModelPrivate::notifyInstanceErrorChange(const QVector<qint32> &instanceIds)
 
     QVector<ModelNode> errorNodeList;
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         foreach (qint32 instanceId, instanceIds)
             errorNodeList.append(ModelNode(model()->d->nodeForInternalId(instanceId), model(), view));
         view->instanceErrorChanged(errorNodeList);
@@ -484,7 +503,7 @@ void ModelPrivate::notifyInstancesCompleted(const QVector<ModelNode> &nodeVector
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->instancesCompleted(toModelNodeVector(internalVector, view.data()));
     }
 
@@ -499,11 +518,8 @@ QMultiHash<ModelNode, InformationName> convertModelNodeInformationHash(const QMu
 {
     QMultiHash<ModelNode, InformationName>  convertedModelNodeInformationHash;
 
-    QHashIterator<ModelNode, InformationName> hashIterator(informationChangeHash);
-    while (hashIterator.hasNext()) {
-        hashIterator.next();
-        convertedModelNodeInformationHash.insert(ModelNode(hashIterator.key(), view), hashIterator.value());
-    }
+    for (auto it = informationChangeHash.cbegin(), end = informationChangeHash.cend(); it != end; ++it)
+        convertedModelNodeInformationHash.insert(ModelNode(it.key(), view), it.value());
 
     return convertedModelNodeInformationHash;
 }
@@ -522,7 +538,7 @@ void ModelPrivate::notifyInstancesInformationsChange(const QMultiHash<ModelNode,
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->instanceInformationsChanged(convertModelNodeInformationHash(informationChangeHash, view.data()));
     }
 
@@ -549,7 +565,7 @@ void ModelPrivate::notifyInstancesRenderImageChanged(const QVector<ModelNode> &n
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->instancesRenderImageChanged(toModelNodeVector(internalVector, view.data()));
     }
 
@@ -576,7 +592,7 @@ void ModelPrivate::notifyInstancesPreviewImageChanged(const QVector<ModelNode> &
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->instancesPreviewImageChanged(toModelNodeVector(internalVector, view.data()));
     }
 
@@ -603,7 +619,7 @@ void ModelPrivate::notifyInstancesChildrenChanged(const QVector<ModelNode> &node
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->instancesChildrenChanged(toModelNodeVector(internalVector, view.data()));
     }
 
@@ -630,7 +646,7 @@ void ModelPrivate::notifyCurrentStateChanged(const ModelNode &node)
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->currentStateChanged(ModelNode(node.internalNode(), model(), view.data()));
     }
 
@@ -639,6 +655,49 @@ void ModelPrivate::notifyCurrentStateChanged(const ModelNode &node)
 
     if (resetModel)
         resetModelByRewriter(description);
+}
+
+void ModelPrivate::notifyCurrentTimelineChanged(const ModelNode &node)
+{
+    bool resetModel = false;
+    QString description;
+
+    m_currentTimelineNode = node.internalNode();
+
+    try {
+        if (rewriterView())
+            rewriterView()->currentTimelineChanged(ModelNode(node.internalNode(), model(), rewriterView()));
+    } catch (const RewritingException &e) {
+        description = e.description();
+        resetModel = true;
+    }
+
+    for (const QPointer<AbstractView> &view : m_viewList) {
+        Q_ASSERT(view != nullptr);
+        view->currentTimelineChanged(ModelNode(node.internalNode(), model(), view.data()));
+    }
+
+    if (nodeInstanceView())
+        nodeInstanceView()->currentTimelineChanged(ModelNode(node.internalNode(), model(), nodeInstanceView()));
+
+    if (resetModel)
+        resetModelByRewriter(description);
+}
+
+void ModelPrivate::notifyRenderImage3DChanged(const QImage &image)
+{
+    for (const QPointer<AbstractView> &view : qAsConst(m_viewList)) {
+        Q_ASSERT(view != nullptr);
+        view->renderImage3DChanged(image);
+    }
+}
+
+void ModelPrivate::notifyUpdateActiveScene3D(const QVariantMap &sceneState)
+{
+    for (const QPointer<AbstractView> &view : qAsConst(m_viewList)) {
+        Q_ASSERT(view != nullptr);
+        view->updateActiveScene3D(sceneState);
+    }
 }
 
 void ModelPrivate::notifyRewriterBeginTransaction()
@@ -655,7 +714,7 @@ void ModelPrivate::notifyRewriterBeginTransaction()
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->rewriterBeginTransaction();
     }
 
@@ -680,7 +739,7 @@ void ModelPrivate::notifyRewriterEndTransaction()
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->rewriterEndTransaction();
     }
 
@@ -708,7 +767,7 @@ void ModelPrivate::notifyInstanceToken(const QString &token, int number, const Q
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->instancesToken(token, number, toModelNodeVector(internalVector, view.data()));
     }
 
@@ -735,7 +794,7 @@ void ModelPrivate::notifyCustomNotification(const AbstractView *senderView, cons
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->customNotification(senderView, identifier, toModelNodeList(internalList, view.data()), data);
     }
 
@@ -779,7 +838,7 @@ void ModelPrivate::notifyPropertiesRemoved(const QList<PropertyPair> &propertyPa
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
         QList<AbstractProperty> propertyList;
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         foreach (const PropertyPair &propertyPair, propertyPairList) {
             AbstractProperty newProperty(propertyPair.second, propertyPair.first, model(), view.data());
             propertyList.append(newProperty);
@@ -814,7 +873,7 @@ void ModelPrivate::notifyPropertiesAboutToBeRemoved(const QList<InternalProperty
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
         QList<AbstractProperty> propertyList;
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         foreach (const InternalProperty::Pointer &property, internalPropertyList) {
             AbstractProperty newProperty(property->name(), property->propertyOwner(), model(), view.data());
             propertyList.append(newProperty);
@@ -843,6 +902,9 @@ void ModelPrivate::notifyPropertiesAboutToBeRemoved(const QList<InternalProperty
 
 void ModelPrivate::setAuxiliaryData(const InternalNode::Pointer& node, const PropertyName &name, const QVariant &data)
 {
+    if (node->auxiliaryData(name) == data)
+        return;
+
     if (data.isValid())
         node->setAuxiliaryData(name, data);
     else
@@ -902,7 +964,7 @@ void ModelPrivate::notifyNodeCreated(const InternalNode::Pointer &newInternalNod
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode createdNode(newInternalNodePointer, model(), view.data());
         view->nodeCreated(createdNode);
     }
@@ -927,7 +989,7 @@ void ModelPrivate::notifyNodeAboutToBeRemoved(const InternalNode::Pointer &inter
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode modelNode(internalNodePointer, model(), view.data());
         view->nodeAboutToBeRemoved(modelNode);
     }
@@ -967,7 +1029,7 @@ void ModelPrivate::notifyNodeRemoved(const InternalNodePointer &internalNodePoin
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode modelNode(internalNodePointer, model(), view.data());
         NodeAbstractProperty parentProperty(parentPropertyName, parentNodePointer, model(), view.data());
         view->nodeRemoved(modelNode, parentProperty, propertyChange);
@@ -994,7 +1056,7 @@ void ModelPrivate::notifyNodeTypeChanged(const InternalNodePointer &internalNode
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode modelNode(internalNodePointer, model(), view.data());
         view->nodeTypeChanged(modelNode, type, majorVersion, minorVersion);
     }
@@ -1025,7 +1087,7 @@ void ModelPrivate::notifyNodeIdChanged(const InternalNode::Pointer& internalNode
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         ModelNode modelNode(internalNodePointer, model(), view.data());
         view->nodeIdChanged(modelNode, newId, oldId);
     }
@@ -1059,7 +1121,7 @@ void ModelPrivate::notifyBindingPropertiesChanged(const QList<InternalBindingPro
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         QList<BindingProperty> propertyList;
         foreach (const InternalBindingPropertyPointer &bindingProperty, internalPropertyList) {
             propertyList.append(BindingProperty(bindingProperty->name(), bindingProperty->propertyOwner(), model(), view.data()));
@@ -1100,7 +1162,7 @@ void ModelPrivate::notifySignalHandlerPropertiesChanged(const QVector<InternalSi
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         QVector<SignalHandlerProperty> propertyList;
         foreach (const InternalSignalHandlerPropertyPointer &signalHandlerProperty, internalPropertyList) {
             propertyList.append(SignalHandlerProperty(signalHandlerProperty->name(), signalHandlerProperty->propertyOwner(), model(), view.data()));
@@ -1142,7 +1204,7 @@ void ModelPrivate::notifyScriptFunctionsChanged(const InternalNodePointer &inter
     }
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
 
         ModelNode node(internalNodePointer, model(), view.data());
         view->scriptFunctionsChanged(node, scriptFunctionList);
@@ -1180,7 +1242,7 @@ void ModelPrivate::notifyVariantPropertiesChanged(const InternalNodePointer &int
 
     foreach (const QPointer<AbstractView> &view, m_viewList) {
         QList<VariantProperty> propertyList;
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         foreach (const PropertyName &propertyName, propertyNameList) {
             VariantProperty property(propertyName, internalNodePointer, model(), view.data());
             propertyList.append(property);
@@ -1363,16 +1425,10 @@ void ModelPrivate::notifyNodeOrderChanged(const InternalNodeListPropertyPointer 
 
 void ModelPrivate::setSelectedNodes(const QList<InternalNode::Pointer> &selectedNodeList)
 {
+    QList<InternalNode::Pointer> sortedSelectedList
+            = Utils::filtered(selectedNodeList, &InternalNode::isValid);
 
-    QList<InternalNode::Pointer> sortedSelectedList(selectedNodeList);
-    QMutableListIterator<InternalNode::Pointer> iterator(sortedSelectedList);
-    while (iterator.hasNext()) {
-        InternalNode::Pointer node(iterator.next());
-        if (!node->isValid())
-            iterator.remove();
-    }
-
-    sortedSelectedList = sortedSelectedList.toSet().toList();
+    sortedSelectedList = Utils::toList(Utils::toSet(sortedSelectedList));
     Utils::sort(sortedSelectedList);
 
     if (sortedSelectedList == m_selectedInternalNodeList)
@@ -1440,9 +1496,13 @@ void ModelPrivate::changeSelectedNodes(const QList<InternalNode::Pointer> &newSe
                                        const QList<InternalNode::Pointer> &oldSelectedNodeList)
 {
     foreach (const QPointer<AbstractView> &view, m_viewList) {
-        Q_ASSERT(view != 0);
+        Q_ASSERT(view != nullptr);
         view->selectedNodesChanged(toModelNodeList(newSelectedNodeList, view.data()), toModelNodeList(oldSelectedNodeList, view.data()));
     }
+
+    if (nodeInstanceView())
+        nodeInstanceView()->selectedNodesChanged(toModelNodeList(newSelectedNodeList, nodeInstanceView()),
+                                                 toModelNodeList(oldSelectedNodeList, nodeInstanceView()));
 }
 
 QList<InternalNode::Pointer> ModelPrivate::selectedNodes() const
@@ -1707,6 +1767,11 @@ NodeInstanceView *ModelPrivate::nodeInstanceView() const
     return m_nodeInstanceView.data();
 }
 
+InternalNodePointer ModelPrivate::currentTimelineNode() const
+{
+    return m_currentTimelineNode;
+}
+
 InternalNodePointer ModelPrivate::nodeForId(const QString &id) const
 {
     return m_idNodeHash.value(id);
@@ -1738,7 +1803,8 @@ QList<InternalNodePointer> ModelPrivate::allNodes() const
 
     nodeList.append(m_rootInternalNode);
     nodeList.append(m_rootInternalNode->allSubNodes());
-    nodeList.append((m_nodeSet - nodeList.toSet()).toList());
+    // FIXME: This is horribly expensive compared to a loop.
+    nodeList.append(Utils::toList(m_nodeSet - Utils::toSet(nodeList)));
 
     return nodeList;
 }
@@ -1829,16 +1895,19 @@ void Model::changeImports(const QList<Import> &importsToBeAdded, const QList<Imp
 void Model::setPossibleImports(const QList<Import> &possibleImports)
 {
     d->m_possibleImportList = possibleImports;
+    d->notifyPossibleImportsChanged(possibleImports);
 }
 
 void Model::setUsedImports(const QList<Import> &usedImports)
 {
     d->m_usedImportList = usedImports;
+    d->notifyUsedImportsChanged(usedImports);
 }
-
 
 static bool compareVersions(const QString &version1, const QString &version2, bool allowHigherVersion)
 {
+    if (version2.isEmpty())
+        return true;
     if (version1 == version2)
         return true;
     if (!allowHigherVersion)
@@ -1847,17 +1916,17 @@ static bool compareVersions(const QString &version1, const QString &version2, bo
     QStringList version2List = version2.split(QLatin1Char('.'));
     if (version1List.count() == 2 && version2List.count() == 2) {
         bool ok;
-        int major1 = version1List.first().toInt(&ok);
+        int major1 = version1List.constFirst().toInt(&ok);
         if (!ok)
             return false;
-        int major2 = version2List.first().toInt(&ok);
+        int major2 = version2List.constFirst().toInt(&ok);
         if (!ok)
             return false;
         if (major1 >= major2) {
-            int minor1 = version1List.last().toInt(&ok);
+            int minor1 = version1List.constLast().toInt(&ok);
             if (!ok)
                 return false;
-            int minor2 = version2List.last().toInt(&ok);
+            int minor2 = version2List.constLast().toInt(&ok);
             if (!ok)
                 return false;
             if (minor1 >= minor2)
@@ -1868,7 +1937,7 @@ static bool compareVersions(const QString &version1, const QString &version2, bo
     return false;
 }
 
-bool Model::hasImport(const Import &import, bool ignoreAlias, bool allowHigherVersion)
+bool Model::hasImport(const Import &import, bool ignoreAlias, bool allowHigherVersion) const
 {
     if (imports().contains(import))
         return true;
@@ -1881,6 +1950,26 @@ bool Model::hasImport(const Import &import, bool ignoreAlias, bool allowHigherVe
                 return true;
         if (existingImport.isLibraryImport() && import.isLibraryImport())
             if (existingImport.url() == import.url()  && compareVersions(existingImport.version(), import.version(), allowHigherVersion))
+                return true;
+    }
+    return false;
+}
+
+bool Model::isImportPossible(const Import &import, bool ignoreAlias, bool allowHigherVersion) const
+{
+    if (imports().contains(import))
+        return true;
+    if (!ignoreAlias)
+        return false;
+
+    const auto importList = possibleImports();
+
+    for (const Import &possibleImport : importList) {
+        if (possibleImport.isFileImport() && import.isFileImport())
+            if (possibleImport.file() == import.file())
+                return true;
+        if (possibleImport.isLibraryImport() && import.isLibraryImport())
+            if (possibleImport.url() == import.url()  && compareVersions(possibleImport.version(), import.version(), allowHigherVersion))
                 return true;
     }
     return false;
@@ -1907,6 +1996,20 @@ QStringList Model::importPaths() const
         importPathList.append(documentDirectoryPath);
 
     return importPathList;
+}
+
+Import Model::highestPossibleImport(const QString &importPath)
+{
+    Import candidate;
+
+    for (const Import &import : possibleImports()) {
+        if (import.url() == importPath) {
+            if (candidate.isEmpty() || compareVersions(import.version(), candidate.version(), true))
+                candidate = import;
+        }
+    }
+
+    return candidate;
 }
 
 RewriterView *Model::rewriterView() const
@@ -1954,6 +2057,14 @@ void Model::setTextModifier(TextModifier *textModifier)
 void Model::setDocumentMessages(const QList<DocumentMessage> &errors, const QList<DocumentMessage> &warnings)
 {
     d->setDocumentMessages(errors, warnings);
+}
+
+/*!
+ * \brief Returns list of selected nodes for a view
+ */
+QList<ModelNode> Model::selectedNodes(AbstractView *view) const
+{
+    return d->toModelNodeList(d->selectedNodes(), view);
 }
 
 /*!
@@ -2023,7 +2134,7 @@ The view is informed that it has been registered within the model by a call to A
 void Model::attachView(AbstractView *view)
 {
 //    Internal::WriteLocker locker(d);
-    RewriterView *castedRewriterView = qobject_cast<RewriterView*>(view);
+    auto castedRewriterView = qobject_cast<RewriterView*>(view);
     if (castedRewriterView) {
         if (rewriterView() == castedRewriterView)
             return;
@@ -2032,7 +2143,7 @@ void Model::attachView(AbstractView *view)
         return;
     }
 
-    NodeInstanceView *nodeInstanceView = qobject_cast<NodeInstanceView*>(view);
+    auto nodeInstanceView = qobject_cast<NodeInstanceView*>(view);
     if (nodeInstanceView)
         return;
 
@@ -2052,11 +2163,11 @@ void Model::detachView(AbstractView *view, ViewNotification emitDetachNotify)
 //    Internal::WriteLocker locker(d);
     bool emitNotify = (emitDetachNotify == NotifyView);
 
-    RewriterView *rewriterView = qobject_cast<RewriterView*>(view);
+    auto rewriterView = qobject_cast<RewriterView*>(view);
     if (rewriterView)
         return;
 
-    NodeInstanceView *nodeInstanceView = qobject_cast<NodeInstanceView*>(view);
+    auto nodeInstanceView = qobject_cast<NodeInstanceView*>(view);
     if (nodeInstanceView)
         return;
 

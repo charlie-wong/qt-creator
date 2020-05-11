@@ -35,6 +35,8 @@
 #include <QTextStream>
 #include <QFileInfo>
 #include <QByteArray>
+#include <QElapsedTimer>
+#include <QSysInfo>
 #include <QString>
 #include <QDir>
 #include <QTime>
@@ -102,6 +104,8 @@ static bool parseArguments(const QStringList &args, QString *errorMessage)
                 optIsWow = true;
             } else if (arg == QLatin1String("nogui")) {
                 noguiMode = true;
+            } else if (arg == QLatin1String("p")) {
+                // Ignore, see QTCREATORBUG-18194.
             } else {
                 *errorMessage = QString::fromLatin1("Unexpected option: %1").arg(arg);
                 return false;
@@ -136,6 +140,26 @@ static bool parseArguments(const QStringList &args, QString *errorMessage)
     return true;
 }
 
+static bool readDebugger(const wchar_t *key, QString *debugger,
+                         QString *errorMessage)
+{
+    bool success = false;
+    HKEY handle;
+    const RegistryAccess::AccessMode accessMode = optIsWow
+#ifdef Q_OS_WIN64
+        ? RegistryAccess::Registry32Mode
+#else
+        ? RegistryAccess::Registry64Mode
+#endif
+        : RegistryAccess::DefaultAccessMode;
+
+    if (openRegistryKey(HKEY_LOCAL_MACHINE, debuggerRegistryKeyC, false, &handle, accessMode, errorMessage)) {
+        success = registryReadStringKey(handle, key, debugger, errorMessage);
+        RegCloseKey(handle);
+    }
+    return success;
+}
+
 static void usage(const QString &binary, const QString &message = QString())
 {
     QString msg;
@@ -168,10 +192,16 @@ static void usage(const QString &binary, const QString &message = QString())
         << "<p>On 64-bit systems, do the same for the key <i>HKEY_LOCAL_MACHINE\\" << wCharToQString(debuggerWow32RegistryKeyC) << "</i>, "
         << "setting the new value to <pre>\"" << QDir::toNativeSeparators(binary) << "\" -wow %ld %ld</pre></p>"
         << "<p>How to run a command with administrative privileges:</p>"
-        << "<pre>runas /env /noprofile /user:Administrator \"command arguments\"</pre>"
-        << "</body></html>";
+        << "<pre>runas /env /noprofile /user:Administrator \"command arguments\"</pre>";
+    QString currentDebugger;
+    QString errorMessage;
+    if (readDebugger(debuggerRegistryValueNameC, &currentDebugger, &errorMessage))
+       str << "<p>Currently registered debugger:</p><pre>" << currentDebugger << "</pre>";
+    str << "<p>Qt " << QT_VERSION_STR << ", " << QSysInfo::WordSize
+        << "bit</p></body></html>";
 
     QMessageBox msgBox(QMessageBox::Information, QLatin1String(titleC), msg, QMessageBox::Ok);
+    msgBox.setTextInteractionFlags(Qt::TextBrowserInteraction);
     msgBox.exec();
 }
 
@@ -282,13 +312,18 @@ bool startCreatorAsDebugger(bool asClient, QString *errorMessage)
     // Send to running Creator: Unstable with directly linked CDB engine.
     if (asClient)
         args << QLatin1String("-client");
-    args << QLatin1String("-wincrashevent")
-        << QString::fromLatin1("%1:%2").arg(argWinCrashEvent).arg(argProcessId);
+    if (argWinCrashEvent != 0) {
+        args << QLatin1String("-wincrashevent")
+            << QString::fromLatin1("%1:%2").arg(argWinCrashEvent).arg(argProcessId);
+    } else {
+        args << QLatin1String("-debug")
+            << QString::fromLatin1("%1").arg(argProcessId);
+    }
     if (debug)
         qDebug() << binary << args;
     QProcess p;
     p.setWorkingDirectory(dir);
-    QTime executionTime;
+    QElapsedTimer executionTime;
     executionTime.start();
     p.start(binary, args, QIODevice::NotOpen);
     if (!p.waitForStarted()) {
@@ -314,22 +349,7 @@ bool startCreatorAsDebugger(bool asClient, QString *errorMessage)
 bool readDefaultDebugger(QString *defaultDebugger,
                          QString *errorMessage)
 {
-    bool success = false;
-    HKEY handle;
-    const RegistryAccess::AccessMode accessMode = optIsWow
-#ifdef Q_OS_WIN64
-        ? RegistryAccess::Registry32Mode
-#else
-        ? RegistryAccess::Registry64Mode
-#endif
-        : RegistryAccess::DefaultAccessMode;
-
-    if (openRegistryKey(HKEY_LOCAL_MACHINE, debuggerRegistryKeyC, false, &handle, accessMode, errorMessage)) {
-        success = registryReadStringKey(handle, debuggerRegistryDefaultValueNameC,
-                                        defaultDebugger, errorMessage);
-        RegCloseKey(handle);
-    }
-    return success;
+   return readDebugger(debuggerRegistryDefaultValueNameC, defaultDebugger, errorMessage);
 }
 
 bool startDefaultDebugger(QString *errorMessage)
@@ -400,6 +420,15 @@ static bool registerDebuggerKey(const WCHAR *key,
     do {
         if (!openRegistryKey(HKEY_LOCAL_MACHINE, key, true, &handle, access, errorMessage))
             break;
+
+        // Make sure to automatically open the qtcdebugger dialog on a crash
+        QString autoVal;
+        registryReadStringKey(handle, autoRegistryValueNameC, &autoVal, errorMessage);
+        if (autoVal != "1") {
+            if (!registryWriteStringKey(handle, autoRegistryValueNameC, "1", errorMessage))
+                break;
+        }
+
         // Save old key, which might be missing
         QString oldDebugger;
         if (isRegistered(handle, call, errorMessage, &oldDebugger)) {
@@ -453,8 +482,7 @@ static bool unregisterDebuggerKey(const WCHAR *key,
             break;
         }
         QString oldDebugger;
-        if (!registryReadStringKey(handle, debuggerRegistryDefaultValueNameC, &oldDebugger, errorMessage))
-            break;
+        registryReadStringKey(handle, debuggerRegistryDefaultValueNameC, &oldDebugger, errorMessage);
         // Re-register old debugger or delete key if it was empty.
         if (oldDebugger.isEmpty()) {
             if (!registryDeleteValue(handle, debuggerRegistryValueNameC, errorMessage))

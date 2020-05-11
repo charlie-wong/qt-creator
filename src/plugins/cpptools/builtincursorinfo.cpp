@@ -32,12 +32,11 @@
 #include "cppsemanticinfo.h"
 #include "cpptoolsreuse.h"
 
-#include <texteditor/convenience.h>
-
 #include <cplusplus/CppDocument.h>
 #include <cplusplus/Macro.h>
 #include <cplusplus/TranslationUnit.h>
 
+#include <utils/textutils.h>
 #include <utils/qtcassert.h>
 #include <utils/runextensions.h>
 
@@ -47,39 +46,34 @@ using namespace CPlusPlus;
 using SemanticUses = QList<CppTools::SemanticInfo::Use>;
 
 namespace CppTools {
-namespace Internal {
 namespace {
 
 CursorInfo::Range toRange(const SemanticInfo::Use &use)
 {
-    return CursorInfo::Range(use.line, use.column, use.length);
+    return {use.line, use.column, use.length};
 }
 
 CursorInfo::Range toRange(int tokenIndex, TranslationUnit *translationUnit)
 {
-    unsigned line, column;
-    translationUnit->getTokenPosition(static_cast<unsigned>(tokenIndex), &line, &column);
+    int line, column;
+    translationUnit->getTokenPosition(tokenIndex, &line, &column);
     if (column)
         --column;  // adjust the column position.
 
-    return CursorInfo::Range(
-                line,
-                column +1,
-                translationUnit->tokenAt(static_cast<unsigned>(tokenIndex)).utf16chars());
+    return {line,
+            column + 1,
+            translationUnit->tokenAt(tokenIndex).utf16chars()};
 }
 
-CursorInfo::Range toRange(const QTextCursor &textCursor,
-                                unsigned utf16offset,
-                                unsigned length)
+CursorInfo::Range toRange(const QTextCursor &textCursor, int utf16offset, int length)
 {
     QTextCursor cursor(textCursor.document());
-    cursor.setPosition(static_cast<int>(utf16offset));
+    cursor.setPosition(utf16offset);
     const QTextBlock textBlock = cursor.block();
 
-    return CursorInfo::Range(
-                static_cast<unsigned>(textBlock.blockNumber() + 1),
-                static_cast<unsigned>(cursor.position() - textBlock.position() + 1),
-                length);
+    return {textBlock.blockNumber() + 1,
+            cursor.position() - textBlock.position() + 1,
+            length};
 }
 
 CursorInfo::Ranges toRanges(const SemanticUses &uses)
@@ -93,7 +87,7 @@ CursorInfo::Ranges toRanges(const SemanticUses &uses)
     return ranges;
 }
 
-CursorInfo::Ranges toRanges(const QList<int> tokenIndices, TranslationUnit *translationUnit)
+CursorInfo::Ranges toRanges(const QList<int> &tokenIndices, TranslationUnit *translationUnit)
 {
     CursorInfo::Ranges ranges;
     ranges.reserve(tokenIndices.size());
@@ -106,16 +100,16 @@ CursorInfo::Ranges toRanges(const QList<int> tokenIndices, TranslationUnit *tran
 
 class FunctionDefinitionUnderCursor: protected ASTVisitor
 {
-    unsigned m_line = 0;
-    unsigned m_column = 0;
+    int m_line = 0;
+    int m_column = 0;
     DeclarationAST *m_functionDefinition = nullptr;
 
 public:
-    FunctionDefinitionUnderCursor(TranslationUnit *translationUnit)
+    explicit FunctionDefinitionUnderCursor(TranslationUnit *translationUnit)
         : ASTVisitor(translationUnit)
     { }
 
-    DeclarationAST *operator()(AST *ast, unsigned line, unsigned column)
+    DeclarationAST *operator()(AST *ast, int line, int column)
     {
         m_functionDefinition = nullptr;
         m_line = line;
@@ -125,7 +119,7 @@ public:
     }
 
 protected:
-    virtual bool preVisit(AST *ast)
+    bool preVisit(AST *ast) override
     {
         if (m_functionDefinition)
             return false;
@@ -144,8 +138,8 @@ protected:
 private:
     bool checkDeclaration(DeclarationAST *ast)
     {
-        unsigned startLine, startColumn;
-        unsigned endLine, endColumn;
+        int startLine, startColumn;
+        int endLine, endColumn;
         getTokenStartPosition(ast->firstToken(), &startLine, &startColumn);
         getTokenEndPosition(ast->lastToken() - 1, &endLine, &endColumn);
 
@@ -163,29 +157,32 @@ private:
 class FindUses
 {
 public:
-    static CursorInfo find(const QTextCursor &textCursor,
-                                 const Document::Ptr document,
-                                 const Snapshot &snapshot)
+    static CursorInfo find(const Document::Ptr document, const Snapshot &snapshot,
+                           int line, int column, Scope *scope, const QString &expression)
     {
-        const FindUses findUses(textCursor, document, snapshot);
+        FindUses findUses(document, snapshot, line, column, scope, expression);
         return findUses.doFind();
     }
 
 private:
-    FindUses(const QTextCursor &textCursor, const Document::Ptr document, const Snapshot &snapshot)
-        : m_document(document), m_snapshot(snapshot)
+    FindUses(const Document::Ptr document, const Snapshot &snapshot, int line, int column,
+             Scope *scope, const QString &expression)
+        : m_document(document)
+        , m_line(line)
+        , m_column(column)
+        , m_scope(scope)
+        , m_expression(expression)
+        , m_snapshot(snapshot)
     {
-        TextEditor::Convenience::convertPosition(textCursor.document(), textCursor.position(),
-                                                 &m_line, &m_column);
-        CanonicalSymbol canonicalSymbol(document, snapshot);
-        m_scope = canonicalSymbol.getScopeAndExpression(textCursor, &m_expression);
     }
 
     CursorInfo doFind() const
     {
         CursorInfo result;
 
-        const CppTools::SemanticInfo::LocalUseMap localUses = findLocalUses();
+        // findLocalUses operates with 1-based line and 0-based column
+        const CppTools::SemanticInfo::LocalUseMap localUses
+                = BuiltinCursorInfo::findLocalUses(m_document, m_line, m_column - 1);
         result.localUses = localUses;
         splitLocalUses(localUses, &result.useRanges, &result.unusedVariablesRanges);
 
@@ -199,16 +196,6 @@ private:
         return result; // OK, result.unusedVariablesRanges will be passed on
     }
 
-    CppTools::SemanticInfo::LocalUseMap findLocalUses() const
-    {
-        AST *ast = m_document->translationUnit()->ast();
-        FunctionDefinitionUnderCursor functionDefinitionUnderCursor(m_document->translationUnit());
-        DeclarationAST *declaration = functionDefinitionUnderCursor(ast,
-                                                                    static_cast<unsigned>(m_line),
-                                                                    static_cast<unsigned>(m_column));
-        return CppTools::LocalSymbols(m_document, declaration).uses;
-    }
-
     void splitLocalUses(const CppTools::SemanticInfo::LocalUseMap &uses,
                         CursorInfo::Ranges *rangesForLocalVariableUnderCursor,
                         CursorInfo::Ranges *rangesForLocalUnusedVariables) const
@@ -218,17 +205,13 @@ private:
 
         LookupContext context(m_document, m_snapshot);
 
-        CppTools::SemanticInfo::LocalUseIterator it(uses);
-        while (it.hasNext()) {
-            it.next();
+        for (auto it = uses.cbegin(), end = uses.cend(); it != end; ++it) {
             const SemanticUses &uses = it.value();
 
             bool good = false;
             foreach (const CppTools::SemanticInfo::Use &use, uses) {
-                unsigned l = static_cast<unsigned>(m_line);
-                // convertCursorPosition() returns a 0-based column number.
-                unsigned c = static_cast<unsigned>(m_column + 1);
-                if (l == use.line && c >= use.column && c <= (use.column + use.length)) {
+                if (m_line == use.line && m_column >= use.column
+                        && m_column <= static_cast<int>(use.column + use.length)) {
                     good = true;
                     break;
                 }
@@ -305,7 +288,7 @@ bool handleMacroCase(const Document::Ptr document,
     if (!macro)
         return false;
 
-    const unsigned length = static_cast<unsigned>(macro->nameToQString().size());
+    const int length = macro->nameToQString().size();
 
     // Macro definition
     if (macro->fileName() == document->fileName())
@@ -353,8 +336,26 @@ QFuture<CursorInfo> BuiltinCursorInfo::run(const CursorInfoParams &cursorInfoPar
         return fi.future();
     }
 
-    return Utils::runAsync(&FindUses::find, cursorInfoParams.textCursor, document, snapshot);
+    const QTextCursor &textCursor = cursorInfoParams.textCursor;
+    int line, column;
+    Utils::Text::convertPosition(textCursor.document(), textCursor.position(), &line, &column);
+    CanonicalSymbol canonicalSymbol(document, snapshot);
+    QString expression;
+    Scope *scope = canonicalSymbol.getScopeAndExpression(textCursor, &expression);
+
+    return Utils::runAsync(&FindUses::find, document, snapshot, line, column, scope, expression);
 }
 
-} // namespace Internal
+CppTools::SemanticInfo::LocalUseMap
+BuiltinCursorInfo::findLocalUses(const Document::Ptr &document, int line, int column)
+{
+    if (!document || !document->translationUnit() || !document->translationUnit()->ast())
+        return SemanticInfo::LocalUseMap();
+
+    AST *ast = document->translationUnit()->ast();
+    FunctionDefinitionUnderCursor functionDefinitionUnderCursor(document->translationUnit());
+    DeclarationAST *declaration = functionDefinitionUnderCursor(ast, line, column);
+    return CppTools::LocalSymbols(document, declaration).uses;
+}
+
 } // namespace CppTools

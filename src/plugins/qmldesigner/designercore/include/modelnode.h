@@ -28,6 +28,7 @@
 #include "qmldesignercorelib_global.h"
 #include <QPointer>
 #include <QList>
+#include <QVector>
 #include <QVariant>
 
 QT_BEGIN_NAMESPACE
@@ -42,9 +43,8 @@ namespace Internal {
     class InternalNode;
     class InternalProperty;
 
-    typedef QSharedPointer<InternalNode> InternalNodePointer;
-    typedef QSharedPointer<InternalProperty> InternalPropertyPointer;
-    typedef QWeakPointer<InternalNode> InternalNodeWeakPointer;
+    using InternalNodePointer = QSharedPointer<InternalNode>;
+    using InternalPropertyPointer = QSharedPointer<InternalProperty>;
 }
 class NodeMetaInfo;
 class AbstractProperty;
@@ -57,10 +57,12 @@ class NodeListProperty;
 class NodeProperty;
 class NodeAbstractProperty;
 class ModelNode;
+class Comment;
+class Annotation;
 
 QMLDESIGNERCORE_EXPORT QList<Internal::InternalNodePointer> toInternalNodeList(const QList<ModelNode> &nodeList);
 
-typedef QList<QPair<PropertyName, QVariant> > PropertyListType;
+using PropertyListType = QList<QPair<PropertyName, QVariant> >;
 
 class QMLDESIGNERCORE_EXPORT  ModelNode
 {
@@ -108,6 +110,9 @@ public:
     bool hasParentProperty() const;
 
     const QList<ModelNode> directSubModelNodes() const;
+    const QList<ModelNode> directSubModelNodesOfType(const TypeName &typeName) const;
+    const QList<ModelNode> subModelNodesOfType(const TypeName &typeName) const;
+
     const QList<ModelNode> allSubModelNodes() const;
     const QList<ModelNode> allSubModelNodesAndThisNode() const;
     bool hasAnySubModelNodes() const;
@@ -132,6 +137,7 @@ public:
     QList<NodeProperty> nodeProperties() const;
     QList<NodeListProperty> nodeListProperties() const;
     QList<BindingProperty> bindingProperties() const;
+    QList<SignalHandlerProperty> signalProperties() const;
     PropertyNameList propertyNames() const;
 
     bool hasProperties() const;
@@ -174,11 +180,32 @@ public:
     static int variantUserType();
     QVariant toVariant() const;
 
-    QVariant auxiliaryData(const PropertyName &name) const;
+    const QVariant auxiliaryData(const PropertyName &name) const;
     void setAuxiliaryData(const PropertyName &name, const QVariant &data) const;
-    void removeAuxiliaryData(const PropertyName &name);
+    void removeAuxiliaryData(const PropertyName &name) const;
     bool hasAuxiliaryData(const PropertyName &name) const;
     QHash<PropertyName, QVariant> auxiliaryData() const;
+
+    QString customId() const;
+    bool hasCustomId() const;
+    void setCustomId(const QString &str);
+    void removeCustomId();
+
+    QVector<Comment> comments() const;
+    bool hasComments() const;
+    void setComments(const QVector<Comment> &coms);
+    void addComment(const Comment &com);
+    bool updateComment(const Comment &com, int position);
+
+    Annotation annotation() const;
+    bool hasAnnotation() const;
+    void setAnnotation(const Annotation &annotation);
+    void removeAnnotation();
+
+    Annotation globalAnnotation() const;
+    bool hasGlobalAnnotation() const;
+    void setGlobalAnnotation(const Annotation &annotation);
+    void removeGlobalAnnotation();
 
     qint32 internalId() const;
 

@@ -37,7 +37,7 @@ namespace Internal {
 class QuickTestParseResult : public TestParseResult
 {
 public:
-    explicit QuickTestParseResult(const Core::Id &id) : TestParseResult(id) {}
+    explicit QuickTestParseResult(ITestFramework *framework) : TestParseResult(framework) {}
     TestTreeItem *createTestTreeItem() const override;
 };
 
@@ -45,21 +45,25 @@ class QuickTestParser : public QObject, public CppParser
 {
     Q_OBJECT
 public:
-    QuickTestParser();
-    virtual ~QuickTestParser();
-    void init(const QStringList &filesToParse) override;
+    explicit QuickTestParser(ITestFramework *framework);
+    void init(const QStringList &filesToParse, bool fullParse) override;
     void release() override;
     bool processDocument(QFutureInterface<TestParseResultPtr> futureInterface,
                          const QString &fileName) override;
+    QString projectFileForMainCppFile(const QString &fileName) const;
 signals:
     void updateWatchPaths(const QStringList &directories) const;
 private:
     bool handleQtQuickTest(QFutureInterface<TestParseResultPtr> futureInterface,
-                           CPlusPlus::Document::Ptr document, const Core::Id &id) const;
+                           CPlusPlus::Document::Ptr document, ITestFramework *framework);
+    void handleDirectoryChanged(const QString &directory);
+    void doUpdateWatchPaths(const QStringList &directories);
     QList<QmlJS::Document::Ptr> scanDirectoryForQuickTestQmlFiles(const QString &srcDir) const;
     QmlJS::Snapshot m_qmlSnapshot;
     QHash<QString, QString> m_proFilesForQmlFiles;
     QFileSystemWatcher m_directoryWatcher;
+    QMap<QString, QMap<QString, QDateTime> > m_watchedFiles;
+    QMap<QString, QString> m_mainCppFiles;
 };
 
 } // namespace Internal

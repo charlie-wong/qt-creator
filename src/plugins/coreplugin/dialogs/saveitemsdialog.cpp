@@ -49,13 +49,12 @@ SaveItemsDialog::SaveItemsDialog(QWidget *parent,
     : QDialog(parent)
 {
     m_ui.setupUi(this);
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
     // QDialogButtonBox's behavior for "destructive" is wrong, the "do not save" should be left-aligned
     const QDialogButtonBox::ButtonRole discardButtonRole = Utils::HostOsInfo::isMacHost()
             ? QDialogButtonBox::ResetRole : QDialogButtonBox::DestructiveRole;
 
-    if (ExtensionSystem::PluginManager::getObject<Core::DiffService>()) {
+    if (DiffService::instance()) {
         m_diffButton = m_ui.buttonBox->addButton(tr("&Diff"), discardButtonRole);
         connect(m_diffButton, &QAbstractButton::clicked, this, &SaveItemsDialog::collectFilesToDiff);
     }
@@ -81,7 +80,7 @@ SaveItemsDialog::SaveItemsDialog(QWidget *parent,
                                                     << visibleName << QDir::toNativeSeparators(directory));
         if (!fileName.isEmpty())
             item->setIcon(0, FileIconProvider::icon(fileName));
-        item->setData(0, Qt::UserRole, qVariantFromValue(document));
+        item->setData(0, Qt::UserRole, QVariant::fromValue(document));
     }
 
     m_ui.treeWidget->resizeColumnToContents(0);
@@ -166,7 +165,7 @@ void SaveItemsDialog::collectFilesToDiff()
 {
     m_filesToDiff.clear();
     foreach (QTreeWidgetItem *item, m_ui.treeWidget->selectedItems()) {
-        if (IDocument *doc = item->data(0, Qt::UserRole).value<IDocument*>())
+        if (auto doc = item->data(0, Qt::UserRole).value<IDocument*>())
             m_filesToDiff.append(doc->filePath().toString());
     }
     reject();

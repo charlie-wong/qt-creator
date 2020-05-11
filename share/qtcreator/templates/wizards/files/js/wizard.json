@@ -6,7 +6,10 @@
     "trDescription": "Creates a JavaScript file.",
     "trDisplayName": "JS File",
     "trDisplayCategory": "Qt",
-    "enabled": "%{JS: [ %{Plugins} ].indexOf('QmlJSEditor') >= 0}",
+    "iconText": "js",
+    "enabled": "%{JS: value('Plugins').indexOf('QmlJSEditor') >= 0}",
+
+    "options": { "key": "DefaultSuffix", "value": "%{JS: Util.preferredSuffix('application/javascript')}" },
 
     "pages" :
     [
@@ -46,7 +49,7 @@
             "data":
             {
                 "source": "file.js",
-                "target": "%{JS: Util.fileName('%{TargetPath}', '%{JS: Util.preferredSuffix('application/javascript')}')}",
+                "target": "%{JS: Util.fileName(value('TargetPath'), value('DefaultSuffix'))}",
                 "openInEditor": true
             }
         }

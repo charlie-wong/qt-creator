@@ -40,20 +40,15 @@ class TestSettingsWidget : public QWidget
 {
     Q_OBJECT
 public:
-    explicit TestSettingsWidget(QWidget *parent = 0);
+    explicit TestSettingsWidget(QWidget *parent = nullptr);
 
     void setSettings(const TestSettings &settings);
     TestSettings settings() const;
 
 private:
     void populateFrameworksListWidget(const QHash<Core::Id, bool> &frameworks);
-    void populateFiltersWidget(const QStringList &filters);
-    QHash<Core::Id, bool> frameworks() const;
-    QStringList filters() const;
+    void frameworkSettings(TestSettings &settings) const;
     void onFrameworkItemChanged();
-    void onAddFilterClicked();
-    void onEditFilterClicked();
-    void onRemoveFilterClicked();
     Ui::TestSettingsPage m_ui;
 
 };
@@ -62,15 +57,14 @@ class TestSettingsPage : public Core::IOptionsPage
 {
     Q_OBJECT
 public:
-    explicit TestSettingsPage(const QSharedPointer<TestSettings> &settings);
-    ~TestSettingsPage();
+    explicit TestSettingsPage(TestSettings *settings);
 
     QWidget *widget() override;
     void apply() override;
     void finish() override { }
 
 private:
-    QSharedPointer<TestSettings> m_settings;
+    TestSettings *m_settings;
     QPointer<TestSettingsWidget> m_widget;
 };
 

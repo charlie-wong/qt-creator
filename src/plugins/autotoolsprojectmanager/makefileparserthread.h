@@ -29,9 +29,13 @@
 
 #include "makefileparser.h"
 
+#include <projectexplorer/buildsystem.h>
+#include <projectexplorer/projectmacro.h>
+
 #include <QMutex>
 #include <QStringList>
 #include <QThread>
+#include <QVector>
 
 namespace AutotoolsProjectManager {
 namespace Internal {
@@ -47,11 +51,13 @@ class MakefileParserThread : public QThread
 {
     Q_OBJECT
 
+    using Macros = ProjectExplorer::Macros;
+
 public:
-    MakefileParserThread(const QString &makefile);
+    explicit MakefileParserThread(ProjectExplorer::BuildSystem *bs);
 
     /** @see QThread::run() */
-    void run();
+    void run() override;
 
     /**
      * @return List of sources that are set for the _SOURCES target.
@@ -82,10 +88,10 @@ public:
     QStringList includePaths() const;
 
     /**
-     * @return Concatenated defines. Should be invoked, after the signal
+     * @return Concatenated macros. Should be invoked, after the signal
      *         finished() has been emitted.
      */
-    QByteArray defines() const;
+    Macros macros() const;
 
     /**
      * @return List of compiler flags for C. Should be invoked, after the signal
@@ -129,14 +135,15 @@ private:
     MakefileParser m_parser;    ///< Is not accessible outside the thread
 
     mutable QMutex m_mutex;
-    bool m_hasError = false;    ///< Return value for MakefileParserThread::hasError()
     QString m_executable;       ///< Return value for MakefileParserThread::executable()
     QStringList m_sources;      ///< Return value for MakefileParserThread::sources()
     QStringList m_makefiles;    ///< Return value for MakefileParserThread::makefiles()
     QStringList m_includePaths; ///< Return value for MakefileParserThread::includePaths()
-    QByteArray m_defines;       ///< Return value for MakefileParserThread::defines()
+    Macros m_macros;            ///< Return value for MakefileParserThread::macros()
     QStringList m_cflags;       ///< Return value for MakefileParserThread::cflags()
     QStringList m_cxxflags;     ///< Return value for MakefileParserThread::cxxflags()
+
+    ProjectExplorer::BuildSystem::ParseGuard m_guard;
 };
 
 } // namespace Internal

@@ -111,9 +111,6 @@ QVariant ModuleItem::data(int column, int role) const
                           "information.\nStepping into the module or setting "
                           "breakpoints by file and line will not work.");
             case PlainSymbols:
-                return tr("This module contains debug information.\nStepping "
-                          "into the module or setting breakpoints by file and "
-                          "line is expected to work.");
             case FastSymbols:
                 return tr("This module contains debug information.\nStepping "
                           "into the module or setting breakpoints by file and "
@@ -171,7 +168,7 @@ public:
 
 bool ModulesModel::contextMenuEvent(const ItemViewEvent &ev)
 {
-    ModuleItem *item = itemForIndexAtLevel<1>(ev.index());
+    ModuleItem *item = itemForIndexAtLevel<1>(ev.sourceModelIndex());
 
     const bool enabled = engine->debuggerActionsEnabled();
     const bool canReload = engine->hasCapability(ReloadModuleCapability);
@@ -196,7 +193,7 @@ bool ModulesModel::contextMenuEvent(const ItemViewEvent &ev)
     addAction(menu, tr("Show Dependencies of \"%1\"").arg(moduleName),
               tr("Show Dependencies"),
               moduleNameValid && !moduleName.isEmpty() && HostOsInfo::isWindowsHost(),
-              [this, modulePath] { QProcess::startDetached("depends", {modulePath}); });
+              [modulePath] { QProcess::startDetached("depends", {modulePath}); });
 
     addAction(menu, tr("Load Symbols for All Modules"),
               enabled && canLoadSymbols,
@@ -214,7 +211,7 @@ bool ModulesModel::contextMenuEvent(const ItemViewEvent &ev)
     addAction(menu, tr("Edit File \"%1\"").arg(moduleName),
               tr("Edit File"),
               moduleNameValid,
-              [this, modulePath] { engine->gotoLocation(modulePath); });
+              [this, modulePath] { engine->gotoLocation(FilePath::fromString(modulePath)); });
 
     addAction(menu, tr("Show Symbols in File \"%1\"").arg(moduleName),
               tr("Show Symbols"),
@@ -226,7 +223,7 @@ bool ModulesModel::contextMenuEvent(const ItemViewEvent &ev)
               canShowSymbols && moduleNameValid,
               [this, modulePath] { engine->requestModuleSections(modulePath); });
 
-    menu->addSeparator();
+    Internal::addHideColumnActions(menu, ev.view());
     menu->addAction(action(SettingsDialog));
 
     menu->popup(ev.globalPos());
@@ -258,6 +255,11 @@ ModulesHandler::ModulesHandler(DebuggerEngine *engine)
     m_proxyModel->setSourceModel(m_model);
 }
 
+ModulesHandler::~ModulesHandler()
+{
+    delete m_model;
+}
+
 QAbstractItemModel *ModulesHandler::model() const
 {
     return m_proxyModel;
@@ -276,7 +278,7 @@ void ModulesHandler::removeAll()
     m_model->clear();
 }
 
-Modules ModulesHandler::modules() const
+const Modules ModulesHandler::modules() const
 {
     Modules mods;
     m_model->forItemsAtLevel<1>([&mods](ModuleItem *item) { mods.append(item->module); });
@@ -327,7 +329,8 @@ void ModulesHandler::endUpdateAll()
         if (!item->updated)
             toDestroy.append(item);
     });
-    qDeleteAll(toDestroy);
+    for (TreeItem *item : toDestroy)
+        m_model->destroyItem(item);
 }
 
 } // namespace Internal

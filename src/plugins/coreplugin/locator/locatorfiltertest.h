@@ -37,6 +37,7 @@ class CORE_EXPORT BasicLocatorFilterTest
 {
 public:
     BasicLocatorFilterTest(ILocatorFilter *filter);
+    virtual ~BasicLocatorFilterTest();
 
     QList<LocatorFilterEntry> matchesFor(const QString &searchText = QString());
 
@@ -44,16 +45,17 @@ private:
     virtual void doBeforeLocatorRun() {}
     virtual void doAfterLocatorRun() {}
 
-    ILocatorFilter *m_filter;
+    ILocatorFilter *m_filter = nullptr;
 };
 
 class CORE_EXPORT ResultData
 {
 public:
-    typedef QList<ResultData> ResultDataList;
+    using ResultDataList = QList<ResultData>;
 
     ResultData();
-    ResultData(const QString &textColumn1, const QString &textColumn2);
+    ResultData(const QString &textColumn1, const QString &textColumn2,
+               const QString &highlightPositions = QString());
 
     bool operator==(const ResultData &other) const;
 
@@ -64,9 +66,11 @@ public:
 
     QString textColumn1;
     QString textColumn2;
+    QString highlight;
+    LocatorFilterEntry::HighlightInfo::DataType dataType;
 };
 
-typedef ResultData::ResultDataList ResultDataList;
+using ResultDataList = ResultData::ResultDataList;
 
 } // namespace Tests
 } // namespace Core
@@ -79,7 +83,8 @@ namespace QTest {
 
 template<> inline char *toString(const Core::Tests::ResultData &data)
 {
-    QByteArray ba = "\"" + data.textColumn1.toUtf8() + "\", \"" + data.textColumn2.toUtf8() + "\"";
+    const QByteArray ba = "\n\"" + data.textColumn1.toUtf8() + "\", \"" + data.textColumn2.toUtf8()
+            + "\"\n\"" + data.highlight.toUtf8() + "\"";
     return qstrdup(ba.data());
 }
 

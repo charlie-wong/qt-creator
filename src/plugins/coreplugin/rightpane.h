@@ -36,7 +36,6 @@ QT_END_NAMESPACE
 
 namespace Core {
 
-class IMode;
 class RightPaneWidget;
 
 class CORE_EXPORT RightPanePlaceHolder : public QWidget
@@ -45,8 +44,8 @@ class CORE_EXPORT RightPanePlaceHolder : public QWidget
     Q_OBJECT
 
 public:
-    explicit RightPanePlaceHolder(Id mode, QWidget *parent = 0);
-    ~RightPanePlaceHolder();
+    explicit RightPanePlaceHolder(Id mode, QWidget *parent = nullptr);
+    ~RightPanePlaceHolder() override;
     static RightPanePlaceHolder *current();
 
 private:
@@ -62,7 +61,7 @@ class CORE_EXPORT RightPaneWidget : public QWidget
 
 public:
     RightPaneWidget();
-    ~RightPaneWidget();
+    ~RightPaneWidget() override;
 
     void saveSettings(QSettings *settings);
     void readSettings(QSettings *settings);
@@ -73,16 +72,17 @@ public:
     static RightPaneWidget *instance();
 
     void setWidget(QWidget *widget);
+    QWidget *widget() const;
 
     int storedWidth();
 
 protected:
-    void resizeEvent(QResizeEvent *);
+    void resizeEvent(QResizeEvent *) override;
 
 private:
     void clearWidget();
-    bool m_shown;
-    int m_width;
+    bool m_shown = true;
+    int m_width = 0;
     QPointer<QWidget> m_widget;
     static RightPaneWidget *m_instance;
 };

@@ -27,6 +27,7 @@
 #include "qttestconstants.h"
 #include "qttestsettingspage.h"
 #include "qttestsettings.h"
+#include "ui_qttestsettingspage.h"
 
 #include <coreplugin/icore.h>
 
@@ -35,18 +36,32 @@
 namespace Autotest {
 namespace Internal {
 
-QtTestSettingsWidget::QtTestSettingsWidget(QWidget *parent)
-    : QWidget(parent)
+class QtTestSettingsWidget final : public Core::IOptionsPageWidget
+{
+    Q_DECLARE_TR_FUNCTIONS(Autotest::Internal::QtTestSettingsWidget)
+
+public:
+    explicit QtTestSettingsWidget(QtTestSettings *settings);
+
+    void apply() final;
+
+private:
+    Ui::QtTestSettingsPage m_ui;
+    QtTestSettings *m_settings;
+};
+
+QtTestSettingsWidget::QtTestSettingsWidget(QtTestSettings *settings)
+    : m_settings(settings)
 {
     m_ui.setupUi(this);
     m_ui.callgrindRB->setEnabled(Utils::HostOsInfo::isAnyUnixHost()); // valgrind available on UNIX
     m_ui.perfRB->setEnabled(Utils::HostOsInfo::isLinuxHost()); // according to docs perf Linux only
-}
 
-void QtTestSettingsWidget::setSettings(const QtTestSettings &settings)
-{
-    m_ui.disableCrashhandlerCB->setChecked(settings.noCrashHandler);
-    switch (settings.metrics) {
+    m_ui.disableCrashhandlerCB->setChecked(m_settings->noCrashHandler);
+    m_ui.useXMLOutputCB->setChecked(m_settings->useXMLOutput);
+    m_ui.verboseBenchmarksCB->setChecked(m_settings->verboseBench);
+    m_ui.logSignalsAndSlotsCB->setChecked(m_settings->logSignalsSlots);
+    switch (m_settings->metrics) {
     case MetricsType::Walltime:
         m_ui.walltimeRB->setChecked(true);
         break;
@@ -62,55 +77,36 @@ void QtTestSettingsWidget::setSettings(const QtTestSettings &settings)
     case MetricsType::Perf:
         m_ui.perfRB->setChecked(true);
         break;
-    default:
-        m_ui.walltimeRB->setChecked(true);
     }
 }
 
-QtTestSettings QtTestSettingsWidget::settings() const
+void QtTestSettingsWidget::apply()
 {
-    QtTestSettings result;
-
-    result.noCrashHandler = m_ui.disableCrashhandlerCB->isChecked();
+    m_settings->noCrashHandler = m_ui.disableCrashhandlerCB->isChecked();
+    m_settings->useXMLOutput = m_ui.useXMLOutputCB->isChecked();
+    m_settings->verboseBench = m_ui.verboseBenchmarksCB->isChecked();
+    m_settings->logSignalsSlots = m_ui.logSignalsAndSlotsCB->isChecked();
     if (m_ui.walltimeRB->isChecked())
-        result.metrics = MetricsType::Walltime;
+        m_settings->metrics = MetricsType::Walltime;
     else if (m_ui.tickcounterRB->isChecked())
-        result.metrics = MetricsType::TickCounter;
+        m_settings->metrics = MetricsType::TickCounter;
     else if (m_ui.eventCounterRB->isChecked())
-        result.metrics = MetricsType::EventCounter;
+        m_settings->metrics = MetricsType::EventCounter;
     else if (m_ui.callgrindRB->isChecked())
-        result.metrics = MetricsType::CallGrind;
+        m_settings->metrics = MetricsType::CallGrind;
     else if (m_ui.perfRB->isChecked())
-        result.metrics = MetricsType::Perf;
+        m_settings->metrics = MetricsType::Perf;
 
-    return result;
+    m_settings->toSettings(Core::ICore::settings());
 }
 
-QtTestSettingsPage::QtTestSettingsPage(QSharedPointer<IFrameworkSettings> settings,
-                                       const ITestFramework *framework)
-    : ITestSettingsPage(framework),
-      m_settings(qSharedPointerCast<QtTestSettings>(settings)),
-      m_widget(0)
+QtTestSettingsPage::QtTestSettingsPage(QtTestSettings *settings, Core::Id settingsId)
 {
+    setId(settingsId);
+    setCategory(Constants::AUTOTEST_SETTINGS_CATEGORY);
     setDisplayName(QCoreApplication::translate("QtTestFramework",
                                                QtTest::Constants::FRAMEWORK_SETTINGS_CATEGORY));
-}
-
-QWidget *QtTestSettingsPage::widget()
-{
-    if (!m_widget) {
-        m_widget = new QtTestSettingsWidget;
-        m_widget->setSettings(*m_settings);
-    }
-    return m_widget;
-}
-
-void QtTestSettingsPage::apply()
-{
-    if (!m_widget) // page was not shown at all
-        return;
-    *m_settings = m_widget->settings();
-    m_settings->toSettings(Core::ICore::settings());
+    setWidgetCreator([settings] { return new QtTestSettingsWidget(settings); });
 }
 
 } // namespace Internal

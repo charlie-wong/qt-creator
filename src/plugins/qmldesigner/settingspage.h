@@ -25,51 +25,15 @@
 
 #pragma once
 
-#include "ui_settingspage.h"
-
 #include <coreplugin/dialogs/ioptionspage.h>
 
-#include <QPointer>
-#include <QWidget>
-
-QT_BEGIN_NAMESPACE
-class QSettings;
-QT_END_NAMESPACE
-
 namespace QmlDesigner {
-
-class DesignerSettings;
-
 namespace Internal {
 
-class SettingsPageWidget : public QWidget
+class SettingsPage final : public Core::IOptionsPage
 {
-    Q_OBJECT
-
-public:
-    explicit SettingsPageWidget(QWidget *parent = 0);
-
-    DesignerSettings settings() const;
-    void setSettings(const DesignerSettings &settings);
-
-private:
-    Ui::SettingsPage m_ui;
-};
-
-
-class SettingsPage : public Core::IOptionsPage
-{
-    Q_OBJECT
-
 public:
     SettingsPage();
-
-    QWidget *widget();
-    void apply();
-    void finish();
-
-private:
-    QPointer<SettingsPageWidget> m_widget;
 };
 
 } // namespace Internal

@@ -28,8 +28,10 @@
 #include <coreplugin/actionmanager/command.h>
 
 #include <utils/qtcassert.h>
+#include <utils/stringutils.h>
 
 #include <QAction>
+#include <QTimer>
 
 namespace Core {
 
@@ -37,6 +39,12 @@ struct CommandLocatorPrivate
 {
     QList<Command *> commands;
 };
+
+/*!
+    \class Core::CommandLocator
+    \inmodule QtCreator
+    \internal
+*/
 
 CommandLocator::CommandLocator(Id id,
                                const QString &displayName,
@@ -66,7 +74,6 @@ QList<LocatorFilterEntry> CommandLocator::matchesFor(QFutureInterface<LocatorFil
     QList<LocatorFilterEntry> betterEntries;
     // Get active, enabled actions matching text, store in list.
     // Reference via index in extraInfo.
-    const QChar ampersand = QLatin1Char('&');
     const Qt::CaseSensitivity entryCaseSensitivity = caseSensitivity(entry);
     const int count = d->commands.size();
     for (int i = 0; i < count; i++) {
@@ -77,8 +84,7 @@ QList<LocatorFilterEntry> CommandLocator::matchesFor(QFutureInterface<LocatorFil
 
         QAction *action = d->commands.at(i)->action();
         if (action && action->isEnabled()) {
-            QString text = action->text();
-            text.remove(ampersand);
+            const QString text = Utils::stripAccelerator(action->text());
             const int index = text.indexOf(entry, 0, entryCaseSensitivity);
             if (index >= 0) {
                 LocatorFilterEntry filterEntry(this, text, QVariant(i));
@@ -105,8 +111,11 @@ void CommandLocator::accept(LocatorFilterEntry entry,
     const int index = entry.internalData.toInt();
     QTC_ASSERT(index >= 0 && index < d->commands.size(), return);
     QAction *action = d->commands.at(index)->action();
-    QTC_ASSERT(action->isEnabled(), return);
-    action->trigger();
+    // avoid nested stack trace and blocking locator by delayed triggering
+    QTimer::singleShot(0, action, [action] {
+        if (action->isEnabled())
+            action->trigger();
+    });
 }
 
 void CommandLocator::refresh(QFutureInterface<void> &)

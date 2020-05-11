@@ -46,13 +46,12 @@ def __removeKit__(kit, kitName):
     if kitName == Targets.getStringForTarget(Targets.getDefaultKit()):
         # The following kits will be the default kit at that time
         kitNameTemplate += " (default)"
-    item = kitNameTemplate % kitName
-    waitForObjectItem(":BuildAndRun_QTreeView", item)
-    clickItem(":BuildAndRun_QTreeView", item, 5, 5, 0, Qt.LeftButton)
+    item = kitNameTemplate % kitName.replace(".", "\\.")
+    mouseClick(waitForObjectItem(":BuildAndRun_QTreeView", item))
     clickButton(waitForObject(":Remove_QPushButton"))
 
 def main():
-    startApplication("qtcreator" + SettingsPath)
+    startQC()
     if not startedWithoutPluginError():
         return
     createProject_Qt_Console(tempDir(), "SquishProject")

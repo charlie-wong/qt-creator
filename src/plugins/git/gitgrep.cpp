@@ -26,7 +26,6 @@
 #include "gitgrep.h"
 #include "gitclient.h"
 #include "gitconstants.h"
-#include "gitplugin.h"
 
 #include <coreplugin/editormanager/editormanager.h>
 #include <coreplugin/progressmanager/progressmanager.h>
@@ -36,7 +35,6 @@
 #include <vcsbase/vcsbaseconstants.h>
 
 #include <utils/algorithm.h>
-#include <utils/asconst.h>
 #include <utils/fancylineedit.h>
 #include <utils/filesearch.h>
 #include <utils/fileutils.h>
@@ -45,6 +43,7 @@
 #include <utils/synchronousprocess.h>
 #include <utils/textfileformat.h>
 
+#include <QCheckBox>
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -60,6 +59,8 @@ class GitGrepParameters
 {
 public:
     QString ref;
+    bool recurseSubmodules = false;
+    QString id() const { return recurseSubmodules ? ref + ".Rec" : ref; }
 };
 
 using namespace Core;
@@ -83,6 +84,17 @@ public:
         m_directory = parameters.additionalParameters.toString();
     }
 
+    struct Match
+    {
+        Match() = default;
+        Match(int start, int length) :
+            matchStart(start), matchLength(length) {}
+
+        int matchStart = 0;
+        int matchLength = 0;
+        QStringList regexpCapturedTexts;
+    };
+
     void processLine(const QString &line, FileSearchResultList *resultList) const
     {
         if (line.isEmpty())
@@ -96,9 +108,17 @@ public:
             filePath.remove(0, m_ref.length());
         single.fileName = m_directory + '/' + filePath;
         const int textSeparator = line.indexOf(QChar::Null, lineSeparator + 1);
-        single.lineNumber = line.mid(lineSeparator + 1, textSeparator - lineSeparator - 1).toInt();
+        single.lineNumber = line.midRef(lineSeparator + 1, textSeparator - lineSeparator - 1).toInt();
         QString text = line.mid(textSeparator + 1);
-        QVector<QPair<int, int>> matches;
+        QRegularExpression regexp;
+        QVector<Match> matches;
+        if (m_parameters.flags & FindRegularExpression) {
+            const QRegularExpression::PatternOptions patternOptions =
+                    (m_parameters.flags & FindCaseSensitively)
+                    ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption;
+            regexp.setPattern(m_parameters.text);
+            regexp.setPatternOptions(patternOptions);
+        }
         for (;;) {
             const int matchStart = text.indexOf(boldRed);
             if (matchStart == -1)
@@ -107,23 +127,19 @@ public:
             const int matchEnd = text.indexOf(resetColor, matchTextStart);
             QTC_ASSERT(matchEnd != -1, break);
             const int matchLength = matchEnd - matchTextStart;
-            matches.append(qMakePair(matchStart, matchLength));
-            text = text.left(matchStart) + text.mid(matchTextStart, matchLength)
-                    + text.mid(matchEnd + resetColor.size());
+            Match match(matchStart, matchLength);
+            const QStringRef matchText = text.midRef(matchTextStart, matchLength);
+            if (m_parameters.flags & FindRegularExpression)
+                match.regexpCapturedTexts = regexp.match(matchText).capturedTexts();
+            matches.append(match);
+            text = text.leftRef(matchStart) + matchText + text.midRef(matchEnd + resetColor.size());
         }
         single.matchingLine = text;
 
-        if (m_parameters.flags & FindRegularExpression) {
-            const QRegularExpression::PatternOptions patternOptions =
-                    (m_parameters.flags & QTextDocument::FindCaseSensitively)
-                    ? QRegularExpression::NoPatternOption : QRegularExpression::CaseInsensitiveOption;
-            QRegularExpression regexp(m_parameters.text, patternOptions);
-            QRegularExpressionMatch regexpMatch = regexp.match(line);
-            single.regexpCapturedTexts = regexpMatch.capturedTexts();
-        }
-        for (auto match : Utils::asConst(matches)) {
-            single.matchStart = match.first;
-            single.matchLength = match.second;
+        for (const auto &match : qAsConst(matches)) {
+            single.matchStart = match.matchStart;
+            single.matchLength = match.matchLength;
+            single.regexpCapturedTexts = match.regexpCapturedTexts;
             resultList->append(single);
         }
     }
@@ -141,11 +157,11 @@ public:
 
     void exec()
     {
-        QStringList arguments;
-        arguments << "-c" << "color.grep.match=bold red"
-                  << "grep" << "-zn"
-                  << "--no-full-name"
-                  << "--color=always";
+        QStringList arguments = {
+            "-c", "color.grep.match=bold red",
+            "-c", "color.grep=always",
+            "grep", "-zn", "--no-full-name"
+        };
         if (!(m_parameters.flags & FindCaseSensitively))
             arguments << "-i";
         if (m_parameters.flags & FindWholeWords)
@@ -156,6 +172,8 @@ public:
             arguments << "-F";
         arguments << "-e" << m_parameters.text;
         GitGrepParameters params = m_parameters.searchEngineParameters.value<GitGrepParameters>();
+        if (params.recurseSubmodules)
+            arguments << "--recurse-submodules";
         if (!params.ref.isEmpty()) {
             arguments << params.ref;
             m_ref = params.ref + ':';
@@ -168,7 +186,7 @@ public:
                     return QString(":!" + filter);
                 });
         arguments << "--" << filterArgs << exclusionArgs;
-        QScopedPointer<VcsCommand> command(GitPlugin::client()->createCommand(m_directory));
+        QScopedPointer<VcsCommand> command(GitClient::instance()->createCommand(m_directory));
         command->addFlags(VcsCommand::SilentOutput | VcsCommand::SuppressFailMessage);
         command->setProgressiveOutput(true);
         QFutureWatcher<FileSearchResultList> watcher;
@@ -176,7 +194,7 @@ public:
         connect(&watcher, &QFutureWatcher<FileSearchResultList>::canceled,
                 command.data(), &VcsCommand::cancel);
         connect(command.data(), &VcsCommand::stdOutText, this, &GitGrepRunner::read);
-        SynchronousProcessResponse resp = command->runCommand(GitPlugin::client()->vcsBinary(), arguments, 0);
+        SynchronousProcessResponse resp = command->runCommand({GitClient::instance()->vcsBinary(), arguments}, 0);
         switch (resp.result) {
         case SynchronousProcessResponse::TerminatedAbnormally:
         case SynchronousProcessResponse::StartFailed:
@@ -212,14 +230,15 @@ static bool isGitDirectory(const QString &path)
 {
     static IVersionControl *gitVc = VcsManager::versionControl(VcsBase::Constants::VCS_ID_GIT);
     QTC_ASSERT(gitVc, return false);
-    return gitVc == VcsManager::findVersionControlForDirectory(path, 0);
+    return gitVc == VcsManager::findVersionControlForDirectory(path, nullptr);
 }
 
-GitGrep::GitGrep()
+GitGrep::GitGrep(GitClient *client)
+    : m_client(client)
 {
     m_widget = new QWidget;
     auto layout = new QHBoxLayout(m_widget);
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     m_treeLineEdit = new FancyLineEdit;
     m_treeLineEdit->setPlaceholderText(tr("Tree (optional)"));
     m_treeLineEdit->setToolTip(tr("Can be HEAD, tag, local or remote branch, or a commit hash.\n"
@@ -227,6 +246,10 @@ GitGrep::GitGrep()
     const QRegularExpression refExpression("[\\S]*");
     m_treeLineEdit->setValidator(new QRegularExpressionValidator(refExpression, this));
     layout->addWidget(m_treeLineEdit);
+    if (client->gitVersion() >= 0x021300) {
+        m_recurseSubmodules = new QCheckBox(tr("Recurse submodules"));
+        layout->addWidget(m_recurseSubmodules);
+    }
     TextEditor::FindInFiles *findInFiles = TextEditor::FindInFiles::instance();
     QTC_ASSERT(findInFiles, return);
     connect(findInFiles, &TextEditor::FindInFiles::pathChanged,
@@ -264,7 +287,9 @@ QVariant GitGrep::parameters() const
 {
     GitGrepParameters params;
     params.ref = m_treeLineEdit->text();
-    return qVariantFromValue(params);
+    if (m_recurseSubmodules)
+        params.recurseSubmodules = m_recurseSubmodules->isChecked();
+    return QVariant::fromValue(params);
 }
 
 void GitGrep::readSettings(QSettings *settings)
@@ -293,20 +318,21 @@ IEditor *GitGrep::openEditor(const SearchResultItem &item,
     QByteArray content;
     const QString topLevel = parameters.additionalParameters.toString();
     const QString relativePath = QDir(topLevel).relativeFilePath(path);
-    if (!GitPlugin::client()->synchronousShow(topLevel, params.ref + ":./" + relativePath,
+    if (!m_client->synchronousShow(topLevel, params.ref + ":./" + relativePath,
                                               &content, nullptr)) {
         return nullptr;
     }
     if (content.isEmpty())
         return nullptr;
     QByteArray fileContent;
-    if (TextFileFormat::readFileUTF8(path, 0, &fileContent, 0) == TextFileFormat::ReadSuccess) {
+    if (TextFileFormat::readFileUTF8(path, nullptr, &fileContent, nullptr)
+            == TextFileFormat::ReadSuccess) {
         if (fileContent == content)
             return nullptr; // open the file for read/write
     }
 
     const QString documentId = QLatin1String(Git::Constants::GIT_PLUGIN)
-            + QLatin1String(".GitShow.") + params.ref
+            + QLatin1String(".GitShow.") + params.id()
             + QLatin1String(".") + relativePath;
     QString title = tr("Git Show %1:%2").arg(params.ref).arg(relativePath);
     IEditor *editor = EditorManager::openEditorWithContents(Id(), &title, content, documentId,

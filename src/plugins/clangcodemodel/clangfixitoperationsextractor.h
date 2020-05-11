@@ -27,9 +27,10 @@
 
 #include <texteditor/quickfix.h>
 
-#include <clangbackendipc/diagnosticcontainer.h>
+#include <clangsupport/diagnosticcontainer.h>
 
 namespace ClangCodeModel {
+namespace Internal {
 
 class ClangFixItOperationsExtractor
 {
@@ -50,4 +51,5 @@ private:
     TextEditor::QuickFixOperations operations;
 };
 
+} // namespace Internal
 } // namespace ClangCodeModel

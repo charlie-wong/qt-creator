@@ -25,11 +25,9 @@
 
 #pragma once
 
-#include "qbsprojectmanager.h"
+#include "qbsprofilemanager.h"
 
 #include "qbsnodes.h"
-
-#include <cpptools/projectinfo.h>
 
 #include <projectexplorer/extracompiler.h>
 #include <projectexplorer/project.h>
@@ -38,138 +36,140 @@
 
 #include <utils/environment.h>
 
-#include <qbs.h>
-
+#include <QFutureWatcher>
 #include <QHash>
-#include <QTimer>
+#include <QJsonObject>
 
-namespace Core { class IDocument; }
+#include <functional>
+
 namespace CppTools { class CppProjectUpdater; }
-namespace ProjectExplorer { class BuildConfiguration; }
 
 namespace QbsProjectManager {
 namespace Internal {
 
-class QbsProjectParser;
+class ErrorInfo;
 class QbsBuildConfiguration;
+class QbsProjectParser;
+class QbsSession;
 
 class QbsProject : public ProjectExplorer::Project
 {
     Q_OBJECT
 
 public:
-    explicit QbsProject(const Utils::FileName &filename);
-    ~QbsProject() override;
+    explicit QbsProject(const Utils::FilePath &filename);
+    ~QbsProject();
 
-    QbsRootProjectNode *rootProjectNode() const override;
+    ProjectExplorer::ProjectImporter *projectImporter() const override;
 
-    QStringList filesGeneratedFrom(const QString &sourceFile) const override;
+    ProjectExplorer::DeploymentKnowledge deploymentKnowledge() const override;
+
+    void configureAsExampleProject() final;
+
+private:
+    mutable ProjectExplorer::ProjectImporter *m_importer = nullptr;
+};
+
+class QbsBuildSystem final : public ProjectExplorer::BuildSystem
+{
+    Q_OBJECT
+
+public:
+    explicit QbsBuildSystem(QbsBuildConfiguration *bc);
+    ~QbsBuildSystem() final;
+
+    void triggerParsing() final;
+    bool supportsAction(ProjectExplorer::Node *context,
+                        ProjectExplorer::ProjectAction action,
+                        const ProjectExplorer::Node *node) const final;
+    bool addFiles(ProjectExplorer::Node *context,
+                  const QStringList &filePaths,
+                  QStringList *notAdded = nullptr) final;
+    ProjectExplorer::RemovedFilesFromProject removeFiles(ProjectExplorer::Node *context,
+                                                         const QStringList &filePaths,
+                                                         QStringList *notRemoved = nullptr) final;
+    bool renameFile(ProjectExplorer::Node *context,
+                    const QString &filePath, const QString &newFilePath) final;
+
+    QStringList filesGeneratedFrom(const QString &sourceFile) const final;
+    QVariant additionalData(Core::Id id) const final;
 
     bool isProjectEditable() const;
-    bool addFilesToProduct(const QStringList &filePaths, const qbs::ProductData &productData,
-                           const qbs::GroupData &groupData, QStringList *notAdded);
-    bool removeFilesFromProduct(const QStringList &filePaths,
-            const qbs::ProductData &productData, const qbs::GroupData &groupData,
+    bool addFilesToProduct(const QStringList &filePaths,
+            const QJsonObject &product,
+            const QJsonObject &group,
+            QStringList *notAdded);
+    ProjectExplorer::RemovedFilesFromProject removeFilesFromProduct(const QStringList &filePaths,
+            const QJsonObject &product,
+            const QJsonObject &group,
             QStringList *notRemoved);
     bool renameFileInProduct(const QString &oldPath,
-            const QString &newPath, const qbs::ProductData &productData,
-            const qbs::GroupData &groupData);
-
-    qbs::BuildJob *build(const qbs::BuildOptions &opts, QStringList products, QString &error);
-    qbs::CleanJob *clean(const qbs::CleanOptions &opts, const QStringList &productNames,
-                         QString &error);
-    qbs::InstallJob *install(const qbs::InstallOptions &opts);
+            const QString &newPath, const QJsonObject &product,
+            const QJsonObject &group);
 
     static ProjectExplorer::FileType fileTypeFor(const QSet<QString> &tags);
 
-    QString profileForTarget(const ProjectExplorer::Target *t) const;
-    bool isParsing() const;
-    bool hasParseResult() const;
+    QString profile() const;
     void parseCurrentBuildConfiguration();
     void scheduleParsing() { m_parsingScheduled = true; }
     bool parsingScheduled() const { return m_parsingScheduled; }
     void cancelParsing();
     void updateAfterBuild();
 
-    void registerQbsProjectParser(QbsProjectParser *p);
+    QbsSession *session() const { return m_session; }
+    QJsonObject projectData() const { return m_projectData; }
 
-    qbs::Project qbsProject() const;
-    qbs::ProjectData qbsProjectData() const;
+    void generateErrors(const ErrorInfo &e);
 
-    bool needsSpecialDeployment() const override;
-    void generateErrors(const qbs::ErrorInfo &e);
-
-    static QString productDisplayName(const qbs::Project &project,
-                                      const qbs::ProductData &product);
-    static QString uniqueProductName(const qbs::ProductData &product);
-
-public:
-    void invalidate();
     void delayParsing();
 
-signals:
-    void projectParsingStarted();
-    void projectParsingDone(bool);
-
 private:
+    friend class QbsProject;
+
     void handleQbsParsingDone(bool success);
-
-    void rebuildProjectTree();
-
-    void targetWasAdded(ProjectExplorer::Target *t);
-    void targetWasRemoved(ProjectExplorer::Target *t);
     void changeActiveTarget(ProjectExplorer::Target *t);
-    void buildConfigurationChanged(ProjectExplorer::BuildConfiguration *bc);
-    void startParsing();
-
-    RestoreResult fromMap(const QVariantMap &map, QString *errorMessage) override;
-
-    void parse(const QVariantMap &config, const Utils::Environment &env, const QString &dir,
-               const QString &configName);
-
     void prepareForParsing();
-    void updateDocuments(const QSet<QString> &files);
+    void updateDocuments();
     void updateCppCodeModel();
-    void updateCppCompilerCallData();
     void updateQmlJsCodeModel();
+    void updateExtraCompilers();
     void updateApplicationTargets();
     void updateDeploymentInfo();
     void updateBuildTargetData();
-    void handleRuleExecutionDone();
     bool checkCancelStatus();
     void updateAfterParse();
-    void updateProjectNodes();
-    void projectLoaded() override;
+    void delayedUpdateAfterParse();
+    void updateProjectNodes(const std::function<void()> &continuation);
+    Utils::FilePath installRoot();
 
     static bool ensureWriteableQbsFile(const QString &file);
 
-    template<typename Options> qbs::AbstractJob *buildOrClean(const Options &opts,
-            const QStringList &productNames, QString &error);
-
-    QHash<ProjectExplorer::Target *, qbs::Project> m_qbsProjects;
-    qbs::Project m_qbsProject;
-    qbs::ProjectData m_projectData;
+    QbsSession * const m_session;
     QSet<Core::IDocument *> m_qbsDocuments;
+    QJsonObject m_projectData; // TODO: Perhaps store this in the root project node instead?
 
-    QbsProjectParser *m_qbsProjectParser;
-
-    QFutureInterface<bool> *m_qbsUpdateFutureInterface;
-    bool m_parsingScheduled;
+    QbsProjectParser *m_qbsProjectParser = nullptr;
+    QFutureInterface<bool> *m_qbsUpdateFutureInterface = nullptr;
+    using TreeCreationWatcher = QFutureWatcher<QbsProjectNode *>;
+    TreeCreationWatcher *m_treeCreationWatcher = nullptr;
+    Utils::Environment m_lastParseEnv;
+    bool m_parsingScheduled = false;
 
     enum CancelStatus {
         CancelStatusNone,
         CancelStatusCancelingForReparse,
         CancelStatusCancelingAltoghether
-    } m_cancelStatus;
+    } m_cancelStatus = CancelStatusNone;
 
     CppTools::CppProjectUpdater *m_cppCodeModelUpdater = nullptr;
-    CppTools::ProjectInfo m_cppCodeModelProjectInfo;
 
-    QbsBuildConfiguration *m_currentBc;
-
-    QTimer m_parsingDelay;
+    QHash<ProjectExplorer::ExtraCompilerFactory *, QStringList> m_sourcesForGeneratedFiles;
     QList<ProjectExplorer::ExtraCompiler *> m_extraCompilers;
-    bool m_extraCompilersPending;
+
+    QHash<QString, Utils::Environment> m_envCache;
+
+    ProjectExplorer::BuildSystem::ParseGuard m_guard;
+    QbsBuildConfiguration *m_buildConfiguration = nullptr;
 };
 
 } // namespace Internal

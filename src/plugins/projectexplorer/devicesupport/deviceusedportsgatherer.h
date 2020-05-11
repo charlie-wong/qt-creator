@@ -27,22 +27,26 @@
 
 #include "idevice.h"
 
-#include <projectexplorer/runconfiguration.h>
+#include <projectexplorer/runcontrol.h>
 
 #include <utils/portlist.h>
 
 namespace ProjectExplorer {
-namespace Internal { class DeviceUsedPortsGathererPrivate; }
+
+namespace Internal {
+class DeviceUsedPortsGathererPrivate;
+class SubChannelProvider;
+} // Internal
 
 class PROJECTEXPLORER_EXPORT DeviceUsedPortsGatherer : public QObject
 {
     Q_OBJECT
 
 public:
-    DeviceUsedPortsGatherer(QObject *parent = 0);
+    DeviceUsedPortsGatherer(QObject *parent = nullptr);
     ~DeviceUsedPortsGatherer() override;
 
-    void start(const ProjectExplorer::IDevice::ConstPtr &device);
+    void start(const IDevice::ConstPtr &device);
     void stop();
     Utils::Port getNextFreePort(Utils::PortList *freePorts) const; // returns -1 if no more are left
     QList<Utils::Port> usedPorts() const;
@@ -52,11 +56,10 @@ signals:
     void portListReady();
 
 private:
-    void handleConnectionEstablished();
-    void handleConnectionError();
-    void handleProcessClosed(int exitStatus);
     void handleRemoteStdOut();
     void handleRemoteStdErr();
+    void handleProcessError();
+    void handleProcessFinished();
 
     void setupUsedPorts();
 
@@ -71,7 +74,7 @@ public:
     explicit PortsGatherer(RunControl *runControl);
     ~PortsGatherer() override;
 
-    Utils::Port findPort();
+    QUrl findEndPoint();
 
 protected:
     void start() override;
@@ -80,6 +83,39 @@ protected:
 private:
     DeviceUsedPortsGatherer m_portsGatherer;
     Utils::PortList m_portList;
+};
+
+class PROJECTEXPLORER_EXPORT ChannelForwarder : public RunWorker
+{
+    Q_OBJECT
+
+public:
+    explicit ChannelForwarder(RunControl *runControl);
+
+    using UrlGetter = std::function<QUrl()>;
+    void setFromUrlGetter(const UrlGetter &urlGetter);
+
+    QUrl fromUrl() const { return m_fromUrl; }
+    QUrl toUrl() const { return m_toUrl; }
+
+private:
+    UrlGetter m_fromUrlGetter;
+    QUrl m_fromUrl;
+    QUrl m_toUrl;
+};
+
+class PROJECTEXPLORER_EXPORT ChannelProvider : public RunWorker
+{
+    Q_OBJECT
+
+public:
+    ChannelProvider(RunControl *runControl, int requiredChannels = 1);
+    ~ChannelProvider() override;
+
+    QUrl channel(int i = 0) const;
+
+private:
+    QVector<Internal::SubChannelProvider *> m_channelProviders;
 };
 
 } // namespace ProjectExplorer

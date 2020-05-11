@@ -63,8 +63,8 @@ class CppFindReferences: public QObject
     Q_OBJECT
 
 public:
-    CppFindReferences(CppModelManager *modelManager);
-    virtual ~CppFindReferences();
+    explicit CppFindReferences(CppModelManager *modelManager);
+    ~CppFindReferences() override;
 
     QList<int> references(CPlusPlus::Symbol *symbol, const CPlusPlus::LookupContext &context) const;
 
@@ -77,7 +77,6 @@ public:
     void renameMacroUses(const CPlusPlus::Macro &macro, const QString &replacement = QString());
 
 private:
-    void openEditor(const Core::SearchResultItem &item);
     void onReplaceButtonClicked(const QString &text, const QList<Core::SearchResultItem> &items, bool preserveCase);
     void searchAgain();
 

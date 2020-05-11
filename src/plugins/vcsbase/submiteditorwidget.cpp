@@ -28,6 +28,8 @@
 #include "submitfilemodel.h"
 #include "ui_submiteditorwidget.h"
 
+#include <utils/algorithm.h>
+
 #include <QDebug>
 #include <QPointer>
 #include <QTextBlock>
@@ -39,6 +41,8 @@
 #include <QToolButton>
 #include <QSpacerItem>
 #include <QShortcut>
+
+using namespace Utils;
 
 enum { debug = 0 };
 enum { defaultLineWidth = 72 };
@@ -100,35 +104,9 @@ void QActionPushButton::actionChanged()
     }
 }
 
-// A helper parented on a QAction,
-// making QAction::setText() a slot (which it currently is not).
-class QActionSetTextSlotHelper : public QObject
-{
-    Q_OBJECT
-public:
-    explicit QActionSetTextSlotHelper(QAction *a) : QObject(a) {}
-
-public slots:
-    void setText(const QString &t) {
-        if (QAction *action = qobject_cast<QAction *>(parent()))
-            action->setText(t);
-    }
-};
 
 // Helpers to retrieve model data
 // Convenience to extract a list of selected indexes
-QList<int> selectedRows(const QAbstractItemView *view)
-{
-    const QModelIndexList indexList = view->selectionModel()->selectedRows(0);
-    if (indexList.empty())
-        return QList<int>();
-    QList<int> rc;
-    const QModelIndexList::const_iterator cend = indexList.constEnd();
-    for (QModelIndexList::const_iterator it = indexList.constBegin(); it != cend; ++it)
-        rc.push_back(it->row());
-    return rc;
-}
-
 // -----------  SubmitEditorWidgetPrivate
 
 struct SubmitEditorWidgetPrivate
@@ -136,42 +114,25 @@ struct SubmitEditorWidgetPrivate
     // A pair of position/action to extend context menus
     typedef QPair<int, QPointer<QAction> > AdditionalContextMenuAction;
 
-    SubmitEditorWidgetPrivate();
-
     Ui::SubmitEditorWidget m_ui;
-    bool m_filesSelected;
-    int m_activatedRow;
-    bool m_emptyFileListEnabled;
 
     QList<AdditionalContextMenuAction> descriptionEditContextMenuActions;
-    QVBoxLayout *m_fieldLayout;
+    QVBoxLayout *m_fieldLayout = nullptr;
     QList<SubmitFieldWidget *> m_fieldWidgets;
-    QShortcut *m_submitShortcut;
-    int m_lineWidth;
-
-    bool m_commitEnabled;
-    bool m_ignoreChange;
-    bool m_descriptionMandatory;
-    bool m_updateInProgress;
+    QShortcut *m_submitShortcut = nullptr;
+    QActionPushButton *m_submitButton = nullptr;
     QString m_description;
 
-    QActionPushButton *m_submitButton;
-};
+    int m_lineWidth = defaultLineWidth;
+    int m_activatedRow = -1;
 
-SubmitEditorWidgetPrivate::SubmitEditorWidgetPrivate() :
-    m_filesSelected(false),
-    m_activatedRow(-1),
-    m_emptyFileListEnabled(false),
-    m_fieldLayout(0),
-    m_submitShortcut(0),
-    m_lineWidth(defaultLineWidth),
-    m_commitEnabled(false),
-    m_ignoreChange(false),
-    m_descriptionMandatory(true),
-    m_updateInProgress(false),
-    m_submitButton(0)
-{
-}
+    bool m_filesSelected = false;
+    bool m_emptyFileListEnabled = false;
+    bool m_commitEnabled = false;
+    bool m_ignoreChange = false;
+    bool m_descriptionMandatory = true;
+    bool m_updateInProgress = false;
+};
 
 SubmitEditorWidget::SubmitEditorWidget() :
     d(new SubmitEditorWidgetPrivate)
@@ -231,13 +192,8 @@ void SubmitEditorWidget::registerActions(QAction *editorUndoAction, QAction *edi
         d->m_commitEnabled = !canSubmit();
         connect(this, &SubmitEditorWidget::submitActionEnabledChanged,
                 submitAction, &QAction::setEnabled);
-        // Wire setText via QActionSetTextSlotHelper.
-        QActionSetTextSlotHelper *actionSlotHelper
-                = submitAction->findChild<QActionSetTextSlotHelper *>();
-        if (!actionSlotHelper)
-            actionSlotHelper = new QActionSetTextSlotHelper(submitAction);
         connect(this, &SubmitEditorWidget::submitActionTextChanged,
-                actionSlotHelper, &QActionSetTextSlotHelper::setText);
+                submitAction, &QAction::setText);
         d->m_submitButton = new QActionPushButton(submitAction);
         d->m_ui.buttonLayout->addWidget(d->m_submitButton);
         if (!d->m_submitShortcut)
@@ -255,37 +211,6 @@ void SubmitEditorWidget::registerActions(QAction *editorUndoAction, QAction *edi
         connect(this, &SubmitEditorWidget::fileSelectionChanged, diffAction, &QAction::setEnabled);
         connect(diffAction, &QAction::triggered, this, &SubmitEditorWidget::triggerDiffSelected);
         d->m_ui.buttonLayout->addWidget(new QActionPushButton(diffAction));
-    }
-}
-
-void SubmitEditorWidget::unregisterActions(QAction *editorUndoAction,  QAction *editorRedoAction,
-                                           QAction *submitAction, QAction *diffAction)
-{
-    if (editorUndoAction) {
-        disconnect(d->m_ui.description, &Utils::CompletingTextEdit::undoAvailable,
-                   editorUndoAction, &QAction::setEnabled);
-        disconnect(editorUndoAction, &QAction::triggered,
-                   d->m_ui.description, &Utils::CompletingTextEdit::undo);
-    }
-    if (editorRedoAction) {
-        disconnect(d->m_ui.description, &Utils::CompletingTextEdit::redoAvailable,
-                   editorRedoAction, &QAction::setEnabled);
-        disconnect(editorRedoAction, &QAction::triggered,
-                   d->m_ui.description, &Utils::CompletingTextEdit::redo);
-    }
-
-    if (submitAction) {
-        disconnect(this, &SubmitEditorWidget::submitActionEnabledChanged,
-                   submitAction, &QAction::setEnabled);
-        // Just deactivate the QActionSetTextSlotHelper on the action
-        disconnect(this, &SubmitEditorWidget::submitActionTextChanged, 0, 0);
-    }
-
-    if (diffAction) {
-         disconnect(this, &SubmitEditorWidget::fileSelectionChanged,
-                    diffAction, &QAction::setEnabled);
-         disconnect(diffAction, &QAction::triggered,
-                    this, &SubmitEditorWidget::triggerDiffSelected);
     }
 }
 
@@ -456,14 +381,14 @@ QStringList SubmitEditorWidget::checkedFiles() const
     return rc;
 }
 
-Utils::CompletingTextEdit *SubmitEditorWidget::descriptionEdit() const
+CompletingTextEdit *SubmitEditorWidget::descriptionEdit() const
 {
     return d->m_ui.description;
 }
 
 void SubmitEditorWidget::triggerDiffSelected()
 {
-    const QList<int> sel = selectedRows(d->m_ui.fileView);
+    const QList<int> sel = selectedRows();
     if (!sel.empty())
         emit diffSelected(sel);
 }
@@ -502,7 +427,7 @@ void SubmitEditorWidget::updateSubmitAction()
         // Update button text.
         const int fileCount = d->m_ui.fileView->model()->rowCount();
         const QString msg = checkedCount ?
-                            tr("%1 %2/%n File(s)", 0, fileCount)
+                            tr("%1 %2/%n File(s)", nullptr, fileCount)
                             .arg(commitName()).arg(checkedCount) :
                             commitName();
         emit submitActionTextChanged(msg);
@@ -589,14 +514,23 @@ void SubmitEditorWidget::descriptionTextChanged()
     updateSubmitAction();
 }
 
-bool SubmitEditorWidget::canSubmit() const
+bool SubmitEditorWidget::canSubmit(QString *whyNot) const
 {
-    if (d->m_updateInProgress)
+    if (d->m_updateInProgress) {
+        if (whyNot)
+            *whyNot = tr("Update in progress");
         return false;
-    if (isDescriptionMandatory() && d->m_description.trimmed().isEmpty())
+    }
+    if (isDescriptionMandatory() && d->m_description.trimmed().isEmpty()) {
+        if (whyNot)
+            *whyNot = tr("Description is empty");
         return false;
+    }
     const unsigned checkedCount = checkedFilesCount();
-    return d->m_emptyFileListEnabled || checkedCount > 0;
+    const bool res = d->m_emptyFileListEnabled || checkedCount > 0;
+    if (!res && whyNot)
+        *whyNot = tr("No files checked");
+    return res;
 }
 
 void SubmitEditorWidget::setUpdateInProgress(bool value)
@@ -608,6 +542,22 @@ void SubmitEditorWidget::setUpdateInProgress(bool value)
 bool SubmitEditorWidget::updateInProgress() const
 {
     return d->m_updateInProgress;
+}
+
+QList<int> SubmitEditorWidget::selectedRows() const
+{
+    return Utils::transform(d->m_ui.fileView->selectionModel()->selectedRows(0), &QModelIndex::row);
+}
+
+void SubmitEditorWidget::setSelectedRows(const QList<int> &rows)
+{
+    if (const SubmitFileModel *model = fileModel()) {
+        QItemSelectionModel *selectionModel = d->m_ui.fileView->selectionModel();
+        for (int row : rows) {
+            selectionModel->select(model->index(row, 0),
+                                   QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        }
+    }
 }
 
 QString SubmitEditorWidget::commitName() const
@@ -672,16 +622,6 @@ void SubmitEditorWidget::checkAllToggled()
     d->m_ui.checkAllCheckBox->setTristate(false);
 }
 
-void SubmitEditorWidget::checkAll()
-{
-    fileModel()->setAllChecked(true);
-}
-
-void SubmitEditorWidget::uncheckAll()
-{
-    fileModel()->setAllChecked(false);
-}
-
 void SubmitEditorWidget::fileListCustomContextMenuRequested(const QPoint & pos)
 {
     // Execute menu offering to check/uncheck all
@@ -692,11 +632,11 @@ void SubmitEditorWidget::fileListCustomContextMenuRequested(const QPoint & pos)
     QAction *uncheckAllAction = menu.addAction(tr("Unselect All"));
     QAction *action = menu.exec(d->m_ui.fileView->mapToGlobal(pos));
     if (action == checkAllAction) {
-        checkAll();
+        fileModel()->setAllChecked(true);;
         return;
     }
     if (action == uncheckAllAction) {
-        uncheckAll();
+        fileModel()->setAllChecked(false);
         return;
     }
 }

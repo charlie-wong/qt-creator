@@ -38,6 +38,8 @@ class DiagramSceneController;
 namespace ModelEditor {
 namespace Internal {
 
+class ModelUtilities;
+class PackageViewController;
 class PxNodeUtilities;
 
 class ComponentViewController :
@@ -47,19 +49,21 @@ class ComponentViewController :
     class ComponentViewControllerPrivate;
 
 public:
-    explicit ComponentViewController(QObject *parent = 0);
+    explicit ComponentViewController(QObject *parent = nullptr);
     ~ComponentViewController();
 
+    void setModelUtilities(ModelUtilities *modelUtilities);
+    void setPackageViewController(PackageViewController *packageViewController);
     void setPxNodeUtilties(PxNodeUtilities *pxnodeUtilities);
     void setDiagramSceneController(qmt::DiagramSceneController *diagramSceneController);
 
-    void createComponentModel(const ProjectExplorer::FolderNode *folderNode,
-                              qmt::MDiagram *diagram, const QString anchorFolder);
+    void createComponentModel(const QString &filePath,
+                              qmt::MDiagram *diagram, const QString &anchorFolder);
     void updateIncludeDependencies(qmt::MPackage *rootPackage);
 
 private:
-    void doCreateComponentModel(const ProjectExplorer::FolderNode *folderNode,
-                                qmt::MDiagram *diagram, const QString anchorFolder);
+    void doCreateComponentModel(const QString &filePath, qmt::MDiagram *diagram,
+                                const QString &anchorFolder, bool scanHeaders);
 
     ComponentViewControllerPrivate *d;
 };

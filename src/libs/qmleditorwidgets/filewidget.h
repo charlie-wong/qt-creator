@@ -52,8 +52,8 @@ class QMLEDITORWIDGETS_EXPORT FileWidget : public QWidget
 
 public:
 
-    FileWidget(QWidget *parent = 0);
-    ~FileWidget();
+    FileWidget(QWidget *parent = nullptr);
+    ~FileWidget() override;
 
     QString fileName() const
     { return m_fileName.toString(); }

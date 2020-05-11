@@ -26,6 +26,7 @@
 #include "qmljsstaticanalysismessage.h"
 #include "qmljsconstants.h"
 #include "parser/qmljsengine_p.h"
+#include "parser/qmljsdiagnosticmessage_p.h"
 
 #include <utils/qtcassert.h>
 
@@ -155,7 +156,7 @@ StaticAnalysisMessages::StaticAnalysisMessages()
            tr("Unnecessary parentheses."));
     newMsg(MaybeWarnEqualityTypeCoercion, MaybeWarning,
            tr("== and != may perform type coercion, use === or !== to avoid it."));
-    newMsg(WarnConfusingExpressionStatement, Error,
+    newMsg(WarnConfusingExpressionStatement, Warning,
            tr("Expression statements should be assignments, calls or delete expressions only."));
     newMsg(HintDeclarationsShouldBeAtStartOfFunction, Hint,
            tr("Place var declarations at the start of a function."));
@@ -222,8 +223,6 @@ StaticAnalysisMessages::StaticAnalysisMessages()
             tr("Qt Quick Designer only supports states in the root item."));
     newMsg(ErrInvalidIdeInVisualDesigner, Error,
            tr("This id might be ambiguous and is not supported in the Qt Quick Designer."));
-    newMsg(WarnAboutQtQuick1InsteadQtQuick2, Warning,
-            tr("Using Qt Quick 1 code model instead of Qt Quick 2."));
     newMsg(ErrUnsupportedRootTypeInVisualDesigner, Error,
            tr("This type (%1) is not supported as a root element by Qt Quick Designer."), 1);
     newMsg(ErrUnsupportedRootTypeInQmlUi, Error,
@@ -242,6 +241,10 @@ StaticAnalysisMessages::StaticAnalysisMessages()
             tr("Referencing the parent of the root item is not supported in a Qt Quick UI form."));
     newMsg(StateCannotHaveChildItem, Error,
             tr("A State cannot have a child item (%1)."), 1);
+    newMsg(WarnDuplicateImport, Warning,
+           tr("Duplicate import (%1)."), 1);
+    newMsg(ErrHitMaximumRecursion, Error,
+           tr("Hit maximum recursion limit when visiting AST."));
 }
 
 } // anonymous namespace
@@ -254,11 +257,11 @@ QList<Type> Message::allMessageTypes()
 }
 
 Message::Message()
-    : type(UnknownType), severity(Hint)
+    : type(UnknownType)
 {}
 
 Message::Message(Type type,
-                 AST::SourceLocation location,
+                 SourceLocation location,
                  const QString &arg1,
                  const QString &arg2,
                  bool appendTypeId)

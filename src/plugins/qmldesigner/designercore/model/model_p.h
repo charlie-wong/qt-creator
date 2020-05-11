@@ -56,15 +56,14 @@ class InternalVariantProperty;
 class InternalNodeAbstractProperty;
 class InternalNodeListProperty;
 
-typedef QSharedPointer<InternalNode> InternalNodePointer;
-typedef QSharedPointer<InternalProperty> InternalPropertyPointer;
-typedef QSharedPointer<InternalBindingProperty> InternalBindingPropertyPointer;
-typedef QSharedPointer<InternalSignalHandlerProperty> InternalSignalHandlerPropertyPointer;
-typedef QSharedPointer<InternalVariantProperty> InternalVariantPropertyPointer;
-typedef QSharedPointer<InternalNodeAbstractProperty> InternalNodeAbstractPropertyPointer;
-typedef QSharedPointer<InternalNodeListProperty> InternalNodeListPropertyPointer;
-typedef QPair<InternalNodePointer, PropertyName> PropertyPair;
-
+using InternalNodePointer = QSharedPointer<InternalNode>;
+using InternalPropertyPointer = QSharedPointer<InternalProperty>;
+using InternalBindingPropertyPointer = QSharedPointer<InternalBindingProperty>;
+using InternalSignalHandlerPropertyPointer = QSharedPointer<InternalSignalHandlerProperty>;
+using InternalVariantPropertyPointer = QSharedPointer<InternalVariantProperty>;
+using InternalNodeAbstractPropertyPointer = QSharedPointer<InternalNodeAbstractProperty>;
+using InternalNodeListPropertyPointer = QSharedPointer<InternalNodeListProperty>;
+using PropertyPair = QPair<InternalNodePointer, PropertyName>;
 
 class ModelPrivate;
 
@@ -88,7 +87,7 @@ class ModelPrivate : public QObject {
 
 public:
      ModelPrivate(Model *model);
-    ~ModelPrivate();
+    ~ModelPrivate() override;
 
     static Model *create(const TypeName &type, int major, int minor, Model *metaInfoPropxyModel);
 
@@ -157,6 +156,10 @@ public:
     void notifyInstanceToken(const QString &token, int number, const QVector<ModelNode> &nodeVector);
 
     void notifyCurrentStateChanged(const ModelNode &node);
+    void notifyCurrentTimelineChanged(const ModelNode &node);
+
+    void notifyRenderImage3DChanged(const QImage &image);
+    void notifyUpdateActiveScene3D(const QVariantMap &sceneState);
 
     void setDocumentMessages(const QList<DocumentMessage> &errors, const QList<DocumentMessage> &warnings);
 
@@ -182,6 +185,8 @@ public:
     void removeImport(const Import &import);
     void changeImports(const QList<Import> &importsToBeAdded, const QList<Import> &importToBeRemoved);
     void notifyImportsChanged(const QList<Import> &addedImports, const QList<Import> &removedImports);
+    void notifyPossibleImportsChanged(const QList<Import> &possibleImports);
+    void notifyUsedImportsChanged(const QList<Import> &usedImportsChanged);
 
 
     //node state property manipulation
@@ -226,6 +231,7 @@ public:
     NodeInstanceView *nodeInstanceView() const;
 
     InternalNodePointer currentStateNode() const;
+    InternalNodePointer currentTimelineNode() const;
 
 private: //functions
     void removePropertyWithoutNotification(const InternalPropertyPointer &property);
@@ -249,6 +255,7 @@ private:
     QSet<InternalNodePointer> m_nodeSet;
     InternalNodePointer m_currentStateNode;
     InternalNodePointer m_rootInternalNode;
+    InternalNodePointer m_currentTimelineNode;
     QUrl m_fileUrl;
     QPointer<RewriterView> m_rewriterView;
     QPointer<NodeInstanceView> m_nodeInstanceView;

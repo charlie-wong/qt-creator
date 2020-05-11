@@ -30,18 +30,18 @@
 namespace WinRt {
 namespace Internal {
 
-class WinRtDeviceFactory;
-
-class WinRtPlugin : public ExtensionSystem::IPlugin
+class WinRtPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "WinRt.json")
 
 public:
-    WinRtPlugin();
+    ~WinRtPlugin() final;
 
-    bool initialize(const QStringList &arguments, QString *errorMessage);
-    void extensionsInitialized();
+private:
+    bool initialize(const QStringList &arguments, QString *errorMessage) final;
+
+    class WinRtPluginPrivate *d = nullptr;
 };
 
 } // namespace Internal

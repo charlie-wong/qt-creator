@@ -30,37 +30,18 @@
 #include <projectexplorer/projectexplorerconstants.h>
 
 #include <QCoreApplication>
-#include <QString>
 
 namespace ProjectExplorer {
 namespace Internal {
 
-DeviceSettingsPage::DeviceSettingsPage(QObject *parent)
-    : Core::IOptionsPage(parent)
+DeviceSettingsPage::DeviceSettingsPage()
 {
     setId(Constants::DEVICE_SETTINGS_PAGE_ID);
-    setDisplayName(tr("Devices"));
+    setDisplayName(DeviceSettingsWidget::tr("Devices"));
     setCategory(Constants::DEVICE_SETTINGS_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("ProjectExplorer",
-                                       ProjectExplorer::Constants::DEVICE_SETTINGS_TR_CATEGORY));
-    setCategoryIcon(Utils::Icon(":/projectexplorer/images/MaemoDevice.png"));
-}
-
-QWidget *DeviceSettingsPage::widget()
-{
-    if (!m_widget)
-        m_widget = new DeviceSettingsWidget;
-    return m_widget;
-}
-
-void DeviceSettingsPage::apply()
-{
-    m_widget->saveSettings();
-}
-
-void DeviceSettingsPage::finish()
-{
-    delete m_widget;
+    setDisplayCategory(QCoreApplication::translate("ProjectExplorer", "Devices"));
+    setCategoryIconPath(":/projectexplorer/images/settingscategory_devices.png");
+    setWidgetCreator([] { return new DeviceSettingsWidget; });
 }
 
 } // namespace Internal

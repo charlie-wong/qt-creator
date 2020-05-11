@@ -29,10 +29,6 @@
 #include <qtsupport/baseqtversion.h>
 #include <qmakeprojectmanager/qmakestep.h>
 
-QT_BEGIN_NAMESPACE
-class QLogggingCategory;
-QT_END_NAMESPACE
-
 namespace QmakeProjectManager {
 namespace Internal {
 
@@ -51,7 +47,7 @@ public:
     enum MakefileState { MakefileMissing, CouldNotParse, Okay };
 
     MakefileState makeFileState() const;
-    Utils::FileName qmakePath() const;
+    Utils::FilePath qmakePath() const;
     QString srcProFile() const;
     QMakeStepConfig config() const;
 
@@ -79,7 +75,7 @@ private:
     };
 
     MakefileState m_state;
-    Utils::FileName m_qmakePath;
+    Utils::FilePath m_qmakePath;
     QString m_srcProFile;
 
     QmakeBuildConfig m_qmakeBuildConfig;

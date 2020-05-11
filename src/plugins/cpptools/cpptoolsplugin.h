@@ -26,36 +26,27 @@
 #pragma once
 
 #include "cpptools_global.h"
-#include "stringtable.h"
 
 #include <projectexplorer/projectexplorer.h>
 
-#include <QSharedPointer>
-
-QT_BEGIN_NAMESPACE
-class QFileInfo;
-class QDir;
-QT_END_NAMESPACE
-
-namespace Utils { class FileName; }
+namespace Utils { class FilePath; }
 
 namespace CppTools {
 
-class CppToolsSettings;
 class CppCodeModelSettings;
 
 namespace Internal {
 
 struct CppFileSettings;
 
-class CppToolsPlugin : public ExtensionSystem::IPlugin
+class CppToolsPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "CppTools.json")
 
 public:
     CppToolsPlugin();
-    ~CppToolsPlugin();
+    ~CppToolsPlugin() final;
 
     static CppToolsPlugin *instance();
     static const QStringList &headerSearchPaths();
@@ -63,16 +54,15 @@ public:
     static const QStringList &headerPrefixes();
     static const QStringList &sourcePrefixes();
     static void clearHeaderSourceCache();
-    static Utils::FileName licenseTemplatePath();
+    static Utils::FilePath licenseTemplatePath();
     static QString licenseTemplate();
+    static bool usePragmaOnce();
 
-    bool initialize(const QStringList &arguments, QString *errorMessage);
-    void extensionsInitialized();
-    ShutdownFlag aboutToShutdown();
+    bool initialize(const QStringList &arguments, QString *errorMessage) final;
+    void extensionsInitialized() final;
 
-    QSharedPointer<CppCodeModelSettings> codeModelSettings() const;
+    CppCodeModelSettings *codeModelSettings();
 
-    static StringTable &stringTable();
 public slots:
     void switchHeaderSource();
     void switchHeaderSourceInNextSplit();
@@ -160,6 +150,8 @@ private slots:
     void test_cpplocatorfilters_CppLocatorFilter();
     void test_cpplocatorfilters_CppLocatorFilter_data();
     void test_cpplocatorfilters_CppCurrentDocumentFilter();
+    void test_cpplocatorfilters_CppCurrentDocumentHighlighting();
+    void test_cpplocatorfilters_CppFunctionsFilterHighlighting();
 
     void test_builtinsymbolsearcher();
     void test_builtinsymbolsearcher_data();
@@ -179,10 +171,8 @@ private slots:
 #endif
 
 private:
-    QSharedPointer<CppFileSettings> m_fileSettings;
-    QSharedPointer<CppCodeModelSettings> m_codeModelSettings;
-    CppToolsSettings *m_settings = nullptr;
-    StringTable m_stringTable;
+    CppFileSettings *fileSettings();
+    class CppToolsPluginPrivate *d = nullptr;
 };
 
 } // namespace Internal

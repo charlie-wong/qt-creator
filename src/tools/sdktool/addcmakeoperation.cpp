@@ -55,7 +55,7 @@ QString AddCMakeOperation::name() const
 
 QString AddCMakeOperation::helpText() const
 {
-    return QString("add a cmake tool to Qt Creator");
+    return QString("add a cmake tool");
 }
 
 QString AddCMakeOperation::argumentsHelpText() const
@@ -143,7 +143,7 @@ bool AddCMakeOperation::test() const
             || !map.contains(QString::fromLatin1(PREFIX) + '0'))
         return false;
     QVariantMap cmData = map.value(QString::fromLatin1(PREFIX) + '0').toMap();
-    if (cmData.count() != 8
+    if (cmData.count() != 5
             || cmData.value(ID_KEY).toString() != "testId"
             || cmData.value(DISPLAYNAME_KEY).toString() != "name"
             || cmData.value(AUTODETECTED_KEY).toBool() != true
@@ -157,7 +157,7 @@ bool AddCMakeOperation::test() const
     if (!unchanged.isEmpty())
         return false;
 
-    // Make sure name stays unique:
+    // add 2nd cmake
     map = addCMake(map, "{some-cm-id}", "name", "/tmp/test",
                    KeyValuePairList() << KeyValuePair("ExtraKey", QVariant("ExtraValue")));
     if (map.value(COUNT).toInt() != 2
@@ -165,7 +165,7 @@ bool AddCMakeOperation::test() const
             || !map.contains(QString::fromLatin1(PREFIX) + '1'))
         return false;
     cmData = map.value(QString::fromLatin1(PREFIX) + '0').toMap();
-    if (cmData.count() != 8
+    if (cmData.count() != 5
             || cmData.value(ID_KEY).toString() != "testId"
             || cmData.value(DISPLAYNAME_KEY).toString() != "name"
             || cmData.value(AUTODETECTED_KEY).toBool() != true
@@ -173,9 +173,9 @@ bool AddCMakeOperation::test() const
             || cmData.value("ExtraKey").toString() != "ExtraValue")
         return false;
     cmData = map.value(QString::fromLatin1(PREFIX) + '1').toMap();
-        if (cmData.count() != 8
+        if (cmData.count() != 5
                 || cmData.value(ID_KEY).toString() != "{some-cm-id}"
-                || cmData.value(DISPLAYNAME_KEY).toString() != "name2"
+                || cmData.value(DISPLAYNAME_KEY).toString() != "name"
                 || cmData.value(AUTODETECTED_KEY).toBool() != true
                 || cmData.value(PATH_KEY).toString() != "/tmp/test"
                 || cmData.value("ExtraKey").toString() != "ExtraValue")
@@ -203,20 +203,13 @@ QVariantMap AddCMakeOperation::addCMake(const QVariantMap &map, const QString &i
         return QVariantMap();
     }
 
-    // Sanity check: Make sure displayName is unique.
-    QStringList nameKeys = FindKeyOperation::findKey(map, DISPLAYNAME_KEY);
-    QStringList nameList;
-    foreach (const QString &nameKey, nameKeys)
-        nameList << GetOperation::get(map, nameKey).toString();
-    const QString uniqueName = makeUnique(displayName, nameList);
-
     QVariantMap result = RmKeysOperation::rmKeys(map, {COUNT});
 
     const QString cm = QString::fromLatin1(PREFIX) + QString::number(count);
 
     KeyValuePairList data;
     data << KeyValuePair({cm, ID_KEY}, QVariant(id));
-    data << KeyValuePair({cm, DISPLAYNAME_KEY}, QVariant(uniqueName));
+    data << KeyValuePair({cm, DISPLAYNAME_KEY}, QVariant(displayName));
     data << KeyValuePair({cm, AUTODETECTED_KEY}, QVariant(true));
     data << KeyValuePair({cm, PATH_KEY}, QVariant(path));
     KeyValuePairList extraList;

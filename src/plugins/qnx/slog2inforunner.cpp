@@ -29,7 +29,8 @@
 #include "qnxdeviceprocess.h"
 #include "qnxrunconfiguration.h"
 
-#include <projectexplorer/runnables.h>
+#include <projectexplorer/runconfigurationaspects.h>
+
 #include <utils/qtcassert.h>
 
 #include <QRegExp>
@@ -43,14 +44,9 @@ namespace Internal {
 Slog2InfoRunner::Slog2InfoRunner(RunControl *runControl)
     : RunWorker(runControl)
 {
-    auto qnxRunConfig = qobject_cast<QnxRunConfiguration *>(runControl->runConfiguration());
-    QTC_ASSERT(qnxRunConfig, return);
-    m_applicationId = FileName::fromString(qnxRunConfig->remoteExecutableFilePath()).fileName();
-}
+    setId("Slog2InfoRunner");
+    m_applicationId = runControl->aspect<ExecutableAspect>()->executable().fileName();
 
-void Slog2InfoRunner::printMissingWarning()
-{
-    appendMessage(tr("Warning: \"slog2info\" is not found on the device, debug output not available."), ErrorMessageFormat);
     // See QTCREATORBUG-10712 for details.
     // We need to limit length of ApplicationId to 63 otherwise it would not match one in slog2info.
     m_applicationId.truncate(63);
@@ -69,11 +65,17 @@ void Slog2InfoRunner::printMissingWarning()
     connect(m_logProcess, &DeviceProcess::finished, this, &Slog2InfoRunner::finished);
 }
 
+void Slog2InfoRunner::printMissingWarning()
+{
+    appendMessage(tr("Warning: \"slog2info\" is not found on the device, debug output not available."), ErrorMessageFormat);
+}
+
 void Slog2InfoRunner::start()
 {
-    StandardRunnable r;
-    r.executable = QLatin1String("slog2info");
+    Runnable r;
+    r.executable = Utils::FilePath::fromString("slog2info");
     m_testProcess->start(r);
+    reportStarted();
 }
 
 void Slog2InfoRunner::stop()
@@ -85,6 +87,7 @@ void Slog2InfoRunner::stop()
         m_logProcess->kill();
         processLog(true);
     }
+    reportStopped();
 }
 
 bool Slog2InfoRunner::commandFound() const
@@ -107,8 +110,8 @@ void Slog2InfoRunner::handleTestProcessCompleted()
 
 void Slog2InfoRunner::readLaunchTime()
 {
-    StandardRunnable r;
-    r.executable = QLatin1String("date");
+    Runnable r;
+    r.executable = Utils::FilePath::fromString("date");
     r.commandLineArguments = QLatin1String("+\"%d %H:%M:%S\"");
     m_launchDateTimeProcess->start(r);
 }
@@ -124,8 +127,8 @@ void Slog2InfoRunner::launchSlog2Info()
     m_launchDateTime = QDateTime::fromString(QString::fromLatin1(m_launchDateTimeProcess->readAllStandardOutput()).trimmed(),
                                              QString::fromLatin1("dd HH:mm:ss"));
 
-    StandardRunnable r;
-    r.executable = QLatin1String("slog2info");
+    Runnable r;
+    r.executable = Utils::FilePath::fromString("slog2info");
     r.commandLineArguments = QLatin1String("-w");
     m_logProcess->start(r);
 }

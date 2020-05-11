@@ -23,8 +23,7 @@
 **
 ****************************************************************************/
 
-#ifndef EXPORTDIALOG_H
-#define EXPORTDIALOG_H
+#pragma once
 
 #include <QDialog>
 
@@ -34,6 +33,8 @@ namespace Utils { class PathChooser; }
 
 namespace ImageViewer {
 namespace Internal {
+
+struct ExportData;
 
 class ExportDialog : public QDialog
 {
@@ -47,7 +48,11 @@ public:
     QString exportFileName() const;
     void setExportFileName(const QString &);
 
+    ExportData exportData() const;
+
     void accept() override;
+
+    static QString imageNameFilterString();
 
 private:
     void resetExportSize();
@@ -66,5 +71,3 @@ private:
 
 } // namespace Internal
 } // namespace ImageViewer
-
-#endif // EXPORTDIALOG_H

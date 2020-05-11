@@ -25,29 +25,25 @@
 
 #pragma once
 
-#include <texteditor/textdocument.h>
 #include <texteditor/texteditor.h>
 
 namespace CMakeProjectManager {
 namespace Internal {
 
 class CMakeEditorWidget;
-class CMakeSettingsPage;
 
 class CMakeEditor : public TextEditor::BaseTextEditor
 {
     Q_OBJECT
 
 public:
-    QString contextHelpId() const override;
+    void contextHelp(const HelpCallback &callback) const override;
 
     friend class CMakeEditorWidget;
 };
 
 class CMakeEditorFactory : public TextEditor::TextEditorFactory
 {
-    Q_OBJECT
-
 public:
     CMakeEditorFactory();
 };

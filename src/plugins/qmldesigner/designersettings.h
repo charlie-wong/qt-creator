@@ -49,9 +49,9 @@ const char WARNING_FOR_DESIGNER_FEATURES_IN_EDITOR[] = "WarnAboutQtQuickDesigner
 const char SHOW_DEBUGVIEW[] = "ShowQtQuickDesignerDebugView";
 const char ENABLE_DEBUGVIEW[] = "EnableQtQuickDesignerDebugView";
 const char ALWAYS_SAFE_IN_CRUMBLEBAR[] = "AlwaysSafeInCrumbleBar";
-const char USE_ONLY_FALLBACK_PUPPET[] = "UseOnlyFallbackPuppet";
+const char USE_DEFAULT_PUPPET[] = "UseDefaultPuppet";
 const char PUPPET_TOPLEVEL_BUILD_DIRECTORY[] = "PuppetToplevelBuildDirectory";
-const char PUPPET_FALLBACK_DIRECTORY[] = "PuppetFallbackDirectory";
+const char PUPPET_DEFAULT_DIRECTORY[] = "PuppetDefaultDirectory";
 const char CONTROLS_STYLE[] = "ControlsStyle";
 const char TYPE_OF_QSTR_FUNCTION[] = "TypeOfQsTrFunction";
 const char SHOW_PROPERTYEDITOR_WARNINGS[] = "ShowPropertyEditorWarnings";
@@ -60,8 +60,14 @@ const char PUPPET_KILL_TIMEOUT[] = "PuppetKillTimeout";
 const char DEBUG_PUPPET[] = "DebugPuppet";
 const char FORWARD_PUPPET_OUTPUT[] = "ForwardPuppetOutput";
 const char STATESEDITOR_EXPANDED[] = "StatesEditorExpanded";
+const char NAVIGATOR_SHOW_ONLY_VISIBLE_ITEMS[] = "NavigatorShowOnlyVisibleItems";
 const char REFORMAT_UI_QML_FILES[] = "ReformatUiQmlFiles";        /* These settings are not exposed in ui. */
 const char IGNORE_DEVICE_PIXEL_RATIO[] = "IgnoreDevicePixelRaio"; /* The settings can be used to turn off the feature, if there are serious issues */
+const char STANDALONE_MODE[] = "StandAloneMode";
+const char ENABLE_TIMELINEVIEW[] = "EnableTimelineView";
+const char SIMPLE_COLOR_PALETTE_CONTENT[] = "SimpleColorPaletteContent";
+const char ALWAYS_DESIGN_MODE[] = "AlwaysDesignMode";
+const char DISABLE_ITEM_LIBRARY_UPDATE_TIMER[] = "DisableItemLibraryUpdateTimer";
 }
 
 class DesignerSettings : public QHash<QByteArray, QVariant>

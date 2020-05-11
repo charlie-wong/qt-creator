@@ -43,13 +43,29 @@ class Target;
 namespace RemoteLinux {
 namespace Internal { class AbstractRemoteLinuxDeployServicePrivate; }
 
+class REMOTELINUX_EXPORT CheckResult
+{
+public:
+    static CheckResult success() { return {true, {}}; }
+    static CheckResult failure(const QString &error = {}) { return {false, error}; }
+
+    operator bool() const { return m_ok; }
+    QString errorMessage() const { return m_error; }
+
+private:
+    CheckResult(bool ok, const QString &error) : m_ok(ok), m_error(error) {}
+
+    bool m_ok = false;
+    QString m_error;
+};
+
 class REMOTELINUX_EXPORT AbstractRemoteLinuxDeployService : public QObject
 {
     Q_OBJECT
     Q_DISABLE_COPY(AbstractRemoteLinuxDeployService)
 public:
-    explicit AbstractRemoteLinuxDeployService(QObject *parent = 0);
-    ~AbstractRemoteLinuxDeployService();
+    explicit AbstractRemoteLinuxDeployService(QObject *parent = nullptr);
+    ~AbstractRemoteLinuxDeployService() override;
 
     void setTarget(ProjectExplorer::Target *bc);
     // Only use setDevice() as fallback if no target is available
@@ -60,7 +76,7 @@ public:
     QVariantMap exportDeployTimes() const;
     void importDeployTimes(const QVariantMap &map);
 
-    virtual bool isDeploymentPossible(QString *whyNot = 0) const;
+    virtual CheckResult isDeploymentPossible() const;
 
 signals:
     void errorMessage(const QString &message);
@@ -76,8 +92,12 @@ protected:
     ProjectExplorer::IDevice::ConstPtr deviceConfiguration() const;
     QSsh::SshConnection *connection() const;
 
-    void saveDeploymentTimeStamp(const ProjectExplorer::DeployableFile &deployableFile);
-    bool hasChangedSinceLastDeployment(const ProjectExplorer::DeployableFile &deployableFile) const;
+    void saveDeploymentTimeStamp(const ProjectExplorer::DeployableFile &deployableFile,
+                                 const QDateTime &remoteTimestamp);
+
+    bool hasLocalFileChanged(const ProjectExplorer::DeployableFile &deployableFile) const;
+    bool hasRemoteFileChanged(const ProjectExplorer::DeployableFile &deployableFile,
+                              const QDateTime &remoteTimestamp) const;
 
     void handleDeviceSetupDone(bool success);
     void handleDeploymentDone();

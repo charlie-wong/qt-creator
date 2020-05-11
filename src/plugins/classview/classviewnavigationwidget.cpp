@@ -40,6 +40,7 @@
 #include <QDebug>
 #include <QVariant>
 #include <QVBoxLayout>
+#include <QElapsedTimer>
 
 enum { debug = false };
 
@@ -93,7 +94,7 @@ namespace Internal {
 NavigationWidget::NavigationWidget(QWidget *parent) :
     QWidget(parent)
 {
-    QVBoxLayout *verticalLayout = new QVBoxLayout(this);
+    auto verticalLayout = new QVBoxLayout(this);
     verticalLayout->setSpacing(0);
     verticalLayout->setContentsMargins(0, 0, 0, 0);
     treeView = new ::Utils::NavigationTreeView(this);
@@ -105,7 +106,7 @@ NavigationWidget::NavigationWidget(QWidget *parent) :
     verticalLayout->addWidget(Core::ItemViewFind::createSearchableWrapper(
                                   treeView, Core::ItemViewFind::DarkColored,
                                   Core::ItemViewFind::FetchMoreWhileSearching));
-
+    setFocusProxy(treeView);
     // tree model
     treeModel = new TreeItemModel(this);
     treeView->setModel(treeModel);
@@ -136,9 +137,7 @@ NavigationWidget::NavigationWidget(QWidget *parent) :
             manager, &Manager::onRequestTreeDataUpdate);
 }
 
-NavigationWidget::~NavigationWidget()
-{
-}
+NavigationWidget::~NavigationWidget() = default;
 
 void NavigationWidget::hideEvent(QHideEvent *event)
 {
@@ -171,9 +170,9 @@ QList<QToolButton *> NavigationWidget::createToolButtons()
     // full projects mode
     if (!fullProjectsModeButton) {
         // create a button
-        fullProjectsModeButton = new QToolButton();
+        fullProjectsModeButton = new QToolButton(this);
         fullProjectsModeButton->setIcon(
-                    CPlusPlus::Icons::iconForType(CPlusPlus::Icons::ClassIconType));
+                    ::Utils::CodeModelIcon::iconForType(::Utils::CodeModelIcon::Class));
         fullProjectsModeButton->setCheckable(true);
         fullProjectsModeButton->setToolTip(tr("Show Subprojects"));
 
@@ -269,7 +268,7 @@ void NavigationWidget::onDataUpdate(QSharedPointer<QStandardItem> result)
     if (result.isNull())
         return;
 
-    QTime timer;
+    QElapsedTimer timer;
     if (debug)
         timer.start();
     // update is received. root item must be updated - and received information
@@ -282,10 +281,12 @@ void NavigationWidget::onDataUpdate(QSharedPointer<QStandardItem> result)
 
     // expand top level projects
     QModelIndex sessionIndex;
-
-    for (int i = 0; i < treeModel->rowCount(sessionIndex); ++i)
+    const int toplevelCount = treeModel->rowCount(sessionIndex);
+    for (int i = 0; i < toplevelCount; ++i)
         treeView->expand(treeModel->index(i, 0, sessionIndex));
 
+    if (!treeView->currentIndex().isValid() && toplevelCount > 0)
+        treeView->setCurrentIndex(treeModel->index(0, 0, sessionIndex));
     if (debug)
         qDebug() << "Class View:" << QDateTime::currentDateTime().toString()
             << "TreeView is updated in" << timer.elapsed() << "msecs";
@@ -314,8 +315,8 @@ void NavigationWidget::fetchExpandedItems(QStandardItem *item, const QStandardIt
         QStandardItem *itemChild = item->child(itemIndex);
         const QStandardItem *targetChild = target->child(targetIndex);
 
-        const SymbolInformation &itemInf = Utils::symbolInformationFromItem(itemChild);
-        const SymbolInformation &targetInf = Utils::symbolInformationFromItem(targetChild);
+        const SymbolInformation &itemInf = Internal::symbolInformationFromItem(itemChild);
+        const SymbolInformation &targetInf = Internal::symbolInformationFromItem(targetChild);
 
         if (itemInf < targetInf) {
             ++itemIndex;

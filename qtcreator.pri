@@ -1,11 +1,11 @@
 !isEmpty(QTCREATOR_PRI_INCLUDED):error("qtcreator.pri already included")
 QTCREATOR_PRI_INCLUDED = 1
 
-QTCREATOR_VERSION = 4.3.82
-QTCREATOR_COMPAT_VERSION = 4.3.82
+include($$PWD/qtcreator_ide_branding.pri)
+!isEmpty(IDE_BRANDING_PRI): include($$IDE_BRANDING_PRI)
+
+PRODUCT_BUNDLE_IDENTIFIER=$${PRODUCT_BUNDLE_ORGANIZATION}.$${IDE_ID}
 VERSION = $$QTCREATOR_VERSION
-QTCREATOR_DISPLAY_VERSION = 4.4.0-beta1
-BINARY_ARTIFACTS_BRANCH = master
 
 CONFIG += c++14
 
@@ -59,7 +59,7 @@ defineReplace(stripSrcDir) {
     return($$relative_path($$absolute_path($$1, $$OUT_PWD), $$_PRO_FILE_PWD_))
 }
 
-macos:!minQtVersion(5, 7, 0) {
+darwin:!minQtVersion(5, 7, 0) {
     # Qt 5.6 still sets deployment target 10.7, which does not work
     # with all C++11/14 features (e.g. std::future)
     QMAKE_MACOSX_DEPLOYMENT_TARGET = 10.8
@@ -95,11 +95,11 @@ isEmpty(IDE_BUILD_TREE) {
 
 IDE_APP_PATH = $$IDE_BUILD_TREE/bin
 osx {
-    IDE_APP_TARGET   = "Qt Creator"
+    IDE_APP_TARGET   = "$$IDE_DISPLAY_NAME"
 
     # check if IDE_BUILD_TREE is actually an existing Qt Creator.app,
     # for building against a binary package
-    exists($$IDE_BUILD_TREE/Contents/MacOS/Qt Creator): IDE_APP_BUNDLE = $$IDE_BUILD_TREE
+    exists($$IDE_BUILD_TREE/Contents/MacOS/$$IDE_APP_TARGET): IDE_APP_BUNDLE = $$IDE_BUILD_TREE
     else: IDE_APP_BUNDLE = $$IDE_APP_PATH/$${IDE_APP_TARGET}.app
 
     # set output path if not set manually
@@ -107,7 +107,7 @@ osx {
 
     IDE_LIBRARY_PATH = $$IDE_OUTPUT_PATH/Frameworks
     IDE_PLUGIN_PATH  = $$IDE_OUTPUT_PATH/PlugIns
-    IDE_LIBEXEC_PATH = $$IDE_OUTPUT_PATH/Resources
+    IDE_LIBEXEC_PATH = $$IDE_OUTPUT_PATH/Resources/libexec
     IDE_DATA_PATH    = $$IDE_OUTPUT_PATH/Resources
     IDE_DOC_PATH     = $$IDE_DATA_PATH/doc
     IDE_BIN_PATH     = $$IDE_OUTPUT_PATH/MacOS
@@ -118,14 +118,14 @@ osx {
 
     INSTALL_LIBRARY_PATH = $$QTC_PREFIX/$${IDE_APP_TARGET}.app/Contents/Frameworks
     INSTALL_PLUGIN_PATH  = $$QTC_PREFIX/$${IDE_APP_TARGET}.app/Contents/PlugIns
-    INSTALL_LIBEXEC_PATH = $$QTC_PREFIX/$${IDE_APP_TARGET}.app/Contents/Resources
+    INSTALL_LIBEXEC_PATH = $$QTC_PREFIX/$${IDE_APP_TARGET}.app/Contents/Resources/libexec
     INSTALL_DATA_PATH    = $$QTC_PREFIX/$${IDE_APP_TARGET}.app/Contents/Resources
     INSTALL_DOC_PATH     = $$INSTALL_DATA_PATH/doc
     INSTALL_BIN_PATH     = $$QTC_PREFIX/$${IDE_APP_TARGET}.app/Contents/MacOS
     INSTALL_APP_PATH     = $$QTC_PREFIX/
 } else {
     contains(TEMPLATE, vc.*):vcproj = 1
-    IDE_APP_TARGET   = qtcreator
+    IDE_APP_TARGET   = $$IDE_ID
 
     # target output path if not set manually
     isEmpty(IDE_OUTPUT_PATH): IDE_OUTPUT_PATH = $$IDE_BUILD_TREE
@@ -156,6 +156,8 @@ osx {
     INSTALL_APP_PATH     = $$QTC_PREFIX/bin
 }
 
+gcc:!clang: QMAKE_CXXFLAGS += -Wno-noexcept-type
+
 RELATIVE_PLUGIN_PATH = $$relative_path($$IDE_PLUGIN_PATH, $$IDE_BIN_PATH)
 RELATIVE_LIBEXEC_PATH = $$relative_path($$IDE_LIBEXEC_PATH, $$IDE_BIN_PATH)
 RELATIVE_DATA_PATH = $$relative_path($$IDE_DATA_PATH, $$IDE_BIN_PATH)
@@ -184,6 +186,14 @@ for(dir, QTC_PLUGIN_DIRS) {
     INCLUDEPATH += $$dir
 }
 
+QTC_LIB_DIRS_FROM_ENVIRONMENT = $$(QTC_LIB_DIRS)
+QTC_LIB_DIRS += $$split(QTC_LIB_DIRS_FROM_ENVIRONMENT, $$QMAKE_DIRLIST_SEP)
+QTC_LIB_DIRS += $$IDE_SOURCE_TREE/src/libs
+QTC_LIB_DIRS += $$IDE_SOURCE_TREE/src/libs/3rdparty
+for(dir, QTC_LIB_DIRS) {
+    INCLUDEPATH += $$dir
+}
+
 CONFIG += \
     depend_includepath \
     no_include_pwd
@@ -199,9 +209,10 @@ exists($$IDE_LIBRARY_PATH): LIBS *= -L$$IDE_LIBRARY_PATH  # library path from ou
 
 DEFINES += \
     QT_CREATOR \
+    QT_NO_JAVA_STYLE_ITERATORS \
     QT_NO_CAST_TO_ASCII \
     QT_RESTRICTED_CAST_FROM_ASCII \
-    QT_DISABLE_DEPRECATED_BEFORE=0x050600 \
+    QT_DISABLE_DEPRECATED_BEFORE=0x050900 \
     QT_USE_FAST_OPERATOR_PLUS \
     QT_USE_FAST_CONCATENATION
 
@@ -267,7 +278,16 @@ for(ever) {
         break()
     done_libs += $$QTC_LIB_DEPENDS
     for(dep, QTC_LIB_DEPENDS) {
-        include($$PWD/src/libs/$$dep/$${dep}_dependencies.pri)
+        dependencies_file =
+        for(dir, QTC_LIB_DIRS) {
+            exists($$dir/$$dep/$${dep}_dependencies.pri) {
+                dependencies_file = $$dir/$$dep/$${dep}_dependencies.pri
+                break()
+            }
+        }
+        isEmpty(dependencies_file): \
+            error("Library dependency $$dep not found")
+        include($$dependencies_file)
         LIBS += -l$$qtLibraryName($$QTC_LIB_NAME)
     }
     QTC_LIB_DEPENDS = $$unique(QTC_LIB_DEPENDS)

@@ -25,17 +25,13 @@
 
 #include "qmakeprojectmanagerplugin.h"
 
+#include "addlibrarywizard.h"
 #include "profileeditor.h"
-#include "qmakeprojectmanager.h"
 #include "qmakenodes.h"
+#include "qmakesettings.h"
 #include "qmakestep.h"
-#include "makestep.h"
+#include "qmakemakestep.h"
 #include "qmakebuildconfiguration.h"
-#include "desktopqmakerunconfiguration.h"
-#include "wizards/guiappwizard.h"
-#include "wizards/librarywizard.h"
-#include "wizards/testwizard.h"
-#include "wizards/simpleprojectwizard.h"
 #include "wizards/subdirsprojectwizard.h"
 #include "customwidgetwizard/customwidgetwizard.h"
 #include "qmakeprojectmanagerconstants.h"
@@ -53,11 +49,15 @@
 #include <coreplugin/editormanager/ieditor.h>
 
 #include <projectexplorer/buildmanager.h>
-#include <projectexplorer/session.h>
+#include <projectexplorer/projectnodes.h>
 #include <projectexplorer/projectmanager.h>
 #include <projectexplorer/projecttree.h>
+#include <projectexplorer/runcontrol.h>
+#include <projectexplorer/session.h>
 #include <projectexplorer/target.h>
+#include <projectexplorer/projectexplorer.h>
 
+#include <texteditor/texteditor.h>
 #include <texteditor/texteditoractionhandler.h>
 #include <texteditor/texteditorconstants.h>
 
@@ -68,52 +68,103 @@
 #    include <QTest>
 #endif
 
-#include <QtPlugin>
-
 using namespace Core;
-using namespace QmakeProjectManager::Internal;
-using namespace QmakeProjectManager;
 using namespace ProjectExplorer;
+using namespace TextEditor;
+
+namespace QmakeProjectManager {
+namespace Internal {
+
+class QmakeProjectManagerPluginPrivate : public QObject
+{
+public:
+    ~QmakeProjectManagerPluginPrivate() override;
+
+    void projectChanged();
+    void activeTargetChanged();
+    void updateActions();
+    void updateRunQMakeAction();
+    void updateContextActions();
+    void buildStateChanged(Project *pro);
+    void updateBuildFileAction();
+    void disableBuildFileMenus();
+    void enableBuildFileMenus(const Utils::FilePath &file);
+
+    Core::Context projectContext;
+
+    CustomWizardMetaFactory<CustomQmakeProjectWizard>
+        qmakeProjectWizard{"qmakeproject", IWizardFactory::ProjectWizard};
+
+    QMakeStepFactory qmakeStepFactory;
+    QmakeMakeStepFactory makeStepFactory;
+
+    QmakeBuildConfigurationFactory buildConfigFactory;
+
+    ProFileEditorFactory profileEditorFactory;
+
+    QmakeSettingsPage settingsPage;
+
+    ExternalQtEditor *m_designerEditor{ExternalQtEditor::createDesignerEditor()};
+    ExternalQtEditor *m_linguistEditor{ExternalQtEditor::createLinguistEditor()};
+
+    QmakeProject *m_previousStartupProject = nullptr;
+    Target *m_previousTarget = nullptr;
+
+    QAction *m_runQMakeAction = nullptr;
+    QAction *m_runQMakeActionContextMenu = nullptr;
+    Utils::ParameterAction *m_buildSubProjectContextMenu = nullptr;
+    QAction *m_subProjectRebuildSeparator = nullptr;
+    QAction *m_rebuildSubProjectContextMenu = nullptr;
+    QAction *m_cleanSubProjectContextMenu = nullptr;
+    QAction *m_buildFileContextMenu = nullptr;
+    Utils::ParameterAction *m_buildSubProjectAction = nullptr;
+    Utils::ParameterAction *m_rebuildSubProjectAction = nullptr;
+    Utils::ParameterAction *m_cleanSubProjectAction = nullptr;
+    Utils::ParameterAction *m_buildFileAction = nullptr;
+    QAction *m_addLibraryAction = nullptr;
+    QAction *m_addLibraryActionContextMenu = nullptr;
+
+    QmakeKitAspect qmakeKitAspect;
+
+    void addLibrary();
+    void addLibraryContextMenu();
+    void runQMake();
+    void runQMakeContextMenu();
+
+    void buildSubDirContextMenu() { handleSubDirContextMenu(QmakeBuildSystem::BUILD, false); }
+    void rebuildSubDirContextMenu() { handleSubDirContextMenu(QmakeBuildSystem::REBUILD, false); }
+    void cleanSubDirContextMenu() { handleSubDirContextMenu(QmakeBuildSystem::CLEAN, false); }
+    void buildFileContextMenu() { handleSubDirContextMenu(QmakeBuildSystem::BUILD, true); }
+    void buildFile();
+
+    void handleSubDirContextMenu(QmakeBuildSystem::Action action, bool isFileBuild);
+    void addLibraryImpl(const QString &fileName, TextEditor::BaseTextEditor *editor);
+    void runQMakeImpl(Project *p, ProjectExplorer::Node *node);
+};
+
+QmakeProjectManagerPlugin::~QmakeProjectManagerPlugin()
+{
+    delete d;
+}
 
 bool QmakeProjectManagerPlugin::initialize(const QStringList &arguments, QString *errorMessage)
 {
     Q_UNUSED(arguments)
     Q_UNUSED(errorMessage)
-    const Context projectContext(QmakeProjectManager::Constants::PROJECT_ID);
-    Context projecTreeContext(ProjectExplorer::Constants::C_PROJECT_TREE);
+    const Context projectContext(QmakeProjectManager::Constants::QMAKEPROJECT_ID);
+    Context projectTreeContext(ProjectExplorer::Constants::C_PROJECT_TREE);
+
+    d = new QmakeProjectManagerPluginPrivate;
 
     //create and register objects
-    m_qmakeProjectManager = new QmakeManager;
-    addAutoReleasedObject(m_qmakeProjectManager);
-
     ProjectManager::registerProjectType<QmakeProject>(QmakeProjectManager::Constants::PROFILE_MIMETYPE);
-
-    ProjectExplorer::KitManager::registerKitInformation(new QmakeKitInformation);
 
     IWizardFactory::registerFactoryCreator([] {
         return QList<IWizardFactory *> {
             new SubdirsProjectWizard,
-            new GuiAppWizard,
-            new LibraryWizard,
-            new TestWizard,
-            new CustomWidgetWizard,
-            new SimpleProjectWizard
+            new CustomWidgetWizard
         };
     });
-
-    addAutoReleasedObject(new CustomWizardMetaFactory<CustomQmakeProjectWizard>
-                          (QLatin1String("qmakeproject"), IWizardFactory::ProjectWizard));
-
-    addAutoReleasedObject(new QMakeStepFactory);
-    addAutoReleasedObject(new MakeStepFactory);
-
-    addAutoReleasedObject(new QmakeBuildConfigurationFactory);
-    addAutoReleasedObject(new DesktopQmakeRunConfigurationFactory);
-
-    addAutoReleasedObject(ExternalQtEditor::createDesignerEditor());
-    addAutoReleasedObject(ExternalQtEditor::createLinguistEditor());
-
-    addAutoReleasedObject(new ProFileEditorFactory);
 
     //menus
     ActionContainer *mbuild =
@@ -128,106 +179,109 @@ bool QmakeProjectManagerPlugin::initialize(const QStringList &arguments, QString
     //register actions
     Command *command = nullptr;
 
-    m_buildSubProjectContextMenu = new Utils::ParameterAction(tr("Build"), tr("Build \"%1\""),
+    d->m_buildSubProjectContextMenu = new Utils::ParameterAction(tr("Build"), tr("Build \"%1\""),
                                                               Utils::ParameterAction::AlwaysEnabled/*handled manually*/,
                                                               this);
-    command = ActionManager::registerAction(m_buildSubProjectContextMenu, Constants::BUILDSUBDIRCONTEXTMENU, projectContext);
+    command = ActionManager::registerAction(d->m_buildSubProjectContextMenu, Constants::BUILDSUBDIRCONTEXTMENU, projectContext);
     command->setAttribute(Command::CA_Hide);
     command->setAttribute(Command::CA_UpdateText);
-    command->setDescription(m_buildSubProjectContextMenu->text());
+    command->setDescription(d->m_buildSubProjectContextMenu->text());
     msubproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_BUILD);
-    connect(m_buildSubProjectContextMenu, &QAction::triggered, m_qmakeProjectManager, &QmakeManager::buildSubDirContextMenu);
+    connect(d->m_buildSubProjectContextMenu, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::buildSubDirContextMenu);
 
-    m_runQMakeActionContextMenu = new QAction(tr("Run qmake"), this);
-    command = ActionManager::registerAction(m_runQMakeActionContextMenu, Constants::RUNQMAKECONTEXTMENU, projectContext);
+    d->m_runQMakeActionContextMenu = new QAction(tr("Run qmake"), this);
+    command = ActionManager::registerAction(d->m_runQMakeActionContextMenu, Constants::RUNQMAKECONTEXTMENU, projectContext);
     command->setAttribute(Command::CA_Hide);
     mproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_BUILD);
     msubproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_BUILD);
-    connect(m_runQMakeActionContextMenu, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::runQMakeContextMenu);
+    connect(d->m_runQMakeActionContextMenu, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::runQMakeContextMenu);
 
     command = msubproject->addSeparator(projectContext, ProjectExplorer::Constants::G_PROJECT_BUILD,
-                                        &m_subProjectRebuildSeparator);
+                                        &d->m_subProjectRebuildSeparator);
     command->setAttribute(Command::CA_Hide);
 
-    m_rebuildSubProjectContextMenu = new QAction(tr("Rebuild"), this);
+    d->m_rebuildSubProjectContextMenu = new QAction(tr("Rebuild"), this);
     command = ActionManager::registerAction(
-                m_rebuildSubProjectContextMenu, Constants::REBUILDSUBDIRCONTEXTMENU, projectContext);
+                d->m_rebuildSubProjectContextMenu, Constants::REBUILDSUBDIRCONTEXTMENU, projectContext);
     command->setAttribute(Command::CA_Hide);
     msubproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_BUILD);
-    connect(m_rebuildSubProjectContextMenu, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::rebuildSubDirContextMenu);
+    connect(d->m_rebuildSubProjectContextMenu, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::rebuildSubDirContextMenu);
 
-    m_cleanSubProjectContextMenu = new QAction(tr("Clean"), this);
+    d->m_cleanSubProjectContextMenu = new QAction(tr("Clean"), this);
     command = ActionManager::registerAction(
-                m_cleanSubProjectContextMenu, Constants::CLEANSUBDIRCONTEXTMENU, projectContext);
+                d->m_cleanSubProjectContextMenu, Constants::CLEANSUBDIRCONTEXTMENU, projectContext);
     command->setAttribute(Command::CA_Hide);
     msubproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_BUILD);
-    connect(m_cleanSubProjectContextMenu, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::cleanSubDirContextMenu);
+    connect(d->m_cleanSubProjectContextMenu, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::cleanSubDirContextMenu);
 
-    m_buildFileContextMenu = new QAction(tr("Build"), this);
-    command = ActionManager::registerAction(m_buildFileContextMenu, Constants::BUILDFILECONTEXTMENU, projectContext);
+    d->m_buildFileContextMenu = new QAction(tr("Build"), this);
+    command = ActionManager::registerAction(d->m_buildFileContextMenu, Constants::BUILDFILECONTEXTMENU, projectContext);
     command->setAttribute(Command::CA_Hide);
     mfile->addAction(command, ProjectExplorer::Constants::G_FILE_OTHER);
-    connect(m_buildFileContextMenu, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::buildFileContextMenu);
+    connect(d->m_buildFileContextMenu, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::buildFileContextMenu);
 
-    m_buildSubProjectAction = new Utils::ParameterAction(tr("Build Subproject"), tr("Build Subproject \"%1\""),
+    d->m_buildSubProjectAction = new Utils::ParameterAction(tr("Build &Subproject"), tr("Build &Subproject \"%1\""),
                                                          Utils::ParameterAction::AlwaysEnabled, this);
-    command = ActionManager::registerAction(m_buildSubProjectAction, Constants::BUILDSUBDIR, projectContext);
+    command = ActionManager::registerAction(d->m_buildSubProjectAction, Constants::BUILDSUBDIR, projectContext);
     command->setAttribute(Command::CA_Hide);
     command->setAttribute(Command::CA_UpdateText);
-    command->setDescription(m_buildSubProjectAction->text());
+    command->setDescription(d->m_buildSubProjectAction->text());
     mbuild->addAction(command, ProjectExplorer::Constants::G_BUILD_BUILD);
-    connect(m_buildSubProjectAction, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::buildSubDirContextMenu);
+    connect(d->m_buildSubProjectAction, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::buildSubDirContextMenu);
 
-    m_runQMakeAction = new QAction(tr("Run qmake"), this);
+    d->m_runQMakeAction = new QAction(tr("Run qmake"), this);
     const Context globalcontext(Core::Constants::C_GLOBAL);
-    command = ActionManager::registerAction(m_runQMakeAction, Constants::RUNQMAKE, globalcontext);
+    command = ActionManager::registerAction(d->m_runQMakeAction, Constants::RUNQMAKE, globalcontext);
     mbuild->addAction(command, ProjectExplorer::Constants::G_BUILD_BUILD);
-    connect(m_runQMakeAction, &QAction::triggered, m_qmakeProjectManager, &QmakeManager::runQMake);
+    connect(d->m_runQMakeAction, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::runQMake);
 
-    m_rebuildSubProjectAction = new Utils::ParameterAction(tr("Rebuild Subproject"), tr("Rebuild Subproject \"%1\""),
+    d->m_rebuildSubProjectAction = new Utils::ParameterAction(tr("Rebuild Subproject"), tr("Rebuild Subproject \"%1\""),
                                                            Utils::ParameterAction::AlwaysEnabled, this);
-    command = ActionManager::registerAction(m_rebuildSubProjectAction, Constants::REBUILDSUBDIR, projectContext);
+    command = ActionManager::registerAction(d->m_rebuildSubProjectAction, Constants::REBUILDSUBDIR, projectContext);
     command->setAttribute(Command::CA_Hide);
     command->setAttribute(Command::CA_UpdateText);
-    command->setDescription(m_rebuildSubProjectAction->text());
+    command->setDescription(d->m_rebuildSubProjectAction->text());
     mbuild->addAction(command, ProjectExplorer::Constants::G_BUILD_REBUILD);
-    connect(m_rebuildSubProjectAction, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::rebuildSubDirContextMenu);
+    connect(d->m_rebuildSubProjectAction, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::rebuildSubDirContextMenu);
 
-    m_cleanSubProjectAction = new Utils::ParameterAction(tr("Clean Subproject"), tr("Clean Subproject \"%1\""),
+    d->m_cleanSubProjectAction = new Utils::ParameterAction(tr("Clean Subproject"), tr("Clean Subproject \"%1\""),
                                                          Utils::ParameterAction::AlwaysEnabled, this);
-    command = ActionManager::registerAction(m_cleanSubProjectAction, Constants::CLEANSUBDIR, projectContext);
+    command = ActionManager::registerAction(d->m_cleanSubProjectAction, Constants::CLEANSUBDIR, projectContext);
     command->setAttribute(Command::CA_Hide);
     command->setAttribute(Command::CA_UpdateText);
-    command->setDescription(m_cleanSubProjectAction->text());
+    command->setDescription(d->m_cleanSubProjectAction->text());
     mbuild->addAction(command, ProjectExplorer::Constants::G_BUILD_CLEAN);
-    connect(m_cleanSubProjectAction, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::cleanSubDirContextMenu);
+    connect(d->m_cleanSubProjectAction, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::cleanSubDirContextMenu);
 
-    m_buildFileAction = new Utils::ParameterAction(tr("Build File"), tr("Build File \"%1\""),
+    d->m_buildFileAction = new Utils::ParameterAction(tr("Build File"), tr("Build File \"%1\""),
                                                    Utils::ParameterAction::AlwaysEnabled, this);
-    command = ActionManager::registerAction(m_buildFileAction, Constants::BUILDFILE, projectContext);
+    command = ActionManager::registerAction(d->m_buildFileAction, Constants::BUILDFILE, projectContext);
     command->setAttribute(Command::CA_Hide);
     command->setAttribute(Command::CA_UpdateText);
-    command->setDescription(m_buildFileAction->text());
+    command->setDescription(d->m_buildFileAction->text());
     command->setDefaultKeySequence(QKeySequence(tr("Ctrl+Alt+B")));
     mbuild->addAction(command, ProjectExplorer::Constants::G_BUILD_BUILD);
-    connect(m_buildFileAction, &QAction::triggered, m_qmakeProjectManager, &QmakeManager::buildFile);
+    connect(d->m_buildFileAction, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::buildFile);
 
     connect(BuildManager::instance(), &BuildManager::buildStateChanged,
-            this, &QmakeProjectManagerPlugin::buildStateChanged);
+            d, &QmakeProjectManagerPluginPrivate::buildStateChanged);
     connect(SessionManager::instance(), &SessionManager::startupProjectChanged,
-            this, &QmakeProjectManagerPlugin::projectChanged);
+            d, &QmakeProjectManagerPluginPrivate::projectChanged);
     connect(ProjectTree::instance(), &ProjectTree::currentProjectChanged,
-            this, &QmakeProjectManagerPlugin::projectChanged);
+            d, &QmakeProjectManagerPluginPrivate::projectChanged);
 
     connect(ProjectTree::instance(), &ProjectTree::currentNodeChanged,
-            this, &QmakeProjectManagerPlugin::updateContextActions);
+            d, &QmakeProjectManagerPluginPrivate::updateContextActions);
 
     ActionContainer *contextMenu = ActionManager::createMenu(QmakeProjectManager::Constants::M_CONTEXT);
 
@@ -236,17 +290,18 @@ bool QmakeProjectManagerPlugin::initialize(const QStringList &arguments, QString
     command = ActionManager::command(TextEditor::Constants::JUMP_TO_FILE_UNDER_CURSOR);
     contextMenu->addAction(command);
 
-    m_addLibraryAction = new QAction(tr("Add Library..."), this);
-    command = ActionManager::registerAction(m_addLibraryAction,
+    d->m_addLibraryAction = new QAction(tr("Add Library..."), this);
+    command = ActionManager::registerAction(d->m_addLibraryAction,
         Constants::ADDLIBRARY, proFileEditorContext);
-    connect(m_addLibraryAction, &QAction::triggered, m_qmakeProjectManager, &QmakeManager::addLibrary);
+    connect(d->m_addLibraryAction, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::addLibrary);
     contextMenu->addAction(command);
 
-    m_addLibraryActionContextMenu = new QAction(tr("Add Library..."), this);
-    command = ActionManager::registerAction(m_addLibraryActionContextMenu,
-        Constants::ADDLIBRARY, projecTreeContext);
-    connect(m_addLibraryActionContextMenu, &QAction::triggered,
-            m_qmakeProjectManager, &QmakeManager::addLibraryContextMenu);
+    d->m_addLibraryActionContextMenu = new QAction(tr("Add Library..."), this);
+    command = ActionManager::registerAction(d->m_addLibraryActionContextMenu,
+        Constants::ADDLIBRARY, projectTreeContext);
+    connect(d->m_addLibraryActionContextMenu, &QAction::triggered,
+            d, &QmakeProjectManagerPluginPrivate::addLibraryContextMenu);
     mproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_FILES);
     msubproject->addAction(command, ProjectExplorer::Constants::G_PROJECT_FILES);
 
@@ -256,21 +311,24 @@ bool QmakeProjectManagerPlugin::initialize(const QStringList &arguments, QString
     contextMenu->addAction(command);
 
     connect(EditorManager::instance(), &EditorManager::currentEditorChanged,
-            this, &QmakeProjectManagerPlugin::updateBuildFileAction);
+            d, &QmakeProjectManagerPluginPrivate::updateBuildFileAction);
 
-    updateActions();
+    d->updateActions();
 
     return true;
 }
 
-void QmakeProjectManagerPlugin::extensionsInitialized()
-{ }
+QmakeProjectManagerPluginPrivate::~QmakeProjectManagerPluginPrivate()
+{
+    delete m_designerEditor;
+    delete m_linguistEditor;
+}
 
-void QmakeProjectManagerPlugin::projectChanged()
+void QmakeProjectManagerPluginPrivate::projectChanged()
 {
     if (m_previousStartupProject)
         disconnect(m_previousStartupProject, &Project::activeTargetChanged,
-                   this, &QmakeProjectManagerPlugin::activeTargetChanged);
+                   this, &QmakeProjectManagerPluginPrivate::activeTargetChanged);
 
     if (ProjectTree::currentProject())
         m_previousStartupProject = qobject_cast<QmakeProject *>(ProjectTree::currentProject());
@@ -279,36 +337,168 @@ void QmakeProjectManagerPlugin::projectChanged()
 
     if (m_previousStartupProject) {
         connect(m_previousStartupProject, &Project::activeTargetChanged,
-                           this, &QmakeProjectManagerPlugin::activeTargetChanged);
-        connect(m_previousStartupProject, &QmakeProject::parsingFinished,
-                this, &QmakeProjectManagerPlugin::updateActions);
+                this, &QmakeProjectManagerPluginPrivate::activeTargetChanged);
     }
 
     activeTargetChanged();
 }
 
-void QmakeProjectManagerPlugin::activeTargetChanged()
+static QmakeProFileNode *buildableFileProFile(Node *node)
+{
+    if (node) {
+        auto subPriFileNode = dynamic_cast<QmakePriFileNode *>(node);
+        if (!subPriFileNode)
+            subPriFileNode = dynamic_cast<QmakePriFileNode *>(node->parentProjectNode());
+        if (subPriFileNode)
+            return subPriFileNode->proFileNode();
+    }
+    return nullptr;
+}
+
+void QmakeProjectManagerPluginPrivate::addLibrary()
+{
+    if (auto editor = qobject_cast<BaseTextEditor *>(Core::EditorManager::currentEditor()))
+        addLibraryImpl(editor->document()->filePath().toString(), editor);
+}
+
+void QmakeProjectManagerPluginPrivate::addLibraryContextMenu()
+{
+    QString projectPath;
+
+    Node *node = ProjectTree::currentNode();
+    if (ContainerNode *cn = node->asContainerNode())
+        projectPath = cn->project()->projectFilePath().toString();
+    else if (dynamic_cast<QmakeProFileNode *>(node))
+        projectPath = node->filePath().toString();
+
+    addLibraryImpl(projectPath, nullptr);
+}
+
+void QmakeProjectManagerPluginPrivate::addLibraryImpl(const QString &fileName, BaseTextEditor *editor)
+{
+    if (fileName.isEmpty())
+        return;
+
+    Internal::AddLibraryWizard wizard(fileName, Core::ICore::dialogParent());
+    if (wizard.exec() != QDialog::Accepted)
+        return;
+
+    if (!editor)
+        editor = qobject_cast<BaseTextEditor *>(Core::EditorManager::openEditor(fileName,
+            Constants::PROFILE_EDITOR_ID, Core::EditorManager::DoNotMakeVisible));
+    if (!editor)
+        return;
+
+    const int endOfDoc = editor->position(EndOfDocPosition);
+    editor->setCursorPosition(endOfDoc);
+    QString snippet = wizard.snippet();
+
+    // add extra \n in case the last line is not empty
+    int line, column;
+    editor->convertPosition(endOfDoc, &line, &column);
+    const int positionInBlock = column - 1;
+    if (!editor->textAt(endOfDoc - positionInBlock, positionInBlock).simplified().isEmpty())
+        snippet = QLatin1Char('\n') + snippet;
+
+    editor->insert(snippet);
+}
+
+void QmakeProjectManagerPluginPrivate::runQMake()
+{
+    runQMakeImpl(SessionManager::startupProject(), nullptr);
+}
+
+void QmakeProjectManagerPluginPrivate::runQMakeContextMenu()
+{
+    runQMakeImpl(ProjectTree::currentProject(), ProjectTree::currentNode());
+}
+
+void QmakeProjectManagerPluginPrivate::runQMakeImpl(Project *p, Node *node)
+{
+    if (!ProjectExplorerPlugin::saveModifiedFiles())
+        return;
+    auto *qmakeProject = qobject_cast<QmakeProject *>(p);
+    QTC_ASSERT(qmakeProject, return);
+
+    if (!qmakeProject->activeTarget() || !qmakeProject->activeTarget()->activeBuildConfiguration())
+        return;
+
+    auto *bc = static_cast<QmakeBuildConfiguration *>(qmakeProject->activeTarget()->activeBuildConfiguration());
+    QMakeStep *qs = bc->qmakeStep();
+    if (!qs)
+        return;
+
+    //found qmakeStep, now use it
+    qs->setForced(true);
+
+    if (node && node != qmakeProject->rootProjectNode())
+        if (auto *profile = dynamic_cast<QmakeProFileNode *>(node))
+            bc->setSubNodeBuild(profile);
+
+    BuildManager::appendStep(qs, tr("QMake"));
+    bc->setSubNodeBuild(nullptr);
+}
+
+void QmakeProjectManagerPluginPrivate::buildFile()
+{
+    Core::IDocument *currentDocument = Core::EditorManager::currentDocument();
+    if (!currentDocument)
+        return;
+
+    const Utils::FilePath file = currentDocument->filePath();
+    Node *n = ProjectTree::nodeForFile(file);
+    FileNode *node  = n ? n->asFileNode() : nullptr;
+    if (!node)
+        return;
+    Project *project = SessionManager::projectForFile(file);
+    if (!project)
+        return;
+    Target *target = project->activeTarget();
+    if (!target)
+        return;
+
+    if (auto bs = qobject_cast<QmakeBuildSystem *>(target->buildSystem()))
+        bs->buildHelper(QmakeBuildSystem::BUILD, true, buildableFileProFile(node), node);
+}
+
+void QmakeProjectManagerPluginPrivate::handleSubDirContextMenu(QmakeBuildSystem::Action action, bool isFileBuild)
+{
+    Node *node = ProjectTree::currentNode();
+
+    QmakeProFileNode *subProjectNode = buildableFileProFile(node);
+    FileNode *fileNode = node ? node->asFileNode() : nullptr;
+    bool buildFilePossible = subProjectNode && fileNode && fileNode->fileType() == FileType::Source;
+    FileNode *buildableFileNode = buildFilePossible ? fileNode : nullptr;
+
+    if (auto bs = qobject_cast<QmakeBuildSystem *>(ProjectTree::currentBuildSystem()))
+        bs->buildHelper(action, isFileBuild, subProjectNode, buildableFileNode);
+}
+
+void QmakeProjectManagerPluginPrivate::activeTargetChanged()
 {
     if (m_previousTarget)
         disconnect(m_previousTarget, &Target::activeBuildConfigurationChanged,
-                   this, &QmakeProjectManagerPlugin::updateRunQMakeAction);
+                   this, &QmakeProjectManagerPluginPrivate::updateRunQMakeAction);
 
-    m_previousTarget = m_previousStartupProject ? m_previousStartupProject->activeTarget() : 0;
+    m_previousTarget = m_previousStartupProject ? m_previousStartupProject->activeTarget() : nullptr;
 
-    if (m_previousTarget)
+    if (m_previousTarget) {
         connect(m_previousTarget, &Target::activeBuildConfigurationChanged,
-                this, &QmakeProjectManagerPlugin::updateRunQMakeAction);
+                this, &QmakeProjectManagerPluginPrivate::updateRunQMakeAction);
+        connect(m_previousTarget, &Target::parsingFinished,
+                this, &QmakeProjectManagerPluginPrivate::updateActions);
+    }
 
     updateRunQMakeAction();
 }
 
-void QmakeProjectManagerPlugin::updateActions()
+void QmakeProjectManagerPluginPrivate::updateActions()
 {
     updateRunQMakeAction();
     updateContextActions();
 }
 
-void QmakeProjectManagerPlugin::updateRunQMakeAction()
+void QmakeProjectManagerPluginPrivate::updateRunQMakeAction()
 {
     bool enable = true;
     if (BuildManager::isBuilding(m_previousStartupProject))
@@ -324,29 +514,31 @@ void QmakeProjectManagerPlugin::updateRunQMakeAction()
     m_runQMakeAction->setEnabled(enable);
 }
 
-void QmakeProjectManagerPlugin::updateContextActions()
+void QmakeProjectManagerPluginPrivate::updateContextActions()
 {
-    Node *node = ProjectTree::currentNode();
+    const Node *node = ProjectTree::currentNode();
     Project *project = ProjectTree::currentProject();
 
-    ContainerNode *containerNode = node ? node->asContainerNode() : nullptr;
-    ProjectNode *proFileNode = containerNode ? containerNode->rootProjectNode() : dynamic_cast<QmakeProFileNode *>(node);
+    const ContainerNode *containerNode = node ? node->asContainerNode() : nullptr;
+    const auto *proFileNode = dynamic_cast<const QmakeProFileNode *>(containerNode ? containerNode->rootProjectNode() : node);
 
     m_addLibraryActionContextMenu->setEnabled(proFileNode);
-    QmakeProject *qmakeProject = qobject_cast<QmakeProject *>(QmakeManager::contextProject());
+    auto *qmakeProject = qobject_cast<QmakeProject *>(project);
     QmakeProFileNode *subProjectNode = nullptr;
+    disableBuildFileMenus();
     if (node) {
-        auto subPriFileNode = dynamic_cast<QmakePriFileNode *>(node);
+        auto subPriFileNode = dynamic_cast<const QmakePriFileNode *>(node);
         if (!subPriFileNode)
             subPriFileNode = dynamic_cast<QmakePriFileNode *>(node->parentProjectNode());
         subProjectNode = subPriFileNode ? subPriFileNode->proFileNode() : nullptr;
-    }
-    FileNode *fileNode = node ? node->asFileNode() : nullptr;
 
-    bool buildFilePossible = subProjectNode && fileNode && (fileNode->fileType() == FileType::Source);
+        if (const FileNode *fileNode = node->asFileNode())
+            enableBuildFileMenus(fileNode->filePath());
+    }
+
     bool subProjectActionsVisible = false;
     if (qmakeProject && subProjectNode) {
-        if (QmakeProFileNode *rootNode = qmakeProject->rootProjectNode())
+        if (ProjectNode *rootNode = qmakeProject->rootProjectNode())
             subProjectActionsVisible = subProjectNode != rootNode;
     }
 
@@ -358,7 +550,6 @@ void QmakeProjectManagerPlugin::updateContextActions()
     m_rebuildSubProjectAction->setParameter(subProjectName);
     m_cleanSubProjectAction->setParameter(subProjectName);
     m_buildSubProjectContextMenu->setParameter(proFileNode ? proFileNode->displayName() : QString());
-    m_buildFileAction->setParameter(buildFilePossible ? fileNode->filePath().fileName() : QString());
 
     auto buildConfiguration = (qmakeProject && qmakeProject->activeTarget()) ?
                 static_cast<QmakeBuildConfiguration *>(qmakeProject->activeTarget()->activeBuildConfiguration()) : nullptr;
@@ -373,7 +564,6 @@ void QmakeProjectManagerPlugin::updateContextActions()
     m_subProjectRebuildSeparator->setVisible(subProjectActionsVisible && isProjectNode);
     m_rebuildSubProjectContextMenu->setVisible(subProjectActionsVisible && isProjectNode);
     m_cleanSubProjectContextMenu->setVisible(subProjectActionsVisible && isProjectNode);
-    m_buildFileAction->setVisible(buildFilePossible);
 
     m_buildSubProjectAction->setEnabled(enabled);
     m_rebuildSubProjectAction->setEnabled(enabled);
@@ -383,11 +573,9 @@ void QmakeProjectManagerPlugin::updateContextActions()
     m_cleanSubProjectContextMenu->setEnabled(enabled && isProjectNode);
     m_runQMakeActionContextMenu->setEnabled(isProjectNode && !isBuilding
                                             && buildConfiguration->qmakeStep());
-    m_buildFileAction->setEnabled(buildFilePossible && !isBuilding);
-    m_buildFileContextMenu->setEnabled(buildFilePossible && !isBuilding);
 }
 
-void QmakeProjectManagerPlugin::buildStateChanged(ProjectExplorer::Project *pro)
+void QmakeProjectManagerPluginPrivate::buildStateChanged(Project *pro)
 {
     if (pro == ProjectTree::currentProject()) {
         updateRunQMakeAction();
@@ -396,22 +584,43 @@ void QmakeProjectManagerPlugin::buildStateChanged(ProjectExplorer::Project *pro)
     }
 }
 
-void QmakeProjectManagerPlugin::updateBuildFileAction()
+void QmakeProjectManagerPluginPrivate::updateBuildFileAction()
+{
+    disableBuildFileMenus();
+    if (IDocument *currentDocument = EditorManager::currentDocument())
+        enableBuildFileMenus(currentDocument->filePath());
+}
+
+void QmakeProjectManagerPluginPrivate::disableBuildFileMenus()
+{
+    m_buildFileAction->setVisible(false);
+    m_buildFileAction->setEnabled(false);
+    m_buildFileAction->setParameter(QString());
+    m_buildFileContextMenu->setEnabled(false);
+}
+
+void QmakeProjectManagerPluginPrivate::enableBuildFileMenus(const Utils::FilePath &file)
 {
     bool visible = false;
     bool enabled = false;
 
-    if (IDocument *currentDocument= EditorManager::currentDocument()) {
-        Utils::FileName file = currentDocument->filePath();
-        Node *node  = SessionManager::nodeForFile(file);
-        Project *project = SessionManager::projectForFile(file);
-        m_buildFileAction->setParameter(file.fileName());
-        visible = qobject_cast<QmakeProject *>(project)
-                && node
-                && dynamic_cast<QmakePriFileNode *>(node->parentProjectNode());
+    if (Node *node = ProjectTree::nodeForFile(file)) {
+        if (Project *project = SessionManager::projectForFile(file)) {
+            if (const FileNode *fileNode = node->asFileNode()) {
+                const FileType type = fileNode->fileType();
+                visible = qobject_cast<QmakeProject *>(project)
+                        && dynamic_cast<QmakePriFileNode *>(node->parentProjectNode())
+                        && (type == FileType::Source || type == FileType::Header);
 
-        enabled = !BuildManager::isBuilding(project);
+                enabled = !BuildManager::isBuilding(project);
+                m_buildFileAction->setParameter(file.fileName());
+            }
+        }
     }
     m_buildFileAction->setVisible(visible);
     m_buildFileAction->setEnabled(enabled);
+    m_buildFileContextMenu->setEnabled(visible && enabled);
 }
+
+} // Internal
+} // QmakeProjectManager

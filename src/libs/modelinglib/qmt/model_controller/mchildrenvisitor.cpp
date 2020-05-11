@@ -34,17 +34,18 @@
 #include "qmt/model/mdependency.h"
 #include "qmt/model/minheritance.h"
 #include "qmt/model/massociation.h"
+#include "qmt/model/mconnection.h"
 
 namespace qmt {
 
 void MChildrenVisitor::visitMElement(MElement *element)
 {
-    Q_UNUSED(element);
+    Q_UNUSED(element)
 }
 
 void MChildrenVisitor::visitMObject(MObject *object)
 {
-    foreach (const Handle<MObject> &handle, object->children()) {
+    for (const Handle<MObject> &handle : object->children()) {
         MObject *child = handle.target();
         if (child)
             child->accept(this);
@@ -100,6 +101,11 @@ void MChildrenVisitor::visitMInheritance(MInheritance *inheritance)
 void MChildrenVisitor::visitMAssociation(MAssociation *association)
 {
     visitMRelation(association);
+}
+
+void MChildrenVisitor::visitMConnection(MConnection *connection)
+{
+    visitMRelation(connection);
 }
 
 } // namespace qmt

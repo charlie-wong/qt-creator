@@ -26,46 +26,34 @@
 #include "basehoverhandler.h"
 #include "texteditor.h"
 
-#include <coreplugin/icore.h>
+#include <utils/executeondestruction.h>
+#include <utils/qtcassert.h>
 #include <utils/tooltip/tooltip.h>
 
-#include <QPoint>
-
-using namespace Core;
+#include <QVBoxLayout>
 
 namespace TextEditor {
 
-BaseHoverHandler::BaseHoverHandler() : m_diagnosticTooltip(false), m_priority(-1)
+BaseHoverHandler::~BaseHoverHandler() = default;
+
+void BaseHoverHandler::showToolTip(TextEditorWidget *widget, const QPoint &point)
 {
-}
-
-BaseHoverHandler::~BaseHoverHandler()
-{}
-
-void BaseHoverHandler::showToolTip(TextEditorWidget *widget, const QPoint &point, int pos)
-{
-    widget->setContextHelpId(QString());
-
-    process(widget, pos);
     operateTooltip(widget, point);
 }
 
-int BaseHoverHandler::checkToolTip(TextEditorWidget *widget, int pos)
+void BaseHoverHandler::checkPriority(TextEditorWidget *widget,
+                                     int pos,
+                                     ReportPriority report)
 {
-    widget->setContextHelpId(QString());
+    widget->setContextHelpItem({});
 
-    process(widget, pos);
-
-    return priority();
+    process(widget, pos, report);
 }
 
 int BaseHoverHandler::priority() const
 {
     if (m_priority >= 0)
         return m_priority;
-
-    if (isDiagnosticTooltip())
-        return Priority_Diagnostic;
 
     if (lastHelpItemIdentified().isValid())
         return Priority_Help;
@@ -81,21 +69,30 @@ void BaseHoverHandler::setPriority(int priority)
     m_priority = priority;
 }
 
-QString BaseHoverHandler::contextHelpId(TextEditorWidget *widget, int pos)
+void BaseHoverHandler::contextHelpId(TextEditorWidget *widget,
+                                     int pos,
+                                     const Core::IContext::HelpCallback &callback)
 {
+    m_isContextHelpRequest = true;
+
     // If the tooltip is visible and there is a help match, this match is used to update
     // the help id. Otherwise, let the identification process happen.
-    if (!Utils::ToolTip::isVisible() || !lastHelpItemIdentified().isValid())
-        process(widget, pos);
+    if (!Utils::ToolTip::isVisible() || !lastHelpItemIdentified().isValid()) {
+        process(widget, pos, [this, widget = QPointer<TextEditorWidget>(widget), callback](int) {
+            if (widget)
+                propagateHelpId(widget, callback);
+        });
+    } else {
+        propagateHelpId(widget, callback);
+    }
 
-    if (lastHelpItemIdentified().isValid())
-        return lastHelpItemIdentified().helpId();
-    return QString();
+    m_isContextHelpRequest = false;
 }
 
-void BaseHoverHandler::setToolTip(const QString &tooltip)
+void BaseHoverHandler::setToolTip(const QString &tooltip, Qt::TextFormat format)
 {
     m_toolTip = tooltip;
+    m_textFormat = format;
 }
 
 const QString &BaseHoverHandler::toolTip() const
@@ -103,75 +100,79 @@ const QString &BaseHoverHandler::toolTip() const
     return m_toolTip;
 }
 
-void BaseHoverHandler::appendToolTip(const QString &extension)
-{
-    m_toolTip.append(extension);
-}
-
-void BaseHoverHandler::setIsDiagnosticTooltip(bool isDiagnosticTooltip)
-{
-    m_diagnosticTooltip = isDiagnosticTooltip;
-}
-
-bool BaseHoverHandler::isDiagnosticTooltip() const
-{
-    return m_diagnosticTooltip;
-}
-
-void BaseHoverHandler::setLastHelpItemIdentified(const HelpItem &help)
+void BaseHoverHandler::setLastHelpItemIdentified(const Core::HelpItem &help)
 {
     m_lastHelpItemIdentified = help;
 }
 
-const HelpItem &BaseHoverHandler::lastHelpItemIdentified() const
+const Core::HelpItem &BaseHoverHandler::lastHelpItemIdentified() const
 {
     return m_lastHelpItemIdentified;
 }
 
-void BaseHoverHandler::clear()
+bool BaseHoverHandler::isContextHelpRequest() const
 {
-    m_diagnosticTooltip = false;
+    return m_isContextHelpRequest;
+}
+
+void BaseHoverHandler::propagateHelpId(TextEditorWidget *widget,
+                                       const Core::IContext::HelpCallback &callback)
+{
+    const Core::HelpItem contextHelp = lastHelpItemIdentified();
+    widget->setContextHelpItem(contextHelp);
+    callback(contextHelp);
+}
+
+void BaseHoverHandler::process(TextEditorWidget *widget, int pos, ReportPriority report)
+{
     m_toolTip.clear();
     m_priority = -1;
-    m_lastHelpItemIdentified = HelpItem();
+    m_lastHelpItemIdentified = Core::HelpItem();
+
+    identifyMatch(widget, pos, report);
 }
 
-void BaseHoverHandler::process(TextEditorWidget *widget, int pos)
+void BaseHoverHandler::identifyMatch(TextEditorWidget *editorWidget, int pos, ReportPriority report)
 {
-    clear();
-    identifyMatch(widget, pos);
-    decorateToolTip();
-}
+    Utils::ExecuteOnDestruction reportPriority([this, report](){ report(priority()); });
 
-void BaseHoverHandler::identifyMatch(TextEditorWidget *editorWidget, int pos)
-{
     QString tooltip = editorWidget->extraSelectionTooltip(pos);
     if (!tooltip.isEmpty())
         setToolTip(tooltip);
 }
 
-void BaseHoverHandler::decorateToolTip()
-{
-    if (Qt::mightBeRichText(toolTip()))
-        setToolTip(toolTip().toHtmlEscaped());
-
-    if (!isDiagnosticTooltip() && lastHelpItemIdentified().isValid()) {
-        const QString &contents = lastHelpItemIdentified().extractContent(false);
-        if (!contents.isEmpty()) {
-            setToolTip(toolTip().toHtmlEscaped());
-            appendToolTip(contents);
-        }
-    }
-}
-
 void BaseHoverHandler::operateTooltip(TextEditorWidget *editorWidget, const QPoint &point)
 {
-    if (m_toolTip.isEmpty())
+    const QVariant helpItem = m_lastHelpItemIdentified.isEmpty()
+                                  ? QVariant()
+                                  : QVariant::fromValue(m_lastHelpItemIdentified);
+    const bool extractHelp = m_lastHelpItemIdentified.isValid()
+                             && !m_lastHelpItemIdentified.isFuzzyMatch();
+    const QString helpContents = extractHelp ? m_lastHelpItemIdentified.firstParagraph()
+                                             : QString();
+    if (m_toolTip.isEmpty() && helpContents.isEmpty()) {
         Utils::ToolTip::hide();
-    else
-        Utils::ToolTip::show(point, m_toolTip, editorWidget, m_lastHelpItemIdentified.isValid()
-                             ? m_lastHelpItemIdentified.helpId()
-                             : QString());
+    } else {
+        if (helpContents.isEmpty()) {
+            Utils::ToolTip::show(point, m_toolTip, m_textFormat, editorWidget, helpItem);
+        } else if (m_toolTip.isEmpty()) {
+            Utils::ToolTip::show(point, helpContents, Qt::RichText, editorWidget, helpItem);
+        } else {
+            // separate labels for tool tip text and help,
+            // so the text format (plain, rich, markdown) can be handled differently
+            auto layout = new QVBoxLayout;
+            layout->setContentsMargins(0, 0, 0, 0);
+            auto label = new QLabel;
+            label->setObjectName("qcWidgetTipTopLabel");
+            label->setTextFormat(m_textFormat);
+            label->setText(m_toolTip);
+            layout->addWidget(label);
+            auto helpContentLabel = new QLabel("<hr/>" + helpContents);
+            helpContentLabel->setObjectName("qcWidgetTipHelpLabel");
+            layout->addWidget(helpContentLabel);
+            Utils::ToolTip::show(point, layout, editorWidget, helpItem);
+        }
+    }
 }
 
 } // namespace TextEditor

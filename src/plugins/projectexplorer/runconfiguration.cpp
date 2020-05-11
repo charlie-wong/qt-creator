@@ -25,48 +25,46 @@
 
 #include "runconfiguration.h"
 
-#include "project.h"
-#include "target.h"
-#include "toolchain.h"
 #include "abi.h"
 #include "buildconfiguration.h"
+#include "buildsystem.h"
 #include "environmentaspect.h"
 #include "kitinformation.h"
-#include "runnables.h"
-
-#include <extensionsystem/pluginmanager.h>
+#include "kitinformation.h"
+#include "project.h"
+#include "projectexplorer.h"
+#include "projectnodes.h"
+#include "runconfigurationaspects.h"
+#include "runcontrol.h"
+#include "session.h"
+#include "target.h"
+#include "toolchain.h"
 
 #include <utils/algorithm.h>
 #include <utils/checkablemessagebox.h>
+#include <utils/detailswidget.h>
 #include <utils/outputformatter.h>
 #include <utils/qtcassert.h>
 #include <utils/utilsicons.h>
 
-#include <coreplugin/icore.h>
 #include <coreplugin/icontext.h>
+#include <coreplugin/icore.h>
+#include <coreplugin/variablechooser.h>
 
 #include <QDir>
+#include <QFormLayout>
+#include <QHash>
 #include <QPushButton>
 #include <QTimer>
 #include <QLoggingCategory>
 #include <QSettings>
 
-#ifdef Q_OS_OSX
-#include <ApplicationServices/ApplicationServices.h>
-#endif
-
-#if defined (WITH_JOURNALD)
-#include "journaldwatcher.h"
-#endif
-
 using namespace Utils;
 using namespace ProjectExplorer::Internal;
 
-namespace {
-Q_LOGGING_CATEGORY(statesLog, "qtc.projectmanager.states")
-}
-
 namespace ProjectExplorer {
+
+const char BUILD_KEY[] = "ProjectExplorer.RunConfiguration.BuildKey";
 
 ///////////////////////////////////////////////////////////////////////
 //
@@ -74,14 +72,19 @@ namespace ProjectExplorer {
 //
 ///////////////////////////////////////////////////////////////////////
 
-ISettingsAspect *ISettingsAspect::clone() const
+ISettingsAspect::ISettingsAspect() = default;
+
+QWidget *ISettingsAspect::createConfigWidget() const
 {
-    ISettingsAspect *other = create();
-    QVariantMap data;
-    toMap(data);
-    other->fromMap(data);
-    return other;
+    QTC_ASSERT(m_configWidgetCreator, return nullptr);
+    return m_configWidgetCreator();
 }
+
+void ISettingsAspect::setConfigWidgetCreator(const ConfigWidgetCreator &configWidgetCreator)
+{
+    m_configWidgetCreator = configWidgetCreator;
+}
+
 
 ///////////////////////////////////////////////////////////////////////
 //
@@ -89,78 +92,54 @@ ISettingsAspect *ISettingsAspect::clone() const
 //
 ///////////////////////////////////////////////////////////////////////
 
-IRunConfigurationAspect::IRunConfigurationAspect(RunConfiguration *runConfig) :
-    m_runConfiguration(runConfig)
-{ }
+GlobalOrProjectAspect::GlobalOrProjectAspect() = default;
 
-IRunConfigurationAspect::~IRunConfigurationAspect()
+GlobalOrProjectAspect::~GlobalOrProjectAspect()
 {
     delete m_projectSettings;
 }
 
-/*!
-    Returns the widget used to configure this run configuration. Ownership is
-    transferred to the caller.
-*/
-
-RunConfigWidget *IRunConfigurationAspect::createConfigurationWidget() const
-{
-    return m_runConfigWidgetCreator ? m_runConfigWidgetCreator() : nullptr;
-}
-
-void IRunConfigurationAspect::setProjectSettings(ISettingsAspect *settings)
+void GlobalOrProjectAspect::setProjectSettings(ISettingsAspect *settings)
 {
     m_projectSettings = settings;
 }
 
-void IRunConfigurationAspect::setGlobalSettings(ISettingsAspect *settings)
+void GlobalOrProjectAspect::setGlobalSettings(ISettingsAspect *settings)
 {
     m_globalSettings = settings;
 }
 
-void IRunConfigurationAspect::setUsingGlobalSettings(bool value)
+void GlobalOrProjectAspect::setUsingGlobalSettings(bool value)
 {
     m_useGlobalSettings = value;
 }
 
-ISettingsAspect *IRunConfigurationAspect::currentSettings() const
+ISettingsAspect *GlobalOrProjectAspect::currentSettings() const
 {
    return m_useGlobalSettings ? m_globalSettings : m_projectSettings;
 }
 
-void IRunConfigurationAspect::fromMap(const QVariantMap &map)
+void GlobalOrProjectAspect::fromMap(const QVariantMap &map)
 {
-    m_projectSettings->fromMap(map);
+    if (m_projectSettings)
+        m_projectSettings->fromMap(map);
     m_useGlobalSettings = map.value(m_id.toString() + QLatin1String(".UseGlobalSettings"), true).toBool();
 }
 
-void IRunConfigurationAspect::toMap(QVariantMap &map) const
+void GlobalOrProjectAspect::toMap(QVariantMap &map) const
 {
-    m_projectSettings->toMap(map);
+    if (m_projectSettings)
+        m_projectSettings->toMap(map);
     map.insert(m_id.toString() + QLatin1String(".UseGlobalSettings"), m_useGlobalSettings);
 }
 
-void IRunConfigurationAspect::setRunConfigWidgetCreator(const RunConfigWidgetCreator &runConfigWidgetCreator)
-{
-    m_runConfigWidgetCreator = runConfigWidgetCreator;
-}
-
-IRunConfigurationAspect *IRunConfigurationAspect::clone(RunConfiguration *runConfig) const
-{
-    IRunConfigurationAspect *other = create(runConfig);
-    if (m_projectSettings)
-        other->m_projectSettings = m_projectSettings->clone();
-    other->m_globalSettings = m_globalSettings;
-    other->m_useGlobalSettings = m_useGlobalSettings;
-    return other;
-}
-
-void IRunConfigurationAspect::resetProjectToGlobalSettings()
+void GlobalOrProjectAspect::resetProjectToGlobalSettings()
 {
     QTC_ASSERT(m_globalSettings, return);
     QVariantMap map;
     m_globalSettings->toMap(map);
-    m_projectSettings->fromMap(map);
+    if (m_projectSettings)
+        m_projectSettings->fromMap(map);
 }
 
 
@@ -171,145 +150,189 @@ void IRunConfigurationAspect::resetProjectToGlobalSettings()
     A run configuration specifies how a target should be run, while a runner
     does the actual running.
 
-    All RunControls and the target hold a shared pointer to the run
-    configuration. That is, the lifetime of the run configuration might exceed
-    the life of the target.
-    The user might still have a RunControl running (or output tab of that RunControl open)
-    and yet unloaded the target.
+    The target owns the RunConfiguraitons and a RunControl will need to copy all
+    necessary data as the RunControl may continue to exist after the RunConfiguration
+    has been destroyed.
 
-    Also, a run configuration might be already removed from the list of run
-    configurations
-    for a target, but still be runnable via the output tab.
+    A RunConfiguration disables itself if the project has no parsing
+    data available. The disabledReason() method can be used to get a user-facing string
+    describing why the RunConfiguration considers itself unfit for use.
 */
 
-RunConfiguration::RunConfiguration(Target *target, Core::Id id) :
-    ProjectConfiguration(target, id)
+static std::vector<RunConfiguration::AspectFactory> theAspectFactories;
+
+RunConfiguration::RunConfiguration(Target *target, Core::Id id)
+    : ProjectConfiguration(target, id)
 {
-    Q_ASSERT(target);
-    ctor();
+    QTC_CHECK(target && target == this->target());
+    connect(target, &Target::parsingFinished, this, &RunConfiguration::update);
 
-    addExtraAspects();
-}
-
-RunConfiguration::RunConfiguration(Target *target, RunConfiguration *source) :
-    ProjectConfiguration(target, source)
-{
-    Q_ASSERT(target);
-    ctor();
-    foreach (IRunConfigurationAspect *aspect, source->m_aspects) {
-        IRunConfigurationAspect *clone = aspect->clone(this);
-        if (clone)
-            m_aspects.append(clone);
-    }
-}
-
-RunConfiguration::~RunConfiguration()
-{
-    qDeleteAll(m_aspects);
-}
-
-void RunConfiguration::addExtraAspects()
-{
-    foreach (IRunControlFactory *factory, ExtensionSystem::PluginManager::getObjects<IRunControlFactory>())
-        addExtraAspect(factory->createRunConfigurationAspect(this));
-}
-
-void RunConfiguration::addExtraAspect(IRunConfigurationAspect *aspect)
-{
-    if (aspect)
-        m_aspects += aspect;
-}
-
-void RunConfiguration::ctor()
-{
-    connect(this, &RunConfiguration::enabledChanged,
-            this, &RunConfiguration::requestRunActionsUpdate);
-
-    Utils::MacroExpander *expander = macroExpander();
-    expander->setDisplayName(tr("Run Settings"));
-    expander->setAccumulating(true);
-    expander->registerSubProvider([this]() -> Utils::MacroExpander * {
-        BuildConfiguration *bc = target()->activeBuildConfiguration();
-        return bc ? bc->macroExpander() : target()->macroExpander();
+    m_expander.setDisplayName(tr("Run Settings"));
+    m_expander.setAccumulating(true);
+    m_expander.registerSubProvider([target] {
+        BuildConfiguration *bc = target->activeBuildConfiguration();
+        return bc ? bc->macroExpander() : target->macroExpander();
     });
-    expander->registerPrefix("CurrentRun:Env", tr("Variables in the current run environment"),
+    m_expander.registerPrefix("CurrentRun:Env", tr("Variables in the current run environment"),
                              [this](const QString &var) {
-        const auto envAspect = extraAspect<EnvironmentAspect>();
-        return envAspect ? envAspect->environment().value(var) : QString();
+        const auto envAspect = aspect<EnvironmentAspect>();
+        return envAspect ? envAspect->environment().expandedValueForKey(var) : QString();
     });
-    expander->registerVariable(Constants::VAR_CURRENTRUN_NAME,
+
+    m_expander.registerVariable(Constants::VAR_CURRENTRUN_WORKINGDIR,
+                               tr("The currently active run configuration's working directory"),
+                               [this] {
+        const auto wdAspect = aspect<WorkingDirectoryAspect>();
+        return wdAspect ? wdAspect->workingDirectory(&m_expander).toString() : QString();
+    });
+
+    m_expander.registerVariable(Constants::VAR_CURRENTRUN_NAME,
             QCoreApplication::translate("ProjectExplorer", "The currently active run configuration's name."),
             [this] { return displayName(); }, false);
+
+    m_commandLineGetter = [this] {
+        FilePath executable;
+        if (const auto executableAspect = aspect<ExecutableAspect>())
+            executable = executableAspect->executable();
+        QString arguments;
+        if (const auto argumentsAspect = aspect<ArgumentsAspect>())
+            arguments = argumentsAspect->arguments(macroExpander());
+        return CommandLine{executable, arguments, CommandLine::Raw};
+    };
 }
 
-/*!
-    Checks whether a run configuration is enabled.
-*/
-
-bool RunConfiguration::isEnabled() const
-{
-    return true;
-}
+RunConfiguration::~RunConfiguration() = default;
 
 QString RunConfiguration::disabledReason() const
 {
-    return QString();
+    BuildSystem *bs = activeBuildSystem();
+    return bs ? bs->disabledReason(m_buildKey) : tr("No build system active");
 }
 
-bool RunConfiguration::isConfigured() const
+bool RunConfiguration::isEnabled() const
 {
-    return true;
+    BuildSystem *bs = activeBuildSystem();
+    return bs && bs->hasParsingData();
 }
 
-RunConfiguration::ConfigurationState RunConfiguration::ensureConfigured(QString *errorMessage)
+QWidget *RunConfiguration::createConfigurationWidget()
 {
-    if (isConfigured())
-        return Configured;
-    if (errorMessage)
-        *errorMessage = tr("Unknown error.");
-    return UnConfigured;
+    auto widget = new QWidget;
+    {
+        LayoutBuilder builder(widget);
+        for (ProjectConfigurationAspect *aspect : m_aspects) {
+            if (aspect->isVisible())
+                aspect->addToLayout(builder.startNewRow());
+        }
+    }
+
+    Core::VariableChooser::addSupportForChildWidgets(widget, &m_expander);
+
+    auto detailsWidget = new Utils::DetailsWidget;
+    detailsWidget->setState(DetailsWidget::NoSummary);
+    detailsWidget->setWidget(widget);
+    return detailsWidget;
 }
 
-
-BuildConfiguration *RunConfiguration::activeBuildConfiguration() const
+void RunConfiguration::addAspectFactory(const AspectFactory &aspectFactory)
 {
-    if (!target())
-        return nullptr;
-    return target()->activeBuildConfiguration();
+    theAspectFactories.push_back(aspectFactory);
 }
 
-Target *RunConfiguration::target() const
+QMap<Core::Id, QVariantMap> RunConfiguration::aspectData() const
 {
-    return static_cast<Target *>(parent());
+    QMap<Core::Id, QVariantMap> data;
+    for (ProjectConfigurationAspect *aspect : m_aspects)
+        aspect->toMap(data[aspect->id()]);
+    return data;
+}
+
+BuildSystem *RunConfiguration::activeBuildSystem() const
+{
+    return target()->buildSystem();
+}
+
+void RunConfiguration::setUpdater(const Updater &updater)
+{
+    m_updater = updater;
+}
+
+Task RunConfiguration::createConfigurationIssue(const QString &description) const
+{
+    return BuildSystemTask(Task::Error, description);
 }
 
 QVariantMap RunConfiguration::toMap() const
 {
     QVariantMap map = ProjectConfiguration::toMap();
 
-    foreach (IRunConfigurationAspect *aspect, m_aspects)
-        aspect->toMap(map);
+    map.insert(BUILD_KEY, m_buildKey);
+
+    // FIXME: Remove this id mangling, e.g. by using a separate entry for the build key.
+    if (!m_buildKey.isEmpty()) {
+        const Core::Id mangled = id().withSuffix(m_buildKey);
+        map.insert(settingsIdKey(), mangled.toSetting());
+    }
 
     return map;
 }
 
-Abi RunConfiguration::abi() const
+void RunConfiguration::setCommandLineGetter(const CommandLineGetter &cmdGetter)
 {
-    BuildConfiguration *bc = target()->activeBuildConfiguration();
-    if (!bc)
-        return Abi::hostAbi();
-    ToolChain *tc = ToolChainKitInformation::toolChain(target()->kit(), Constants::CXX_LANGUAGE_ID);
-    if (!tc)
-        return Abi::hostAbi();
-    return tc->targetAbi();
+    m_commandLineGetter = cmdGetter;
+}
+
+CommandLine RunConfiguration::commandLine() const
+{
+    return m_commandLineGetter();
+}
+
+void RunConfiguration::update()
+{
+    if (m_updater)
+        m_updater();
+
+    emit enabledChanged();
+
+    const bool isActive = target()->isActive() && target()->activeRunConfiguration() == this;
+
+    if (isActive && project() == SessionManager::startupProject())
+        ProjectExplorerPlugin::updateRunActions();
+}
+
+BuildTargetInfo RunConfiguration::buildTargetInfo() const
+{
+    BuildSystem *bs = target()->buildSystem();
+    QTC_ASSERT(bs, return {});
+    return bs->buildTarget(m_buildKey);
+}
+
+ProjectNode *RunConfiguration::productNode() const
+{
+    return project()->rootProjectNode()->findProjectNode([this](const ProjectNode *candidate) {
+        return candidate->buildKey() == buildKey();
+    });
 }
 
 bool RunConfiguration::fromMap(const QVariantMap &map)
 {
-    foreach (IRunConfigurationAspect *aspect, m_aspects)
-        aspect->fromMap(map);
+    if (!ProjectConfiguration::fromMap(map))
+        return false;
 
-    return ProjectConfiguration::fromMap(map);
+    m_buildKey = map.value(BUILD_KEY).toString();
+
+    if (m_buildKey.isEmpty()) {
+        const Core::Id mangledId = Core::Id::fromSetting(map.value(settingsIdKey()));
+        m_buildKey = mangledId.suffixAfter(id());
+
+        // Hack for cmake projects 4.10 -> 4.11.
+        const QString magicSeparator = "///::///";
+        const int magicIndex = m_buildKey.indexOf(magicSeparator);
+        if (magicIndex != -1)
+            m_buildKey = m_buildKey.mid(magicIndex + magicSeparator.length());
+    }
+
+    return  true;
 }
 
 /*!
@@ -325,22 +348,6 @@ bool RunConfiguration::fromMap(const QVariantMap &map)
 */
 
 /*!
-    Returns extra aspects.
-
-    \sa ProjectExplorer::IRunConfigurationAspect
-*/
-
-QList<IRunConfigurationAspect *> RunConfiguration::extraAspects() const
-{
-    return m_aspects;
-}
-
-IRunConfigurationAspect *RunConfiguration::extraAspect(Core::Id id) const
-{
-    return Utils::findOrDefault(m_aspects, Utils::equal(&IRunConfigurationAspect::id, id));
-}
-
-/*!
     \internal
 
     \class ProjectExplorer::Runnable
@@ -350,7 +357,7 @@ IRunConfigurationAspect *RunConfiguration::extraAspect(Core::Id id) const
 
     A target specific \l RunConfiguration implementation can specify
     what information it considers necessary to execute a process
-    on the target. Target specific) \n IRunControlFactory implementation
+    on the target. Target specific) \n RunWorker implementation
     can use that information either unmodified or tweak it or ignore
     it when setting up a RunControl.
 
@@ -365,14 +372,14 @@ IRunConfigurationAspect *RunConfiguration::extraAspect(Core::Id id) const
 
 Runnable RunConfiguration::runnable() const
 {
-    return Runnable();
+    Runnable r;
+    r.setCommandLine(commandLine());
+    if (auto workingDirectoryAspect = aspect<WorkingDirectoryAspect>())
+        r.workingDirectory = workingDirectoryAspect->workingDirectory(macroExpander()).toString();
+    if (auto environmentAspect = aspect<EnvironmentAspect>())
+        r.environment = environmentAspect->environment();
+    return r;
 }
-
-Utils::OutputFormatter *RunConfiguration::createOutputFormatter() const
-{
-    return new Utils::OutputFormatter();
-}
-
 
 /*!
     \class ProjectExplorer::IRunConfigurationFactory
@@ -405,1070 +412,198 @@ Utils::OutputFormatter *RunConfiguration::createOutputFormatter() const
     Translates the types to names to display to the user.
 */
 
-IRunConfigurationFactory::IRunConfigurationFactory(QObject *parent) :
-    QObject(parent)
+static QList<RunConfigurationFactory *> g_runConfigurationFactories;
+
+RunConfigurationFactory::RunConfigurationFactory()
 {
+    g_runConfigurationFactories.append(this);
 }
 
-RunConfiguration *IRunConfigurationFactory::create(Target *parent, Core::Id id)
+RunConfigurationFactory::~RunConfigurationFactory()
 {
-    if (!canCreate(parent, id))
-        return nullptr;
-    RunConfiguration *rc = doCreate(parent, id);
-    if (!rc)
-        return nullptr;
-    return rc;
+    g_runConfigurationFactories.removeOne(this);
 }
 
-RunConfiguration *IRunConfigurationFactory::restore(Target *parent, const QVariantMap &map)
+QString RunConfigurationFactory::decoratedTargetName(const QString &targetName, Target *target)
 {
-    if (!canRestore(parent, map))
-        return nullptr;
-    RunConfiguration *rc = doRestore(parent, map);
-    if (!rc->fromMap(map)) {
-        delete rc;
-        rc = nullptr;
-    }
-    return rc;
-}
-
-IRunConfigurationFactory *IRunConfigurationFactory::find(Target *parent, const QVariantMap &map)
-{
-    return ExtensionSystem::PluginManager::getObject<IRunConfigurationFactory>(
-        [&parent, &map](IRunConfigurationFactory *factory) {
-            return factory->canRestore(parent, map);
-        });
-}
-
-IRunConfigurationFactory *IRunConfigurationFactory::find(Target *parent, RunConfiguration *rc)
-{
-    return ExtensionSystem::PluginManager::getObject<IRunConfigurationFactory>(
-        [&parent, rc](IRunConfigurationFactory *factory) {
-            return factory->canClone(parent, rc);
-        });
-}
-
-QList<IRunConfigurationFactory *> IRunConfigurationFactory::find(Target *parent)
-{
-    return ExtensionSystem::PluginManager::getObjects<IRunConfigurationFactory>(
-        [&parent](IRunConfigurationFactory *factory) {
-            return !factory->availableCreationIds(parent).isEmpty();
-        });
-}
-
-/*!
-    \class ProjectExplorer::IRunControlFactory
-
-    \brief The IRunControlFactory class creates RunControl objects matching a
-    run configuration.
-*/
-
-/*!
-    \fn RunConfigWidget *ProjectExplorer::IRunConfigurationAspect::createConfigurationWidget()
-
-    Returns a widget used to configure this runner. Ownership is transferred to
-    the caller.
-
-    Returns null if @p \a runConfiguration is not suitable for RunControls from this
-    factory, or no user-accessible
-    configuration is required.
-*/
-
-IRunControlFactory::IRunControlFactory(QObject *parent)
-    : QObject(parent)
-{
-}
-
-/*!
-    Returns an IRunConfigurationAspect to carry options for RunControls this
-    factory can create.
-
-    If no extra options are required, it is allowed to return null like the
-    default implementation does. This function is intended to be called from the
-    RunConfiguration constructor, so passing a RunConfiguration pointer makes
-    no sense because that object is under construction at the time.
-*/
-
-IRunConfigurationAspect *IRunControlFactory::createRunConfigurationAspect(RunConfiguration *rc)
-{
-    Q_UNUSED(rc);
-    return nullptr;
-}
-
-/*!
-    \class ProjectExplorer::RunControl
-    \brief The RunControl class instances represent one item that is run.
-*/
-
-/*!
-    \fn QIcon ProjectExplorer::RunControl::icon() const
-    Returns the icon to be shown in the Outputwindow.
-
-    TODO the icon differs currently only per "mode", so this is more flexible
-    than it needs to be.
-*/
-
-namespace Internal {
-
-enum class RunWorkerState
-{
-    Initialized, Starting, Running, Stopping, Done, Failed
-};
-
-static QString stateName(RunWorkerState s)
-{
-#    define SN(x) case x: return QLatin1String(#x);
-    switch (s) {
-        SN(RunWorkerState::Initialized)
-        SN(RunWorkerState::Starting)
-        SN(RunWorkerState::Running)
-        SN(RunWorkerState::Stopping)
-        SN(RunWorkerState::Done)
-        SN(RunWorkerState::Failed)
-    }
-    return QLatin1String("<unknown>");
-#    undef SN
-}
-
-class RunWorkerPrivate : public QObject
-{
-public:
-    RunWorkerPrivate(RunWorker *runWorker, RunControl *runControl);
-
-    bool canStart() const;
-    void timerEvent(QTimerEvent *ev) override;
-
-    RunWorker *q;
-    RunWorkerState state = RunWorkerState::Initialized;
-    RunControl *runControl;
-    QList<RunWorker *> dependencies;
     QString displayName;
-
-    QVariantMap data;
-    int startWatchdogInterval = 0;
-    int startWatchdogTimerId = -1;
-    int stopWatchdogInterval = 0; // 5000;
-    int stopWatchdogTimerId = -1;
-};
-
-enum class RunControlState
-{
-    Initialized,      // Default value after creation.
-    Starting,         // Actual process/tool starts.
-    Running,          // All good and running.
-    Stopping,         // initiateStop() was called, stop application/tool
-    Stopped,          // all good, but stopped. Can possibly be re-started
-};
-
-static QString stateName(RunControlState s)
-{
-#    define SN(x) case x: return QLatin1String(#x);
-    switch (s) {
-        SN(RunControlState::Initialized)
-        SN(RunControlState::Starting)
-        SN(RunControlState::Running)
-        SN(RunControlState::Stopping)
-        SN(RunControlState::Stopped)
-    }
-    return QLatin1String("<unknown>");
-#    undef SN
-}
-
-class RunControlPrivate : public QObject
-{
-public:
-    RunControlPrivate(RunControl *parent, RunConfiguration *runConfiguration, Core::Id mode)
-        : q(parent), runMode(mode), runConfiguration(runConfiguration)
-    {
-        icon = Icons::RUN_SMALL_TOOLBAR;
-        if (runConfiguration) {
-            runnable = runConfiguration->runnable();
-            displayName  = runConfiguration->displayName();
-            outputFormatter = runConfiguration->createOutputFormatter();
-            device = DeviceKitInformation::device(runConfiguration->target()->kit());
-            project = runConfiguration->target()->project();
+    if (!targetName.isEmpty())
+        displayName = QFileInfo(targetName).completeBaseName();
+    Core::Id devType = DeviceTypeKitAspect::deviceTypeId(target->kit());
+    if (devType != Constants::DESKTOP_DEVICE_TYPE) {
+        if (IDevice::ConstPtr dev = DeviceKitAspect::device(target->kit())) {
+            if (displayName.isEmpty()) {
+                //: Shown in Run configuration if no executable is given, %1 is device name
+                displayName = RunConfiguration::tr("Run on %1").arg(dev->displayName());
+            } else {
+                //: Shown in Run configuration, Add menu: "name of runnable (on device name)"
+                displayName = RunConfiguration::tr("%1 (on %2)").arg(displayName, dev->displayName());
+            }
         }
     }
+    return displayName;
+}
 
-    ~RunControlPrivate()
-    {
-        QTC_CHECK(state == RunControlState::Stopped || state == RunControlState::Initialized);
-        qDeleteAll(m_workers);
-        delete outputFormatter;
-    }
-
-    Q_ENUM(RunControlState)
-
-    void checkState(RunControlState expectedState);
-    void setState(RunControlState state);
-
-    void debugMessage(const QString &msg);
-
-    void initiateStart();
-    void continueStart();
-    void initiateStop();
-    void continueStop();
-
-    void onWorkerStarted(RunWorker *worker);
-    void onWorkerStopped(RunWorker *worker);
-    void onWorkerFailed(RunWorker *worker, const QString &msg);
-
-    void showError(const QString &msg);
-
-    static bool isAllowedTransition(RunControlState from, RunControlState to);
-
-    RunControl *q;
-    QString displayName;
-    Runnable runnable;
-    IDevice::ConstPtr device;
-    Connection connection;
-    Core::Id runMode;
-    Utils::Icon icon;
-    const QPointer<RunConfiguration> runConfiguration; // Not owned.
-    QPointer<Project> project; // Not owned.
-    Utils::OutputFormatter *outputFormatter = nullptr;
-    std::function<bool(bool*)> promptToStop;
-
-    // A handle to the actual application process.
-    Utils::ProcessHandle applicationProcessHandle;
-
-    RunControlState state = RunControlState::Initialized;
-    bool supportsReRunning = true;
-
-    QList<QPointer<RunWorker>> m_workers;
-
-#ifdef Q_OS_OSX
-    // This is used to bring apps in the foreground on Mac
-    int foregroundCount;
-#endif
-};
-
-} // Internal
-
-using namespace Internal;
-
-RunControl::RunControl(RunConfiguration *runConfiguration, Core::Id mode) :
-    d(new RunControlPrivate(this, runConfiguration, mode))
+QList<RunConfigurationCreationInfo>
+RunConfigurationFactory::availableCreators(Target *target) const
 {
-#ifdef WITH_JOURNALD
-    JournaldWatcher::instance()->subscribe(this, [this](const JournaldWatcher::LogEntry &entry) {
-        if (entry.value("_MACHINE_ID") != JournaldWatcher::instance()->machineId())
-            return;
-
-        const QByteArray pid = entry.value("_PID");
-        if (pid.isEmpty())
-            return;
-
-        const qint64 pidNum = static_cast<qint64>(QString::fromLatin1(pid).toInt());
-        if (pidNum != d->applicationProcessHandle.pid())
-            return;
-
-        const QString message = QString::fromUtf8(entry.value("MESSAGE")) + "\n";
-        appendMessageRequested(this, message, Utils::OutputFormat::LogMessageFormat);
+    const QList<BuildTargetInfo> buildTargets = target->buildSystem()->applicationTargets();
+    const bool hasAnyQtcRunnable = Utils::anyOf(buildTargets,
+                                            Utils::equal(&BuildTargetInfo::isQtcRunnable, true));
+    return Utils::transform(buildTargets, [&](const BuildTargetInfo &ti) {
+        QString displayName = ti.displayName;
+        if (displayName.isEmpty())
+            displayName = decoratedTargetName(ti.buildKey, target);
+        else if (m_decorateDisplayNames)
+            displayName = decoratedTargetName(displayName, target);
+        RunConfigurationCreationInfo rci;
+        rci.factory = this;
+        rci.id = m_runConfigBaseId;
+        rci.buildKey = ti.buildKey;
+        rci.projectFilePath = ti.projectFilePath;
+        rci.displayName = displayName;
+        rci.displayNameUniquifier = ti.displayNameUniquifier;
+        rci.creationMode = ti.isQtcRunnable || !hasAnyQtcRunnable
+                ? RunConfigurationCreationInfo::AlwaysCreate
+                : RunConfigurationCreationInfo::ManualCreationOnly;
+        rci.useTerminal = ti.usesTerminal;
+        rci.buildKey = ti.buildKey;
+        return rci;
     });
-#endif
 }
 
-RunControl::~RunControl()
+/*!
+    Adds a list of device types for which this RunConfigurationFactory
+    can create RunConfigurations.
+
+    If this function is never called for a RunConfiguarionFactory,
+    the factory will create RunConfigurations for all device types.
+*/
+
+void RunConfigurationFactory::addSupportedTargetDeviceType(Core::Id id)
 {
-#ifdef WITH_JOURNALD
-    JournaldWatcher::instance()->unsubscribe(this);
-#endif
-    disconnect();
-    delete d;
-    d = nullptr;
+    m_supportedTargetDeviceTypes.append(id);
 }
 
-void RunControl::initiateStart()
+void RunConfigurationFactory::setDecorateDisplayNames(bool on)
 {
-    emit aboutToStart();
-    start();
+    m_decorateDisplayNames = on;
 }
 
-void RunControl::start()
+void RunConfigurationFactory::addSupportedProjectType(Core::Id id)
 {
-    d->initiateStart();
+    m_supportedProjectTypes.append(id);
 }
 
-void RunControl::initiateStop()
+bool RunConfigurationFactory::canHandle(Target *target) const
 {
-    stop();
-}
+    const Project *project = target->project();
+    Kit *kit = target->kit();
 
-void RunControl::stop()
-{
-    d->initiateStop();
-}
-
-using WorkerCreators = QHash<Core::Id, RunControl::WorkerCreator>;
-
-static WorkerCreators &theWorkerCreators()
-{
-    static WorkerCreators creators;
-    return creators;
-}
-
-void RunControl::registerWorkerCreator(Core::Id id, const WorkerCreator &workerCreator)
-{
-    theWorkerCreators().insert(id, workerCreator);
-    auto keys = theWorkerCreators().keys();
-    Q_UNUSED(keys);
-}
-
-QList<QPointer<RunWorker> > RunControl::workers() const
-{
-    return d->m_workers;
-}
-
-RunWorker *RunControl::createWorker(Core::Id id)
-{
-    auto keys = theWorkerCreators().keys();
-    Q_UNUSED(keys);
-    RunWorkerCreator creator = theWorkerCreators().value(id);
-    if (creator)
-        return creator(this);
-    creator = device()->workerCreator(id);
-    if (creator)
-        return creator(this);
-    return nullptr;
-}
-
-void RunControlPrivate::initiateStart()
-{
-    checkState(RunControlState::Initialized);
-    setState(RunControlState::Starting);
-    debugMessage("Queue: Starting");
-
-    continueStart();
-}
-
-void RunControlPrivate::continueStart()
-{
-    checkState(RunControlState::Starting);
-    bool allDone = true;
-    debugMessage("Looking for next worker");
-    for (RunWorker *worker : m_workers) {
-        if (worker) {
-            debugMessage("  Examining worker " + worker->displayName());
-            switch (worker->d->state) {
-                case RunWorkerState::Initialized:
-                    debugMessage("  " + worker->displayName() + " is not done yet.");
-                    if (worker->d->canStart()) {
-                        debugMessage("Starting " + worker->displayName());
-                        worker->d->state = RunWorkerState::Starting;
-                        QTimer::singleShot(0, worker, &RunWorker::initiateStart);
-                        return;
-                    }
-                    allDone = false;
-                    debugMessage("  " + worker->displayName() + " cannot start.");
-                    break;
-                case RunWorkerState::Starting:
-                    debugMessage("  " + worker->displayName() + " currently starting");
-                    allDone = false;
-                    break;
-                case RunWorkerState::Running:
-                    debugMessage("  " + worker->displayName() + " currently running");
-                    break;
-                case RunWorkerState::Stopping:
-                    debugMessage("  " + worker->displayName() + " currently stopping");
-                    continue;
-                case RunWorkerState::Failed:
-                    // Should not happen.
-                    debugMessage("  " + worker->displayName() + " failed before");
-                    QTC_CHECK(false);
-                    //setState(RunControlState::Stopped);
-                    break;
-                case RunWorkerState::Done:
-                    debugMessage("  " + worker->displayName() + " was done before");
-                    break;
-            }
-        } else {
-            debugMessage("Found unknown deleted worker while starting");
-        }
-    }
-    if (allDone)
-        setState(RunControlState::Running);
-}
-
-void RunControlPrivate::initiateStop()
-{
-    checkState(RunControlState::Running);
-    setState(RunControlState::Stopping);
-    debugMessage("Queue: Stopping");
-
-    continueStop();
-}
-
-void RunControlPrivate::continueStop()
-{
-    debugMessage("Continue Stopping");
-    checkState(RunControlState::Stopping);
-    for (RunWorker *worker : m_workers) {
-        if (worker) {
-            debugMessage("  Examining worker " + worker->displayName());
-            switch (worker->d->state) {
-                case RunWorkerState::Initialized:
-                    debugMessage("  " + worker->displayName() + " was Initialized, setting to Done");
-                    worker->d->state = RunWorkerState::Done;
-                    break;
-                case RunWorkerState::Stopping:
-                    debugMessage("  " + worker->displayName() + " was already Stopping. Keeping it that way");
-                    break;
-                case RunWorkerState::Starting:
-                    worker->d->state = RunWorkerState::Stopping;
-                    debugMessage("  " + worker->displayName() + " was Starting, queuing stop");
-                    QTimer::singleShot(0, worker, &RunWorker::initiateStop);
-                    return; // Sic.
-                case RunWorkerState::Running:
-                    debugMessage("  " + worker->displayName() + " was Running, queuing stop");
-                    worker->d->state = RunWorkerState::Stopping;
-                    QTimer::singleShot(0, worker, &RunWorker::initiateStop);
-                    return; // Sic.
-                case RunWorkerState::Done:
-                    debugMessage("  " + worker->displayName() + " was Done. Good.");
-                    break;
-                case RunWorkerState::Failed:
-                    debugMessage("  " + worker->displayName() + " was Failed. Good");
-                    break;
-            }
-        } else {
-            debugMessage("Found unknown deleted worker");
-        }
-    }
-    debugMessage("All workers stopped. Set runControl to Stopped");
-    setState(RunControlState::Stopped);
-}
-
-void RunControlPrivate::onWorkerStarted(RunWorker *worker)
-{
-    worker->d->state = RunWorkerState::Running;
-
-    if (state == RunControlState::Starting) {
-        debugMessage(worker->displayName() + " start succeeded");
-        continueStart();
-        return;
-    }
-    showError(tr("Unexpected run control state %1 when worker %2 started")
-              .arg(stateName(state))
-              .arg(worker->displayName()));
-    //setState(RunControlState::Stopped);
-}
-
-void RunControlPrivate::onWorkerFailed(RunWorker *worker, const QString &msg)
-{
-    worker->d->state = RunWorkerState::Failed;
-
-    showError(msg);
-    setState(RunControlState::Stopped);
-}
-
-void RunControlPrivate::onWorkerStopped(RunWorker *worker)
-{
-    switch (worker->d->state) {
-    case RunWorkerState::Running:
-        // That was a spontaneous stop.
-        worker->d->state = RunWorkerState::Done;
-        debugMessage(worker->displayName() + " stopped spontaneously.");
-        break;
-    case RunWorkerState::Stopping:
-        worker->d->state = RunWorkerState::Done;
-        debugMessage(worker->displayName() + " stopped expectedly.");
-        break;
-    default:
-        debugMessage(worker->displayName() + " stopped unexpectedly in state"
-                     + stateName(worker->d->state));
-        worker->d->state = RunWorkerState::Failed;
-        break;
-    }
-    continueStop();
-}
-
-void RunControlPrivate::showError(const QString &msg)
-{
-    if (!msg.isEmpty())
-        q->appendMessage(msg + '\n', ErrorMessageFormat);
-}
-
-Utils::OutputFormatter *RunControl::outputFormatter() const
-{
-    return d->outputFormatter;
-}
-
-Core::Id RunControl::runMode() const
-{
-    return d->runMode;
-}
-
-const Runnable &RunControl::runnable() const
-{
-    return d->runnable;
-}
-
-void RunControl::setRunnable(const Runnable &runnable)
-{
-    d->runnable = runnable;
-}
-
-const Connection &RunControl::connection() const
-{
-    return d->connection;
-}
-
-void RunControl::setConnection(const Connection &connection)
-{
-    d->connection = connection;
-}
-
-QString RunControl::displayName() const
-{
-    return d->displayName;
-}
-
-void RunControl::setDisplayName(const QString &displayName)
-{
-    d->displayName = displayName;
-}
-
-void RunControl::setIcon(const Utils::Icon &icon)
-{
-    d->icon = icon;
-}
-
-Utils::Icon RunControl::icon() const
-{
-    return d->icon;
-}
-
-Abi RunControl::abi() const
-{
-    if (const RunConfiguration *rc = d->runConfiguration.data())
-        return rc->abi();
-    return Abi();
-}
-
-IDevice::ConstPtr RunControl::device() const
-{
-   return d->device;
-}
-
-RunConfiguration *RunControl::runConfiguration() const
-{
-    return d->runConfiguration.data();
-}
-
-Project *RunControl::project() const
-{
-    return d->project.data();
-}
-
-bool RunControl::canReUseOutputPane(const RunControl *other) const
-{
-    if (other->isRunning())
+    if (containsType(target->project()->projectIssues(kit), Task::TaskType::Error))
         return false;
 
-    return d->runnable.canReUseOutputPane(other->d->runnable);
-}
-
-/*!
-    A handle to the application process.
-
-    This is typically a process id, but should be treated as
-    opaque handle to the process controled by this \c RunControl.
-*/
-
-ProcessHandle RunControl::applicationProcessHandle() const
-{
-    return d->applicationProcessHandle;
-}
-
-void RunControl::setApplicationProcessHandle(const ProcessHandle &handle)
-{
-    if (d->applicationProcessHandle != handle) {
-        d->applicationProcessHandle = handle;
-        emit applicationProcessHandleChanged(QPrivateSignal());
-    }
-}
-
-/*!
-    Prompts to stop. If \a optionalPrompt is passed, a \gui {Do not ask again}
-    checkbox is displayed and the result is returned in \a *optionalPrompt.
-*/
-
-bool RunControl::promptToStop(bool *optionalPrompt) const
-{
-    QTC_ASSERT(isRunning(), return true);
-    if (optionalPrompt && !*optionalPrompt)
-        return true;
-
-    // Overridden.
-    if (d->promptToStop)
-        return d->promptToStop(optionalPrompt);
-
-    const QString msg = tr("<html><head/><body><center><i>%1</i> is still running.<center/>"
-                           "<center>Force it to quit?</center></body></html>").arg(displayName());
-    return showPromptToStopDialog(tr("Application Still Running"), msg,
-                                  tr("Force &Quit"), tr("&Keep Running"),
-                                  optionalPrompt);
-}
-
-void RunControl::setPromptToStop(const std::function<bool (bool *)> &promptToStop)
-{
-    d->promptToStop = promptToStop;
-}
-
-bool RunControl::supportsReRunning() const
-{
-    return d->supportsReRunning;
-}
-
-void RunControl::setSupportsReRunning(bool reRunningSupported)
-{
-    d->supportsReRunning = reRunningSupported;
-}
-
-bool RunControl::isRunning() const
-{
-    return d->state == RunControlState::Running;
-}
-
-bool RunControl::isStarting() const
-{
-    return d->state == RunControlState::Starting;
-}
-
-bool RunControl::isStopping() const
-{
-    return d->state == RunControlState::Stopping;
-}
-
-/*!
-    Prompts to terminate the application with the \gui {Do not ask again}
-    checkbox.
-*/
-
-bool RunControl::showPromptToStopDialog(const QString &title,
-                                        const QString &text,
-                                        const QString &stopButtonText,
-                                        const QString &cancelButtonText,
-                                        bool *prompt)
-{
-    // Show a question message box where user can uncheck this
-    // question for this class.
-    Utils::CheckableMessageBox messageBox(Core::ICore::mainWindow());
-    messageBox.setWindowTitle(title);
-    messageBox.setText(text);
-    messageBox.setStandardButtons(QDialogButtonBox::Yes|QDialogButtonBox::Cancel);
-    if (!stopButtonText.isEmpty())
-        messageBox.button(QDialogButtonBox::Yes)->setText(stopButtonText);
-    if (!cancelButtonText.isEmpty())
-        messageBox.button(QDialogButtonBox::Cancel)->setText(cancelButtonText);
-    messageBox.setDefaultButton(QDialogButtonBox::Yes);
-    if (prompt) {
-        messageBox.setCheckBoxText(Utils::CheckableMessageBox::msgDoNotAskAgain());
-        messageBox.setChecked(false);
-    } else {
-        messageBox.setCheckBoxVisible(false);
-    }
-    messageBox.exec();
-    const bool close = messageBox.clickedStandardButton() == QDialogButtonBox::Yes;
-    if (close && prompt && messageBox.isChecked())
-        *prompt = false;
-    return close;
-}
-
-bool RunControlPrivate::isAllowedTransition(RunControlState from, RunControlState to)
-{
-    switch (from) {
-    case RunControlState::Initialized:
-        return to == RunControlState::Starting;
-    case RunControlState::Starting:
-        return to == RunControlState::Running;
-    case RunControlState::Running:
-        return to == RunControlState::Stopping
-            || to == RunControlState::Stopped;
-    case RunControlState::Stopping:
-        return to == RunControlState::Stopped;
-    case RunControlState::Stopped:
-        return false;
-    }
-    return false;
-}
-
-void RunControlPrivate::checkState(RunControlState expectedState)
-{
-    if (state != expectedState)
-        qDebug() << "Unexpected run control state " << stateName(expectedState)
-                 << " have: " << stateName(state);
-}
-
-void RunControlPrivate::setState(RunControlState newState)
-{
-    if (!isAllowedTransition(state, newState))
-        qDebug() << "Invalid run control state transition from " << stateName(state)
-                 << " to " << stateName(newState);
-
-    state = newState;
-
-    debugMessage("Entering state " + stateName(newState));
-
-    // Extra reporting.
-    switch (state) {
-    case RunControlState::Running:
-        emit q->started();
-        break;
-    case RunControlState::Stopped:
-        q->setApplicationProcessHandle(Utils::ProcessHandle());
-        foreach (auto worker, m_workers)
-            if (worker)
-                worker->onFinished();
-        //state = RunControlState::Initialized; // Reset for potential re-running.
-        emit q->finished();
-        break;
-    default:
-        break;
-    }
-}
-
-void RunControlPrivate::debugMessage(const QString &msg)
-{
-    //q->appendMessage(msg + '\n', Utils::DebugFormat);
-    qCDebug(statesLog()) << msg;
-}
-
-/*!
-    Brings the application determined by this RunControl's \c applicationProcessHandle
-    to the foreground.
-
-    The default implementation raises the application on Mac, and does
-    nothing elsewhere.
-*/
-void RunControl::bringApplicationToForeground()
-{
-#ifdef Q_OS_OSX
-    d->foregroundCount = 0;
-    bringApplicationToForegroundInternal();
-#endif
-}
-
-void RunControl::bringApplicationToForegroundInternal()
-{
-#ifdef Q_OS_OSX
-    ProcessSerialNumber psn;
-    GetProcessForPID(d->applicationProcessHandle.pid(), &psn);
-    if (SetFrontProcess(&psn) == procNotFound && d->foregroundCount < 15) {
-        // somehow the mac/carbon api says
-        // "-600 no eligible process with specified process id"
-        // if we call SetFrontProcess too early
-        ++d->foregroundCount;
-        QTimer::singleShot(200, this, &RunControl::bringApplicationToForegroundInternal);
-    }
-#endif
-}
-
-void RunControl::appendMessage(const QString &msg, Utils::OutputFormat format)
-{
-    emit appendMessageRequested(this, msg, format);
-}
-
-bool Runnable::canReUseOutputPane(const Runnable &other) const
-{
-    return d ? d->canReUseOutputPane(other.d) : (other.d.get() == 0);
-}
-
-
-// FIXME: Remove once ApplicationLauncher signalling does not depend on device.
-static bool isSynchronousLauncher(RunControl *runControl)
-{
-    RunConfiguration *runConfig = runControl->runConfiguration();
-    Target *target = runConfig ? runConfig->target() : nullptr;
-    Kit *kit = target ? target->kit() : nullptr;
-    Core::Id deviceId = DeviceTypeKitInformation::deviceTypeId(kit);
-    return !deviceId.isValid() || deviceId == ProjectExplorer::Constants::DESKTOP_DEVICE_TYPE;
-}
-
-
-// SimpleTargetRunner
-
-SimpleTargetRunner::SimpleTargetRunner(RunControl *runControl)
-    : RunWorker(runControl)
-{
-    setDisplayName("SimpleTargetRunner");
-}
-
-void SimpleTargetRunner::start()
-{
-    m_launcher.disconnect(this);
-
-    Runnable r = runControl()->runnable();
-    QString msg = RunControl::tr("Starting %1...").arg(r.displayName());
-    appendMessage(msg, Utils::NormalMessageFormat);
-
-    if (isSynchronousLauncher(runControl())) {
-
-        connect(&m_launcher, &ApplicationLauncher::appendMessage,
-                this, &SimpleTargetRunner::appendMessage);
-        connect(&m_launcher, &ApplicationLauncher::processStarted,
-                this, &SimpleTargetRunner::onProcessStarted);
-        connect(&m_launcher, &ApplicationLauncher::processExited,
-                this, &SimpleTargetRunner::onProcessFinished);
-        connect(&m_launcher, &ApplicationLauncher::error,
-                this, &SimpleTargetRunner::onProcessError);
-
-        QTC_ASSERT(r.is<StandardRunnable>(), return);
-        const QString executable = r.as<StandardRunnable>().executable;
-        if (executable.isEmpty()) {
-            reportFailure(RunControl::tr("No executable specified."));
-        }  else if (!QFileInfo::exists(executable)) {
-            reportFailure(RunControl::tr("Executable %1 does not exist.")
-                              .arg(QDir::toNativeSeparators(executable)));
-        } else {
-            m_launcher.start(r);
-        }
-
-    } else {
-
-        connect(&m_launcher, &ApplicationLauncher::reportError,
-                this, [this](const QString &msg) {
-                    reportFailure(msg);
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::remoteStderr,
-                this, [this](const QByteArray &output) {
-                    appendMessage(QString::fromUtf8(output), Utils::StdErrFormatSameLine);
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::remoteStdout,
-                this, [this](const QByteArray &output) {
-                    appendMessage(QString::fromUtf8(output), Utils::StdOutFormatSameLine);
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::finished,
-                this, [this] {
-                    m_launcher.disconnect(this);
-                    reportStopped();
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::processStarted,
-                this, [this] {
-                    appendMessage("Application launcher started", Utils::NormalMessageFormat);
-//                    reportStarted();
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::processExited,
-                this, [this] {
-                    m_launcher.disconnect(this);
-                    reportStopped();
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::remoteProcessStarted,
-                this, [this] {
-                    reportStarted();
-                });
-
-        connect(&m_launcher, &ApplicationLauncher::reportProgress,
-                this, [this](const QString &progressString) {
-                    appendMessage(progressString, Utils::NormalMessageFormat);
-                });
-
-        m_launcher.start(r, runControl()->device());
-    }
-}
-
-void SimpleTargetRunner::stop()
-{
-    m_launcher.stop();
-}
-
-void SimpleTargetRunner::onProcessStarted()
-{
-    // Console processes only know their pid after being started
-    runControl()->setApplicationProcessHandle(m_launcher.applicationPID());
-    runControl()->bringApplicationToForeground();
-    reportStarted();
-}
-
-void SimpleTargetRunner::onProcessFinished(int exitCode, QProcess::ExitStatus status)
-{
-    QString msg;
-    if (status == QProcess::CrashExit)
-        msg = tr("%1 crashed.");
-    else
-        msg = tr("%2 exited with code %1").arg(exitCode);
-    appendMessage(msg.arg(runnable().displayName()), Utils::NormalMessageFormat);
-    reportStopped();
-}
-
-void SimpleTargetRunner::onProcessError(QProcess::ProcessError)
-{
-    QString msg = tr("%1 finished.");
-    appendMessage(msg.arg(runnable().displayName()), Utils::NormalMessageFormat);
-    reportStopped();
-}
-
-// RunWorkerPrivate
-
-RunWorkerPrivate::RunWorkerPrivate(RunWorker *runWorker, RunControl *runControl)
-    : q(runWorker), runControl(runControl)
-{
-    runControl->d->m_workers.append(runWorker);
-}
-
-bool RunWorkerPrivate::canStart() const
-{
-    if (state != RunWorkerState::Initialized)
-        return false;
-    for (RunWorker *worker : dependencies) {
-        QTC_ASSERT(worker, return true);
-        if (worker->d->state != RunWorkerState::Done
-                && worker->d->state != RunWorkerState::Running)
+    if (!m_supportedProjectTypes.isEmpty())
+        if (!m_supportedProjectTypes.contains(project->id()))
             return false;
-    }
+
+    if (!m_supportedTargetDeviceTypes.isEmpty())
+        if (!m_supportedTargetDeviceTypes.contains(
+                    DeviceTypeKitAspect::deviceTypeId(kit)))
+            return false;
+
     return true;
 }
 
-void RunWorkerPrivate::timerEvent(QTimerEvent *ev)
+RunConfiguration *RunConfigurationFactory::create(Target *target) const
 {
-    if (ev->timerId() == startWatchdogTimerId) {
-        q->reportFailure(tr("Worker start timed out"));
-        return;
+    QTC_ASSERT(m_creator, return nullptr);
+    RunConfiguration *rc = m_creator(target);
+    QTC_ASSERT(rc, return nullptr);
+
+    // Add the universal aspects.
+    for (const RunConfiguration::AspectFactory &factory : theAspectFactories)
+        rc->m_aspects.append(factory(target));
+
+    rc->acquaintAspects();
+    return rc;
+}
+
+RunConfiguration *RunConfigurationCreationInfo::create(Target *target) const
+{
+    QTC_ASSERT(factory->canHandle(target), return nullptr);
+    QTC_ASSERT(id == factory->runConfigurationBaseId(), return nullptr);
+
+    RunConfiguration *rc = factory->create(target);
+    if (!rc)
+        return nullptr;
+
+    rc->m_buildKey = buildKey;
+    rc->update();
+    rc->setDisplayName(displayName);
+
+    return rc;
+}
+
+RunConfiguration *RunConfigurationFactory::restore(Target *parent, const QVariantMap &map)
+{
+    for (RunConfigurationFactory *factory : g_runConfigurationFactories) {
+        if (factory->canHandle(parent)) {
+            const Core::Id id = idFromMap(map);
+            if (id.name().startsWith(factory->m_runConfigBaseId.name())) {
+                RunConfiguration *rc = factory->create(parent);
+                if (rc->fromMap(map)) {
+                    rc->update();
+                    return rc;
+                }
+                delete rc;
+                return nullptr;
+            }
+        }
     }
-    if (ev->timerId() == stopWatchdogTimerId) {
-        q->reportFailure(tr("Worker stop timed out"));
-        return;
+    return nullptr;
+}
+
+RunConfiguration *RunConfigurationFactory::clone(Target *parent, RunConfiguration *source)
+{
+    return restore(parent, source->toMap());
+}
+
+const QList<RunConfigurationCreationInfo> RunConfigurationFactory::creatorsForTarget(Target *parent)
+{
+    QList<RunConfigurationCreationInfo> items;
+    for (RunConfigurationFactory *factory : g_runConfigurationFactories) {
+        if (factory->canHandle(parent))
+            items.append(factory->availableCreators(parent));
     }
+    QHash<QString, QList<RunConfigurationCreationInfo *>> itemsPerDisplayName;
+    for (RunConfigurationCreationInfo &item : items)
+        itemsPerDisplayName[item.displayName] << &item;
+    for (auto it = itemsPerDisplayName.cbegin(); it != itemsPerDisplayName.cend(); ++it) {
+        if (it.value().size() == 1)
+            continue;
+        for (RunConfigurationCreationInfo * const rci : it.value())
+            rci->displayName += rci->displayNameUniquifier;
+    }
+    return items;
 }
 
-// RunWorker
+FixedRunConfigurationFactory::FixedRunConfigurationFactory(const QString &displayName,
+                                                           bool addDeviceName) :
+    m_fixedBuildTarget(displayName),
+    m_decorateTargetName(addDeviceName)
+{ }
 
-RunWorker::RunWorker(RunControl *runControl)
-    : d(new RunWorkerPrivate(this, runControl))
+QList<RunConfigurationCreationInfo>
+FixedRunConfigurationFactory::availableCreators(Target *parent) const
 {
-}
-
-RunWorker::~RunWorker()
-{
-    delete d;
-}
-
-void RunWorker::initiateStart()
-{
-    if (d->startWatchdogInterval != 0)
-        d->startWatchdogTimerId = d->startTimer(d->startWatchdogInterval);
-
-    start();
-}
-
-void RunWorker::reportStarted()
-{
-    if (d->startWatchdogInterval != 0)
-        d->killTimer(d->startWatchdogTimerId);
-    d->runControl->d->onWorkerStarted(this);
-    emit started();
-}
-
-void RunWorker::initiateStop()
-{
-    if (d->stopWatchdogInterval != 0)
-        d->stopWatchdogTimerId = d->startTimer(d->stopWatchdogInterval);
-
-    d->runControl->d->debugMessage("Initiate stop for " + displayName());
-    stop();
-}
-
-void RunWorker::reportStopped()
-{
-    if (d->stopWatchdogInterval != 0)
-        d->killTimer(d->stopWatchdogTimerId);
-    d->runControl->d->onWorkerStopped(this);
-    emit stopped();
-}
-
-void RunWorker::reportFailure(const QString &msg)
-{
-    d->runControl->d->onWorkerFailed(this, msg);
-}
-
-void RunWorker::appendMessage(const QString &msg, OutputFormat format)
-{
-    if (msg.endsWith('\n'))
-        d->runControl->appendMessage(msg, format);
-    else
-        d->runControl->appendMessage(msg + '\n', format);
-}
-
-IDevice::ConstPtr RunWorker::device() const
-{
-    return d->runControl->device();
-}
-
-const Runnable &RunWorker::runnable() const
-{
-    return d->runControl->runnable();
-}
-
-const Connection &RunWorker::connection() const
-{
-    return d->runControl->connection();
-}
-
-Core::Id RunWorker::runMode() const
-{
-    return d->runControl->runMode();
-}
-
-void RunWorker::addDependency(RunWorker *dependency)
-{
-    d->dependencies.append(dependency);
-}
-
-RunControl *RunWorker::runControl() const
-{
-    return d->runControl;
-}
-
-QString RunWorker::displayName() const
-{
-    return d->displayName;
-}
-
-void RunWorker::setDisplayName(const QString &displayName)
-{
-    d->displayName = displayName;
-}
-
-void RunWorker::setStartTimeout(int ms)
-{
-    d->startWatchdogInterval = ms;
-}
-
-void RunWorker::setStopTimeout(int ms)
-{
-    d->stopWatchdogInterval = ms;
-}
-
-void RunWorker::reportData(int channel, const QVariant &data)
-{
-    emit dataReported(channel, data);
-}
-
-void RunWorker::recordData(const QString &channel, const QVariant &data)
-{
-    d->data[channel] = data;
-}
-
-QVariant RunWorker::recordedData(const QString &channel)
-{
-    return d->data[channel];
-}
-
-void RunWorker::start()
-{
-    reportStarted();
-}
-
-void RunWorker::stop()
-{
-    reportStopped();
+    QString displayName = m_decorateTargetName ? decoratedTargetName(m_fixedBuildTarget, parent)
+                                               : m_fixedBuildTarget;
+    RunConfigurationCreationInfo rci;
+    rci.factory = this;
+    rci.id = runConfigurationBaseId();
+    rci.displayName = displayName;
+    return {rci};
 }
 
 } // namespace ProjectExplorer

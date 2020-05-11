@@ -38,12 +38,14 @@ class QnxConfigurationManager: public QObject
 {
     Q_OBJECT
 public:
+    QnxConfigurationManager();
+    ~QnxConfigurationManager() override;
+
     static QnxConfigurationManager *instance();
-    ~QnxConfigurationManager();
     QList<QnxConfiguration*> configurations() const;
     void removeConfiguration(QnxConfiguration *config);
     bool addConfiguration(QnxConfiguration *config);
-    QnxConfiguration* configurationFromEnvFile(const Utils::FileName &envFile) const;
+    QnxConfiguration* configurationFromEnvFile(const Utils::FilePath &envFile) const;
 
 protected slots:
     void saveConfigs();
@@ -52,13 +54,9 @@ signals:
     void configurationsListUpdated();
 
 private:
-    QnxConfigurationManager(QObject *parent = 0);
-    static QnxConfigurationManager *m_instance;
     QList<QnxConfiguration*> m_configurations;
     Utils::PersistentSettingsWriter *m_writer;
     void restoreConfigurations();
-
-    friend class QnxPlugin;
 };
 
 }

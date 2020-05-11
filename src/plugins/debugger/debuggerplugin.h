@@ -40,9 +40,7 @@ class DebuggerPlugin : public ExtensionSystem::IPlugin
 
 public:
     DebuggerPlugin();
-    ~DebuggerPlugin();
-
-    static DebuggerPlugin *instance();
+    ~DebuggerPlugin() override;
 
 private:
     // IPlugin implementation.
@@ -59,7 +57,7 @@ private:
     // Called from GammaRayIntegration
     Q_SLOT void getEnginesState(QByteArray *json) const;
 
-    QList<QObject *> createTestObjects() const override;
+    QVector<QObject *> createTestObjects() const override;
 };
 
 } // namespace Internal

@@ -26,7 +26,6 @@
 #include "mergetool.h"
 #include "gitclient.h"
 #include "gitplugin.h"
-#include "gitversioncontrol.h"
 
 #include <coreplugin/documentmanager.h>
 #include <coreplugin/icore.h>
@@ -54,17 +53,23 @@ bool MergeTool::start(const QString &workingDirectory, const QStringList &files)
 {
     QStringList arguments;
     arguments << "mergetool" << "-y" << files;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert("LANG", "C");
+    env.insert("LANGUAGE", "C");
     m_process = new QProcess(this);
     m_process->setWorkingDirectory(workingDirectory);
-    const Utils::FileName binary = GitPlugin::client()->vcsBinary();
-    VcsOutputWindow::appendCommand(workingDirectory, binary, arguments);
+    m_process->setProcessEnvironment(env);
+    m_process->setProcessChannelMode(QProcess::MergedChannels);
+    const Utils::FilePath binary = GitClient::instance()->vcsBinary();
+    VcsOutputWindow::appendCommand(workingDirectory, {binary, arguments});
     m_process->start(binary.toString(), arguments);
     if (m_process->waitForStarted()) {
-        connect(m_process, static_cast<void (QProcess::*)(int)>(&QProcess::finished), this, &MergeTool::done);
+        connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                this, &MergeTool::done);
         connect(m_process, &QIODevice::readyRead, this, &MergeTool::readData);
     } else {
         delete m_process;
-        m_process = 0;
+        m_process = nullptr;
         return false;
     }
     return true;
@@ -230,6 +235,14 @@ void MergeTool::readData()
             prompt(tr("Unchanged File"), tr("Was the merge successful?"));
         } else if (m_line.startsWith("Continue merging")) {
             prompt(tr("Continue Merging"), tr("Continue merging other unresolved paths?"));
+        } else if (m_line.startsWith("Hit return")) {
+            QMessageBox::warning(
+                        Core::ICore::dialogParent(), tr("Merge Tool"),
+                        QString("<html><body><p>%1</p>\n<p>%2</p></body></html>").arg(
+                            tr("Merge tool is not configured."),
+                            tr("Run git config --global merge.tool &lt;tool&gt; "
+                               "to configure it, then try again.")));
+            m_process->kill();
         } else if (m_line.endsWith('\n')) {
             // Skip unidentified lines
             m_line.clear();
@@ -250,8 +263,8 @@ void MergeTool::done()
         VcsOutputWindow::appendError(tr("Merge tool process terminated with exit code %1")
                                   .arg(exitCode));
     }
-    GitPlugin::client()->continueCommandIfNeeded(workingDirectory, exitCode == 0);
-    GitPlugin::instance()->gitVersionControl()->emitRepositoryChanged(workingDirectory);
+    GitClient::instance()->continueCommandIfNeeded(workingDirectory, exitCode == 0);
+    GitPlugin::emitRepositoryChanged(workingDirectory);
     deleteLater();
 }
 

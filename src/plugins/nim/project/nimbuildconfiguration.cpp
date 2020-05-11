@@ -24,15 +24,22 @@
 ****************************************************************************/
 
 #include "nimbuildconfiguration.h"
-#include "nimbuildconfigurationwidget.h"
 #include "nimcompilerbuildstep.h"
 #include "nimproject.h"
 
 #include "../nimconstants.h"
 
-#include <projectexplorer/namedwidget.h>
-#include <projectexplorer/projectexplorerconstants.h>
+#include <projectexplorer/buildconfiguration.h>
+#include <projectexplorer/buildinfo.h>
 #include <projectexplorer/buildsteplist.h>
+#include <projectexplorer/buildstep.h>
+#include <projectexplorer/kit.h>
+#include <projectexplorer/projectexplorer.h>
+#include <projectexplorer/projectexplorerconstants.h>
+#include <projectexplorer/projectmacroexpander.h>
+#include <projectexplorer/target.h>
+#include <projectexplorer/projectconfigurationaspects.h>
+#include <utils/mimetypes/mimedatabase.h>
 #include <utils/qtcassert.h>
 
 using namespace ProjectExplorer;
@@ -40,83 +47,111 @@ using namespace Utils;
 
 namespace Nim {
 
-NimBuildConfiguration::NimBuildConfiguration(Target *target)
-    : BuildConfiguration(target, Constants::C_NIMBUILDCONFIGURATION_ID)
-{}
-
-NamedWidget *NimBuildConfiguration::createConfigWidget()
+static FilePath defaultBuildDirectory(const Kit *k,
+                                      const FilePath &projectFilePath,
+                                      const QString &bc,
+                                      BuildConfiguration::BuildType buildType)
 {
-    return new NimBuildConfigurationWidget(this);
+    QFileInfo projectFileInfo = projectFilePath.toFileInfo();
+
+    ProjectMacroExpander expander(projectFilePath,
+                                  projectFileInfo.baseName(), k, bc, buildType);
+    QString buildDirectory = expander.expand(ProjectExplorerPlugin::buildDirectoryTemplate());
+
+    if (FileUtils::isAbsolutePath(buildDirectory))
+        return FilePath::fromString(buildDirectory);
+
+    auto projectDir = FilePath::fromString(projectFileInfo.absoluteDir().absolutePath());
+    return projectDir.pathAppended(buildDirectory);
 }
 
-BuildConfiguration::BuildType NimBuildConfiguration::buildType() const
+NimBuildConfiguration::NimBuildConfiguration(Target *target, Core::Id id)
+    : BuildConfiguration(target, id)
 {
-    return BuildConfiguration::Unknown;
+    setConfigWidgetDisplayName(tr("General"));
+    setConfigWidgetHasFrame(true);
+    setBuildDirectorySettingsKey("Nim.NimBuildConfiguration.BuildDirectory");
+
+    appendInitialBuildStep(Constants::C_NIMCOMPILERBUILDSTEP_ID);
+    appendInitialCleanStep(Constants::C_NIMCOMPILERCLEANSTEP_ID);
+
+    setInitializer([this, target](const BuildInfo &info) {
+        // Create the build configuration and initialize it from build info
+        setBuildDirectory(defaultBuildDirectory(target->kit(),
+                                                project()->projectFilePath(),
+                                                displayName(),
+                                                buildType()));
+
+        auto nimCompilerBuildStep = buildSteps()->firstOfType<NimCompilerBuildStep>();
+        QTC_ASSERT(nimCompilerBuildStep, return);
+        NimCompilerBuildStep::DefaultBuildOptions defaultOption;
+        switch (info.buildType) {
+        case BuildConfiguration::Release:
+            defaultOption = NimCompilerBuildStep::DefaultBuildOptions::Release;
+            break;
+        case BuildConfiguration::Debug:
+            defaultOption = NimCompilerBuildStep::DefaultBuildOptions::Debug;
+            break;
+        default:
+            defaultOption = NimCompilerBuildStep::DefaultBuildOptions::Empty;
+            break;
+        }
+        nimCompilerBuildStep->setDefaultCompilerOptions(defaultOption);
+
+        const Utils::FilePaths nimFiles = project()->files([](const Node *n) {
+            return Project::AllFiles(n) && n->path().endsWith(".nim");
+        });
+
+        if (!nimFiles.isEmpty())
+            nimCompilerBuildStep->setTargetNimFile(nimFiles.first());
+    });
 }
 
-bool NimBuildConfiguration::fromMap(const QVariantMap &map)
+
+FilePath NimBuildConfiguration::cacheDirectory() const
 {
-    if (!BuildConfiguration::fromMap(map))
-        return false;
-
-    if (!canRestore(map))
-        return false;
-
-    const QString displayName = map[Constants::C_NIMBUILDCONFIGURATION_DISPLAY_KEY].toString();
-    const QString buildDirectory = map[Constants::C_NIMBUILDCONFIGURATION_BUILDDIRECTORY_KEY].toString();
-
-    setDisplayName(displayName);
-    setBuildDirectory(FileName::fromString(buildDirectory));
-
-    return true;
+    return buildDirectory().pathAppended("nimcache");
 }
 
-QVariantMap NimBuildConfiguration::toMap() const
-{
-    QVariantMap result = BuildConfiguration::toMap();
-    result[Constants::C_NIMBUILDCONFIGURATION_DISPLAY_KEY] = displayName();
-    result[Constants::C_NIMBUILDCONFIGURATION_BUILDDIRECTORY_KEY] = buildDirectory().toString();
-    return result;
-}
-
-FileName NimBuildConfiguration::cacheDirectory() const
-{
-    return buildDirectory().appendPath(QStringLiteral("nimcache"));
-}
-
-FileName NimBuildConfiguration::outFilePath() const
+FilePath NimBuildConfiguration::outFilePath() const
 {
     const NimCompilerBuildStep *step = nimCompilerBuildStep();
-    QTC_ASSERT(step, return FileName());
+    QTC_ASSERT(step, return FilePath());
     return step->outFilePath();
-}
-
-bool NimBuildConfiguration::canRestore(const QVariantMap &map)
-{
-    return idFromMap(map) == Constants::C_NIMBUILDCONFIGURATION_ID;
-}
-
-bool NimBuildConfiguration::hasNimCompilerBuildStep() const
-{
-    BuildStepList *steps = stepList(ProjectExplorer::Constants::BUILDSTEPS_BUILD);
-    return steps ? steps->contains(Constants::C_NIMCOMPILERBUILDSTEP_ID) : false;
-}
-
-bool NimBuildConfiguration::hasNimCompilerCleanStep() const
-{
-    BuildStepList *steps = stepList(ProjectExplorer::Constants::BUILDSTEPS_CLEAN);
-    return steps ? steps->contains(Constants::C_NIMCOMPILERCLEANSTEP_ID) : false;
 }
 
 const NimCompilerBuildStep *NimBuildConfiguration::nimCompilerBuildStep() const
 {
-    BuildStepList *steps = stepList(ProjectExplorer::Constants::BUILDSTEPS_BUILD);
-    QTC_ASSERT(steps, return nullptr);
-    foreach (BuildStep *step, steps->steps())
+    foreach (BuildStep *step, buildSteps()->steps())
         if (step->id() == Constants::C_NIMCOMPILERBUILDSTEP_ID)
             return qobject_cast<NimCompilerBuildStep *>(step);
     return nullptr;
 }
 
+
+NimBuildConfigurationFactory::NimBuildConfigurationFactory()
+{
+    registerBuildConfiguration<NimBuildConfiguration>(Constants::C_NIMBUILDCONFIGURATION_ID);
+    setSupportedProjectType(Constants::C_NIMPROJECT_ID);
+    setSupportedProjectMimeTypeName(Constants::C_NIM_PROJECT_MIMETYPE);
+
+    setBuildGenerator([](const Kit *k, const FilePath &projectPath, bool forSetup) {
+        const auto oneBuild = [&](BuildConfiguration::BuildType buildType, const QString &typeName) {
+            BuildInfo info;
+            info.buildType = buildType;
+            info.typeName = typeName;
+            if (forSetup) {
+                info.displayName = info.typeName;
+                info.buildDirectory = defaultBuildDirectory(k, projectPath, info.typeName, buildType);
+            }
+            return info;
+        };
+        return QList<BuildInfo>{
+            oneBuild(BuildConfiguration::Debug, BuildConfiguration::tr("Debug")),
+            oneBuild(BuildConfiguration::Release, BuildConfiguration::tr("Release"))
+        };
+    });
 }
+
+} // namespace Nim
 

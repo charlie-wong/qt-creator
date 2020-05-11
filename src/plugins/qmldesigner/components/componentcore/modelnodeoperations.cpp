@@ -25,8 +25,10 @@
 
 #include "modelnodeoperations.h"
 #include "modelnodecontextmenu_helper.h"
+#include "addimagesdialog.h"
 #include "layoutingridlayout.h"
 #include "findimplementation.h"
+
 
 #include "addsignalhandlerdialog.h"
 
@@ -42,6 +44,7 @@
 #include <documentmanager.h>
 #include <qmlanchors.h>
 #include <nodelistproperty.h>
+#include <nodeproperty.h>
 #include <signalhandlerproperty.h>
 
 #include <limits>
@@ -56,6 +59,10 @@
 
 #include <qmljseditor/qmljsfindreferences.h>
 
+#include <projectexplorer/project.h>
+#include <projectexplorer/projectnodes.h>
+#include <projectexplorer/projecttree.h>
+
 #include <utils/algorithm.h>
 #include <utils/qtcassert.h>
 
@@ -69,44 +76,6 @@
 namespace QmlDesigner {
 
 const PropertyName auxDataString("anchors_");
-
-static inline QList<QmlItemNode> siblingsForNode(const QmlItemNode &itemNode)
-{
-    QList<QmlItemNode> siblingList;
-
-    if (itemNode.isValid() && itemNode.modelNode().hasParentProperty()) {
-        QList<ModelNode> modelNodes = itemNode.modelNode().parentProperty().parentModelNode().directSubModelNodes();
-        foreach (const ModelNode &node, modelNodes) {
-            QmlItemNode childItemNode = node;
-            if (childItemNode.isValid())
-                siblingList.append(childItemNode);
-        }
-    }
-
-    return siblingList;
-}
-
-static signed int getMaxZValue(const QList<QmlItemNode> &siblingList)
-{
-    signed int maximum = INT_MIN;
-    foreach (const QmlItemNode &node, siblingList) {
-        signed int z  = node.instanceValue("z").toInt();
-        if (z > maximum)
-            maximum = z;
-    }
-    return maximum;
-}
-
-static signed int getMinZValue(const QList<QmlItemNode> &siblingList)
-{
-    signed int minimum = INT_MAX;
-    foreach (const QmlItemNode &node, siblingList) {
-        signed int z  = node.instanceValue("z").toInt();
-        if (z < minimum)
-            minimum = z;
-    }
-    return minimum;
-}
 
 static inline void reparentTo(const ModelNode &node, const QmlItemNode &parent)
 {
@@ -192,9 +161,13 @@ void toFront(const SelectionContext &selectionState)
     try {
         QmlItemNode node = selectionState.firstSelectedModelNode();
         if (node.isValid()) {
-            signed int maximumZ = getMaxZValue(siblingsForNode(node));
-            maximumZ++;
-            node.setVariantProperty("z", maximumZ);
+            ModelNode modelNode = selectionState.currentSingleSelectedNode();
+            NodeListProperty parentProperty = modelNode.parentProperty().toNodeListProperty();
+            const int index = parentProperty.indexOf(modelNode);
+            const int lastIndex = parentProperty.count() - 1;
+
+            if (index != lastIndex)
+                parentProperty.slide(index, lastIndex);
         }
     } catch (const RewritingException &e) { //better save then sorry
         e.showException();
@@ -209,9 +182,12 @@ void toBack(const SelectionContext &selectionState)
     try {
         QmlItemNode node = selectionState.firstSelectedModelNode();
         if (node.isValid()) {
-            signed int minimumZ = getMinZValue(siblingsForNode(node));
-            minimumZ--;
-            node.setVariantProperty("z", minimumZ);
+            ModelNode modelNode = selectionState.currentSingleSelectedNode();
+            NodeListProperty parentProperty = modelNode.parentProperty().toNodeListProperty();
+            const int index = parentProperty.indexOf(modelNode);
+
+            if (index != 0)
+                parentProperty.slide(index, 0);
         }
 
     } catch (const RewritingException &e) { //better save then sorry
@@ -234,9 +210,7 @@ void changeOrder(const SelectionContext &selectionState, OderAction orderAction)
     if (!modelNode.parentProperty().isNodeListProperty())
         return;
 
-    try {
-        RewriterTransaction transaction(selectionState.view(), QByteArrayLiteral("DesignerActionManager|raise"));
-
+    selectionState.view()->executeInTransaction("DesignerActionManager|raise",[orderAction, selectionState, modelNode](){
         ModelNode modelNode = selectionState.currentSingleSelectedNode();
         NodeListProperty parentProperty = modelNode.parentProperty().toNodeListProperty();
         const int index = parentProperty.indexOf(modelNode);
@@ -249,11 +223,7 @@ void changeOrder(const SelectionContext &selectionState, OderAction orderAction)
             if (index > 0)
                 parentProperty.slide(index, index - 1);
         }
-
-        transaction.commit();
-    } catch (const RewritingException &e) { //better save then sorry
-         e.showException();
-    }
+    });
 }
 
 void raise(const SelectionContext &selectionState)
@@ -285,7 +255,7 @@ void setVisible(const SelectionContext &selectionState)
         return;
 
     try {
-        selectionState.selectedModelNodes().first().variantProperty("visible").setValue(selectionState.toggled());
+        selectionState.selectedModelNodes().constFirst().variantProperty("visible").setValue(selectionState.toggled());
     } catch (const RewritingException &e) { //better save then sorry
         e.showException();
     }
@@ -322,16 +292,15 @@ void resetSize(const SelectionContext &selectionState)
     if (!selectionState.view())
         return;
 
-    try {
-        RewriterTransaction transaction(selectionState.view(), QByteArrayLiteral("DesignerActionManager|resetSize"));
+    selectionState.view()->executeInTransaction("DesignerActionManager|resetSize",[selectionState](){
         foreach (ModelNode node, selectionState.selectedModelNodes()) {
             QmlItemNode itemNode(node);
-            itemNode.removeProperty("width");
-            itemNode.removeProperty("height");
+            if (itemNode.isValid()) {
+                itemNode.removeProperty("width");
+                itemNode.removeProperty("height");
+            }
         }
-    } catch (const RewritingException &e) { //better save then sorry
-        e.showException();
-    }
+    });
 }
 
 void resetPosition(const SelectionContext &selectionState)
@@ -339,17 +308,15 @@ void resetPosition(const SelectionContext &selectionState)
     if (!selectionState.view())
         return;
 
-    try {
-        RewriterTransaction transaction(selectionState.view(), QByteArrayLiteral("DesignerActionManager|resetPosition"));
+    selectionState.view()->executeInTransaction("DesignerActionManager|resetPosition",[selectionState](){
         foreach (ModelNode node, selectionState.selectedModelNodes()) {
             QmlItemNode itemNode(node);
-            itemNode.removeProperty("x");
-            itemNode.removeProperty("y");
+            if (itemNode.isValid()) {
+                itemNode.removeProperty("x");
+                itemNode.removeProperty("y");
+            }
         }
-        transaction.commit();
-    } catch (const RewritingException &e) { //better save then sorry
-        e.showException();
-    }
+    });
 }
 
 void goIntoComponentOperation(const SelectionContext &selectionState)
@@ -366,14 +333,16 @@ void resetZ(const SelectionContext &selectionState)
     if (!selectionState.view())
         return;
 
-    RewriterTransaction transaction(selectionState.view(), QByteArrayLiteral("DesignerActionManager|resetZ"));
-    foreach (ModelNode node, selectionState.selectedModelNodes()) {
-        QmlItemNode itemNode(node);
-        itemNode.removeProperty("z");
-    }
+    selectionState.view()->executeInTransaction("DesignerActionManager|resetZ",[selectionState](){
+        foreach (ModelNode node, selectionState.selectedModelNodes()) {
+            QmlItemNode itemNode(node);
+            if (itemNode.isValid())
+                itemNode.removeProperty("z");
+        }
+    });
 }
 
-static inline void backupPropertyAndRemove(ModelNode node, const PropertyName &propertyName)
+static inline void backupPropertyAndRemove(const ModelNode &node, const PropertyName &propertyName)
 {
     if (node.hasVariantProperty(propertyName)) {
         node.setAuxiliaryData(auxDataString + propertyName, node.variantProperty(propertyName).value());
@@ -398,9 +367,7 @@ void anchorsFill(const SelectionContext &selectionState)
     if (!selectionState.view())
         return;
 
-    try {
-        RewriterTransaction transaction(selectionState.view(), QByteArrayLiteral("DesignerActionManager|anchorsFill"));
-
+    selectionState.view()->executeInTransaction("DesignerActionManager|anchorsFill",[selectionState](){
         ModelNode modelNode = selectionState.currentSingleSelectedNode();
 
         QmlItemNode node = modelNode;
@@ -411,11 +378,7 @@ void anchorsFill(const SelectionContext &selectionState)
             backupPropertyAndRemove(modelNode, "width");
             backupPropertyAndRemove(modelNode, "height");
         }
-
-        transaction.commit();
-    } catch (const RewritingException &e) { //better save then sorry
-        e.showException();
-    }
+    });
 }
 
 void anchorsReset(const SelectionContext &selectionState)
@@ -423,22 +386,22 @@ void anchorsReset(const SelectionContext &selectionState)
     if (!selectionState.view())
         return;
 
-    RewriterTransaction transaction(selectionState.view(), QByteArrayLiteral("DesignerActionManager|anchorsReset"));
+    selectionState.view()->executeInTransaction("DesignerActionManager|anchorsReset",[selectionState](){
+        ModelNode modelNode = selectionState.currentSingleSelectedNode();
 
-    ModelNode modelNode = selectionState.currentSingleSelectedNode();
-
-    QmlItemNode node = modelNode;
-    if (node.isValid()) {
-        node.anchors().removeAnchors();
-        node.anchors().removeMargins();
-        restoreProperty(node, "x");
-        restoreProperty(node, "y");
-        restoreProperty(node, "width");
-        restoreProperty(node, "height");
-    }
+        QmlItemNode node = modelNode;
+        if (node.isValid()) {
+            node.anchors().removeAnchors();
+            node.anchors().removeMargins();
+            restoreProperty(node, "x");
+            restoreProperty(node, "y");
+            restoreProperty(node, "width");
+            restoreProperty(node, "height");
+        }
+    });
 }
 
-typedef std::function<bool(const ModelNode &node1, const ModelNode &node2)> LessThan;
+using LessThan = std::function<bool (const ModelNode &, const ModelNode&)>;
 
 bool compareByX(const ModelNode &node1, const ModelNode &node2)
 {
@@ -474,8 +437,8 @@ bool compareByGrid(const ModelNode &node1, const ModelNode &node2)
 
 
 static void layoutHelperFunction(const SelectionContext &selectionContext,
-                                 TypeName layoutType,
-                                 LessThan lessThan)
+                                 const TypeName &layoutType,
+                                 const LessThan &lessThan)
 {
     if (!selectionContext.view()
             || !selectionContext.hasSingleSelectedModelNode()
@@ -486,10 +449,8 @@ static void layoutHelperFunction(const SelectionContext &selectionContext,
         const QmlItemNode qmlItemNode = QmlItemNode(selectionContext.firstSelectedModelNode());
 
         if (qmlItemNode.hasInstanceParentItem()) {
-
             ModelNode layoutNode;
-            {
-                RewriterTransaction transaction(selectionContext.view(), QByteArrayLiteral("DesignerActionManager|layoutHelperFunction1"));
+            selectionContext.view()->executeInTransaction("DesignerActionManager|layoutHelperFunction1",[=, &layoutNode](){
 
                 QmlItemNode parentNode = qmlItemNode.instanceParentItem();
 
@@ -498,10 +459,9 @@ static void layoutHelperFunction(const SelectionContext &selectionContext,
                 layoutNode = selectionContext.view()->createModelNode(layoutType, metaInfo.majorVersion(), metaInfo.minorVersion());
 
                 reparentTo(layoutNode, parentNode);
-            }
+            });
 
-            {
-                RewriterTransaction transaction(selectionContext.view(), QByteArrayLiteral("DesignerActionManager|layoutHelperFunction2"));
+            selectionContext.view()->executeInTransaction("DesignerActionManager|layoutHelperFunction2",[=](){
 
                 QList<ModelNode> sortedSelectedNodes =  selectionContext.selectedModelNodes();
                 Utils::sort(sortedSelectedNodes, lessThan);
@@ -510,7 +470,7 @@ static void layoutHelperFunction(const SelectionContext &selectionContext,
                 LayoutInGridLayout::reparentToNodeAndRemovePositionForModelNodes(layoutNode, sortedSelectedNodes);
                 if (layoutType.contains("Layout"))
                     LayoutInGridLayout::setSizeAsPreferredSize(sortedSelectedNodes);
-            }
+            });
         }
     }
 }
@@ -565,22 +525,6 @@ void layoutGridLayout(const SelectionContext &selectionContext)
     }
 }
 
-/*
-bool optionsPageLessThan(const IOptionsPage *p1, const IOptionsPage *p2)
-{
-    if (p1->category() != p2->category())
-        return p1->category().alphabeticallyBefore(p2->category());
-    return p1->id().alphabeticallyBefore(p2->id());
-}
-
-static inline QList<IOptionsPage*> sortedOptionsPages()
-{
-    QList<IOptionsPage*> rc = ExtensionSystem::PluginManager::getObjects<IOptionsPage>();
-    qStableSort(rc.begin(), rc.end(), optionsPageLessThan);
-    return rc;
-}
-
-*/
 static PropertyNameList sortedPropertyNameList(const PropertyNameList &nameList)
 {
     PropertyNameList sortedPropertyNameList = nameList;
@@ -588,7 +532,7 @@ static PropertyNameList sortedPropertyNameList(const PropertyNameList &nameList)
     return sortedPropertyNameList;
 }
 
-static QString toUpper(const QString signal)
+static QString toUpper(const QString &signal)
 {
     QString ret = signal;
     ret[0] = signal.at(0).toUpper();
@@ -598,9 +542,9 @@ static QString toUpper(const QString signal)
 static void addSignal(const QString &typeName, const QString &itemId, const QString &signalName, bool isRootModelNode)
 {
     QScopedPointer<Model> model(Model::create("Item", 2, 0));
-    RewriterView rewriterView(RewriterView::Amend, 0);
+    RewriterView rewriterView(RewriterView::Amend, nullptr);
 
-    TextEditor::TextEditorWidget *textEdit = qobject_cast<TextEditor::TextEditorWidget*>
+    auto textEdit = qobject_cast<TextEditor::TextEditorWidget*>
             (Core::EditorManager::currentEditor()->widget());
 
     BaseTextEditModifier modifier(textEdit);
@@ -657,7 +601,7 @@ void addSignalHandlerOrGotoImplementation(const SelectionContext &selectionState
 {
     ModelNode modelNode;
     if (selectionState.singleNodeIsSelected())
-        modelNode = selectionState.selectedModelNodes().first();
+        modelNode = selectionState.selectedModelNodes().constFirst();
 
     bool isModelNodeRoot = true;
 
@@ -672,25 +616,18 @@ void addSignalHandlerOrGotoImplementation(const SelectionContext &selectionState
 
     if (!qmlObjectNode.isRootModelNode()) {
         isModelNodeRoot = false;
-        try {
-            RewriterTransaction transaction =
-                    qmlObjectNode.view()->beginRewriterTransaction(QByteArrayLiteral("NavigatorTreeModel:exportItem"));
-
-            QmlObjectNode qmlObjectNode(modelNode);
+        qmlObjectNode.view()->executeInTransaction("NavigatorTreeModel:exportItem", [&qmlObjectNode](){
             qmlObjectNode.ensureAliasExport();
-            transaction.commit();
-        }  catch (RewritingException &exception) { //better safe than sorry! There always might be cases where we fail
-            exception.showException();
-        }
+        });
     }
 
     QString itemId = modelNode.id();
 
-    const Utils::FileName currentDesignDocument = QmlDesignerPlugin::instance()->documentManager().currentDesignDocument()->fileName();
+    const Utils::FilePath currentDesignDocument = QmlDesignerPlugin::instance()->documentManager().currentDesignDocument()->fileName();
     const QString fileName = currentDesignDocument.toString();
     const QString typeName = currentDesignDocument.toFileInfo().baseName();
 
-    QStringList signalNames = cleanSignalNames(getSortedSignalNameList(selectionState.selectedModelNodes().first()));
+    QStringList signalNames = cleanSignalNames(getSortedSignalNameList(selectionState.selectedModelNodes().constFirst()));
 
     QList<QmlJSEditor::FindReferences::Usage> usages = QmlJSEditor::FindReferences::findUsageOfType(fileName, typeName);
 
@@ -701,15 +638,15 @@ void addSignalHandlerOrGotoImplementation(const SelectionContext &selectionState
         return;
     }
 
-    usages = FindImplementation::run(usages.first().path, typeName, itemId);
+    usages = FindImplementation::run(usages.constFirst().path, typeName, itemId);
 
     Core::ModeManager::activateMode(Core::Constants::MODE_EDIT);
 
-    if (usages.count() > 0 && (addAlwaysNewSlot || usages.count() < 2)  && (!isModelNodeRoot  || addAlwaysNewSlot)) {
-        Core::EditorManager::openEditorAt(usages.first().path, usages.first().line, usages.first().col);
+    if (!usages.isEmpty() && (addAlwaysNewSlot || usages.count() < 2)  && (!isModelNodeRoot  || addAlwaysNewSlot)) {
+        Core::EditorManager::openEditorAt(usages.constFirst().path, usages.constFirst().line, usages.constFirst().col);
 
         if (!signalNames.isEmpty()) {
-            AddSignalHandlerDialog *dialog = new AddSignalHandlerDialog(Core::ICore::dialogParent());
+            auto dialog = new AddSignalHandlerDialog(Core::ICore::dialogParent());
             dialog->setSignals(signalNames);
 
             AddSignalHandlerDialog::connect(dialog, &AddSignalHandlerDialog::signalSelected, [=] {
@@ -718,21 +655,17 @@ void addSignalHandlerOrGotoImplementation(const SelectionContext &selectionState
                 if (dialog->signal().isEmpty())
                     return;
 
-                try {
-                    RewriterTransaction transaction =
-                            qmlObjectNode.view()->beginRewriterTransaction(QByteArrayLiteral("NavigatorTreeModel:exportItem"));
+                qmlObjectNode.view()->executeInTransaction("NavigatorTreeModel:exportItem", [=](){
 
                     addSignal(typeName, itemId, dialog->signal(), isModelNodeRoot);
-                }  catch (RewritingException &exception) { //better safe than sorry! There always might be cases where we fail
-                    exception.showException();
-                }
+                });
 
                 addSignal(typeName, itemId, dialog->signal(), isModelNodeRoot);
 
                 //Move cursor to correct curser position
                 const QString filePath = Core::EditorManager::currentDocument()->filePath().toString();
                 QList<QmlJSEditor::FindReferences::Usage> usages = FindImplementation::run(filePath, typeName, itemId);
-                Core::EditorManager::openEditorAt(filePath, usages.first().line, usages.first().col + 1);
+                Core::EditorManager::openEditorAt(filePath, usages.constFirst().line, usages.constFirst().col + 1);
             } );
             dialog->show();
 
@@ -740,7 +673,7 @@ void addSignalHandlerOrGotoImplementation(const SelectionContext &selectionState
         return;
     }
 
-    Core::EditorManager::openEditorAt(usages.first().path, usages.first().line, usages.first().col + 1);
+    Core::EditorManager::openEditorAt(usages.constFirst().path, usages.constFirst().line, usages.constFirst().col + 1);
 }
 
 void removeLayout(const SelectionContext &selectionContext)
@@ -761,9 +694,7 @@ void removeLayout(const SelectionContext &selectionContext)
     if (!parent.isValid())
         return;
 
-    {
-        RewriterTransaction transaction(selectionContext.view(), QByteArrayLiteral("DesignerActionManager|removeLayout"));
-
+    selectionContext.view()->executeInTransaction("DesignerActionManager|removeLayout", [selectionContext, &layoutItem, parent](){
         foreach (const ModelNode &modelNode, selectionContext.currentSingleSelectedNode().directSubModelNodes()) {
             if (QmlItemNode::isValidQmlItemNode(modelNode)) {
 
@@ -782,7 +713,7 @@ void removeLayout(const SelectionContext &selectionContext)
                 parent.modelNode().defaultNodeListProperty().reparentHere(modelNode);
         }
         layoutItem.destroy();
-    }
+    });
 }
 
 void removePositioner(const SelectionContext &selectionContext)
@@ -794,7 +725,7 @@ void moveToComponent(const SelectionContext &selectionContext)
 {
     ModelNode modelNode;
     if (selectionContext.singleNodeIsSelected())
-        modelNode = selectionContext.selectedModelNodes().first();
+        modelNode = selectionContext.selectedModelNodes().constFirst();
 
     if (modelNode.isValid())
         selectionContext.view()->model()->rewriterView()->moveToComponent(modelNode);
@@ -836,9 +767,7 @@ void addItemToStackedContainer(const SelectionContext &selectionContext)
         }
     }
 
-    try {
-        RewriterTransaction transaction =
-                view->beginRewriterTransaction(QByteArrayLiteral("DesignerActionManager:addItemToStackedContainer"));
+    view->executeInTransaction("DesignerActionManager:addItemToStackedContainer", [=](){
 
         NodeMetaInfo itemMetaInfo = view->model()->metaInfo("QtQuick.Item", -1, -1);
         QTC_ASSERT(itemMetaInfo.isValid(), return);
@@ -863,11 +792,7 @@ void addItemToStackedContainer(const SelectionContext &selectionContext)
 
             }
         }
-
-        transaction.commit();
-    }  catch (RewritingException &exception) { //better safe than sorry! There always might be cases where we fail
-        exception.showException();
-    }
+    });
 }
 
 PropertyName getIndexPropertyName(const ModelNode &modelNode)
@@ -886,7 +811,7 @@ PropertyName getIndexPropertyName(const ModelNode &modelNode)
     return PropertyName();
 }
 
-void static setIndexProperty(const AbstractProperty &property, const QVariant &value)
+static void setIndexProperty(const AbstractProperty &property, const QVariant &value)
 {
     if (!property.exists() || property.isVariantProperty()) {
         /* Using QmlObjectNode ensures we take states into account. */
@@ -979,9 +904,8 @@ void addTabBarToStackedContainer(const SelectionContext &selectionContext)
     const PropertyName indexPropertyName = getIndexPropertyName(container);
     QTC_ASSERT(container.metaInfo().hasProperty(indexPropertyName), return);
 
-    try {
-        RewriterTransaction transaction =
-                view->beginRewriterTransaction(QByteArrayLiteral("DesignerActionManager:addItemToStackedContainer"));
+    view->executeInTransaction("DesignerActionManager:addItemToStackedContainer",
+                               [view, container, containerItemNode, tabBarMetaInfo, tabButtonMetaInfo, indexPropertyName](){
 
         ModelNode tabBarNode =
                 view->createModelNode("QtQuick.Controls.TabBar",
@@ -1013,11 +937,171 @@ void addTabBarToStackedContainer(const SelectionContext &selectionContext)
         container.removeProperty(indexPropertyName);
         const QString expression = id + "." + QString::fromLatin1(indexPropertyName);
         container.bindingProperty(indexPropertyName).setExpression(expression);
+    });
 
-        transaction.commit();
-    }  catch (RewritingException &exception) { //better safe than sorry! There always might be cases where we fail
-        exception.showException();
+}
+
+bool addFontToProject(const QStringList &fileNames, const QString &defaultDirectory)
+{
+    QString directory = AddImagesDialog::getDirectory(fileNames, defaultDirectory);
+
+    if (directory.isEmpty())
+        return true;
+
+    bool allSuccessful = true;
+    for (const QString &fileName : fileNames) {
+        const QString targetFile = directory + "/" + QFileInfo(fileName).fileName();
+        const bool success = QFile::copy(fileName, targetFile);
+
+        auto document = QmlDesignerPlugin::instance()->currentDesignDocument();
+
+        QTC_ASSERT(document, return false);
+
+        if (success) {
+            ProjectExplorer::Node *node = ProjectExplorer::ProjectTree::nodeForFile(document->fileName());
+            if (node) {
+                ProjectExplorer::FolderNode *containingFolder = node->parentFolderNode();
+                if (containingFolder)
+                    containingFolder->addFiles(QStringList(targetFile));
+            }
+        } else {
+            allSuccessful = false;
+        }
     }
+
+    return allSuccessful;
+}
+
+
+bool addImageToProject(const QStringList &fileNames, const QString &defaultDirectory)
+{
+    QString directory = AddImagesDialog::getDirectory(fileNames, defaultDirectory);
+
+    if (directory.isEmpty())
+        return true;
+
+    bool allSuccessful = true;
+    for (const QString &fileName : fileNames) {
+        const QString targetFile = directory + "/" + QFileInfo(fileName).fileName();
+        const bool success = QFile::copy(fileName, targetFile);
+
+        auto document = QmlDesignerPlugin::instance()->currentDesignDocument();
+
+        QTC_ASSERT(document, return false);
+
+        if (success) {
+            ProjectExplorer::Node *node = ProjectExplorer::ProjectTree::nodeForFile(document->fileName());
+            if (node) {
+                ProjectExplorer::FolderNode *containingFolder = node->parentFolderNode();
+                if (containingFolder)
+                    containingFolder->addFiles(QStringList(targetFile));
+            }
+        } else {
+            allSuccessful = false;
+        }
+    }
+
+    return allSuccessful;
+}
+
+void createFlowActionArea(const SelectionContext &selectionContext)
+{
+    AbstractView *view = selectionContext.view();
+
+    QTC_ASSERT(view && selectionContext.hasSingleSelectedModelNode(), return);
+    ModelNode container = selectionContext.currentSingleSelectedNode();
+    QTC_ASSERT(container.isValid(), return);
+    QTC_ASSERT(container.metaInfo().isValid(), return);
+
+    NodeMetaInfo actionAreaMetaInfo = view->model()->metaInfo("FlowView.FlowActionArea", -1, -1);
+    QTC_ASSERT(actionAreaMetaInfo.isValid(), return);
+
+    const QPointF pos = selectionContext.scenePosition().isNull() ? QPointF() : selectionContext.scenePosition() - QmlItemNode(container).flowPosition();
+
+    view->executeInTransaction("DesignerActionManager:createFlowActionArea",
+                               [view, container, actionAreaMetaInfo, pos](){
+
+                                   ModelNode flowActionNode =
+                                       view->createModelNode("FlowView.FlowActionArea",
+                                                             actionAreaMetaInfo.majorVersion(),
+                                                             actionAreaMetaInfo.minorVersion());
+
+                                   if (!pos.isNull()) {
+                                       flowActionNode.variantProperty("x").setValue(pos.x());
+                                       flowActionNode.variantProperty("y").setValue(pos.y());
+                                   }
+
+                                   container.defaultNodeListProperty().reparentHere(flowActionNode);
+                                   view->setSelectedModelNode(flowActionNode);
+                               });
+
+}
+
+void addTransition(const SelectionContext &selectionContext)
+{
+    if (selectionContext.view()) {
+        AbstractView *view = selectionContext.view();
+        QmlFlowTargetNode targetNode = selectionContext.targetNode();
+        QmlFlowTargetNode sourceNode = selectionContext.currentSingleSelectedNode();
+
+        QTC_ASSERT(targetNode.isValid(), return);
+        QTC_ASSERT(sourceNode.isValid(), return);
+
+
+
+        view->executeInTransaction("DesignerActionManager:addTransition",
+                                   [targetNode, &sourceNode](){
+                                       sourceNode.assignTargetItem(targetNode);
+                                   });
+    }
+}
+
+void addFlowEffect(const SelectionContext &selectionContext, const TypeName &typeName)
+{
+   AbstractView *view = selectionContext.view();
+
+   QTC_ASSERT(view && selectionContext.hasSingleSelectedModelNode(), return);
+   ModelNode container = selectionContext.currentSingleSelectedNode();
+   QTC_ASSERT(container.isValid(), return);
+   QTC_ASSERT(container.metaInfo().isValid(), return);
+   QTC_ASSERT(QmlItemNode::isFlowTransition(container), return);
+
+   NodeMetaInfo effectMetaInfo = view->model()->metaInfo("FlowView." + typeName, -1, -1);
+   QTC_ASSERT(typeName == "None" || effectMetaInfo.isValid(), return);
+
+   view->executeInTransaction("DesignerActionManager:addFlowEffect",
+                              [view, container, effectMetaInfo](){
+
+                                  if (container.hasProperty("effect"))
+                                      container.removeProperty("effect");
+
+                                  if (effectMetaInfo.isValid()) {
+                                      ModelNode effectNode =
+                                          view->createModelNode(effectMetaInfo.typeName(),
+                                                                effectMetaInfo.majorVersion(),
+                                                                effectMetaInfo.minorVersion());
+
+                                      container.nodeProperty("effect").reparentHere(effectNode);
+                                      view->setSelectedModelNode(effectNode);
+                                  }
+   });
+}
+
+void setFlowStartItem(const SelectionContext &selectionContext)
+{
+    AbstractView *view = selectionContext.view();
+
+    QTC_ASSERT(view && selectionContext.hasSingleSelectedModelNode(), return);
+    ModelNode node = selectionContext.currentSingleSelectedNode();
+    QTC_ASSERT(node.isValid(), return);
+    QTC_ASSERT(node.metaInfo().isValid(), return);
+    QmlFlowItemNode flowItem(node);
+    QTC_ASSERT(flowItem.isValid(), return);
+    QTC_ASSERT(flowItem.flowView().isValid(), return);
+    view->executeInTransaction("DesignerActionManager:setFlowStartItem",
+                               [&flowItem](){
+        flowItem.flowView().setStartFlowItem(flowItem);
+    });
 }
 
 } // namespace Mode

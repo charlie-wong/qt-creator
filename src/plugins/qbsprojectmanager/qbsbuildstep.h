@@ -30,13 +30,13 @@
 #include <projectexplorer/buildstep.h>
 #include <projectexplorer/task.h>
 
-#include <qbs.h>
-
 namespace Utils { class FancyLineEdit; }
 
 namespace QbsProjectManager {
 namespace Internal {
+class ErrorInfo;
 class QbsProject;
+class QbsSession;
 
 class QbsBuildStepConfigWidget;
 
@@ -51,50 +51,54 @@ public:
         ExpandVariables
     };
 
-    explicit QbsBuildStep(ProjectExplorer::BuildStepList *bsl);
-    QbsBuildStep(ProjectExplorer::BuildStepList *bsl, const QbsBuildStep *other);
+    QbsBuildStep(ProjectExplorer::BuildStepList *bsl, Core::Id id);
     ~QbsBuildStep() override;
-
-    bool init(QList<const BuildStep *> &earlierSteps) override;
-
-    void run(QFutureInterface<bool> &fi) override;
-
-    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
-
-    bool runInGuiThread() const override;
-    void cancel() override;
 
     QVariantMap qbsConfiguration(VariableHandling variableHandling) const;
     void setQbsConfiguration(const QVariantMap &config);
 
-    bool keepGoing() const;
-    bool showCommandLines() const;
-    bool install() const;
-    bool cleanInstallRoot() const;
+    bool keepGoing() const { return m_keepGoing; }
+    bool showCommandLines() const { return m_showCommandLines; }
+    bool install() const { return m_install; }
+    bool cleanInstallRoot() const { return m_cleanInstallDir; }
     bool hasCustomInstallRoot() const;
-    Utils::FileName installRoot() const;
+    Utils::FilePath installRoot(VariableHandling variableHandling = ExpandVariables) const;
     int maxJobs() const;
     QString buildVariant() const;
 
     void setForceProbes(bool force) { m_forceProbes = force; emit qbsConfigurationChanged(); }
     bool forceProbes() const { return m_forceProbes; }
 
-    bool isQmlDebuggingEnabled() const;
+    QbsBuildSystem *qbsBuildSystem() const;
+    QbsBuildStepData stepData() const;
 
-    bool fromMap(const QVariantMap &map) override;
-    QVariantMap toMap() const override;
+    void dropSession();
 
 signals:
     void qbsConfigurationChanged();
     void qbsBuildOptionsChanged();
 
 private:
-    void buildingDone(bool success);
+    bool init() override;
+    void setupOutputFormatter(Utils::OutputFormatter *formatter) override;
+    void doRun() override;
+    void doCancel() override;
+    ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
+    bool fromMap(const QVariantMap &map) override;
+    QVariantMap toMap() const override;
+
+    void buildingDone(const ErrorInfo &error);
     void reparsingDone(bool success);
     void handleTaskStarted(const QString &desciption, int max);
     void handleProgress(int value);
-    void handleCommandDescriptionReport(const QString &highlight, const QString &message);
-    void handleProcessResultReport(const qbs::ProcessResult &result);
+    void handleCommandDescription(const QString &message);
+    void handleProcessResult(
+            const Utils::FilePath &executable,
+            const QStringList &arguments,
+            const Utils::FilePath &workingDir,
+            const QStringList &stdOut,
+            const QStringList &stdErr,
+            bool success);
 
     void createTaskAndOutput(ProjectExplorer::Task::TaskType type,
                              const QString &message, const QString &file, int line);
@@ -112,10 +116,12 @@ private:
     void build();
     void finish();
 
-    QbsProject *qbsProject() const;
-
     QVariantMap m_qbsConfiguration;
-    qbs::BuildOptions m_qbsBuildOptions;
+    int m_maxJobCount = 0;
+    bool m_keepGoing = false;
+    bool m_showCommandLines = false;
+    bool m_install = true;
+    bool m_cleanInstallDir = false;
     bool m_forceProbes = false;
 
     // Temporary data:
@@ -123,28 +129,21 @@ private:
     QStringList m_activeFileTags;
     QStringList m_products;
 
-    QFutureInterface<bool> *m_fi;
-    qbs::BuildJob *m_job;
-    int m_progressBase;
+    QbsSession *m_session = nullptr;
+
+    QString m_currentTask;
+    int m_maxProgress;
     bool m_lastWasSuccess;
-    ProjectExplorer::IOutputParser *m_parser;
-    bool m_parsingProject;
+    bool m_parsingProject = false;
+    bool m_parsingAfterBuild = false;
 
     friend class QbsBuildStepConfigWidget;
 };
 
-class QbsBuildStepFactory : public ProjectExplorer::IBuildStepFactory
+class QbsBuildStepFactory : public ProjectExplorer::BuildStepFactory
 {
-    Q_OBJECT
-
 public:
-    explicit QbsBuildStepFactory(QObject *parent = 0);
-
-    QList<ProjectExplorer::BuildStepInfo>
-        availableSteps(ProjectExplorer::BuildStepList *parent) const override;
-
-    ProjectExplorer::BuildStep *create(ProjectExplorer::BuildStepList *parent, Core::Id id) override;
-    ProjectExplorer::BuildStep *clone(ProjectExplorer::BuildStepList *parent, ProjectExplorer::BuildStep *product) override;
+    QbsBuildStepFactory();
 };
 
 } // namespace Internal

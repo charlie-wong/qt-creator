@@ -24,57 +24,87 @@
 **
 ****************************************************************************/
 
-#include "baremetalplugin.h"
 #include "baremetalconstants.h"
-#include "baremetaldeviceconfigurationfactory.h"
-#include "baremetalruncontrolfactory.h"
-#include "baremetalrunconfigurationfactory.h"
+#include "baremetaldebugsupport.h"
+#include "baremetaldevice.h"
+#include "baremetalplugin.h"
+#include "baremetalrunconfiguration.h"
 
-#include "gdbserverproviderssettingspage.h"
-#include "gdbserverprovidermanager.h"
+#include "debugserverprovidermanager.h"
+#include "debugserverproviderssettingspage.h"
 
-#include <coreplugin/icore.h>
-#include <coreplugin/icontext.h>
+#include "iarewtoolchain.h"
+#include "keiltoolchain.h"
+#include "sdcctoolchain.h"
+
+#include <coreplugin/actionmanager/actioncontainer.h>
 #include <coreplugin/actionmanager/actionmanager.h>
 #include <coreplugin/actionmanager/command.h>
-#include <coreplugin/actionmanager/actioncontainer.h>
 #include <coreplugin/coreconstants.h>
+#include <coreplugin/icontext.h>
+#include <coreplugin/icore.h>
 
-#include <QAction>
-#include <QMessageBox>
-#include <QMainWindow>
-#include <QMenu>
-#include <QtPlugin>
+#include <projectexplorer/deployconfiguration.h>
+
+using namespace ProjectExplorer;
 
 namespace BareMetal {
 namespace Internal {
 
-BareMetalPlugin::BareMetalPlugin()
+class BareMetalDeployConfigurationFactory : public DeployConfigurationFactory
 {
-    setObjectName(QLatin1String("BareMetalPlugin"));
-}
+public:
+    BareMetalDeployConfigurationFactory()
+    {
+        setConfigBaseId("BareMetal.DeployConfiguration");
+        setDefaultDisplayName(QCoreApplication::translate("BareMetalDeployConfiguration",
+                                                          "Deploy to BareMetal Device"));
+        addSupportedTargetDeviceType(Constants::BareMetalOsType);
+    }
+};
+
+
+// BareMetalPluginPrivate
+
+class BareMetalPluginPrivate
+{
+public:
+    IarToolChainFactory iarToolChainFactory;
+    KeilToolChainFactory keilToolChainFactory;
+    SdccToolChainFactory sdccToolChainFactory;
+    BareMetalDeviceFactory deviceFactory;
+    BareMetalRunConfigurationFactory runConfigurationFactory;
+    BareMetalCustomRunConfigurationFactory customRunConfigurationFactory;
+    DebugServerProvidersSettingsPage debugServerProviderSettinsPage;
+    DebugServerProviderManager debugServerProviderManager;
+    BareMetalDeployConfigurationFactory deployConfigurationFactory;
+
+    RunWorkerFactory runWorkerFactory{
+        RunWorkerFactory::make<BareMetalDebugSupport>(),
+        {ProjectExplorer::Constants::NORMAL_RUN_MODE, ProjectExplorer::Constants::DEBUG_RUN_MODE},
+        {runConfigurationFactory.id(), customRunConfigurationFactory.id()}
+    };
+};
+
+// BareMetalPlugin
 
 BareMetalPlugin::~BareMetalPlugin()
 {
+    delete d;
 }
 
 bool BareMetalPlugin::initialize(const QStringList &arguments, QString *errorString)
 {
-   Q_UNUSED(arguments)
-   Q_UNUSED(errorString)
+    Q_UNUSED(arguments)
+    Q_UNUSED(errorString)
 
-   addAutoReleasedObject(new BareMetalDeviceConfigurationFactory);
-   addAutoReleasedObject(new BareMetalRunControlFactory);
-   addAutoReleasedObject(new BareMetalRunConfigurationFactory);
-   addAutoReleasedObject(new GdbServerProvidersSettingsPage);
-   addAutoReleasedObject(new GdbServerProviderManager);
-
-   return true;
+    d = new BareMetalPluginPrivate;
+    return true;
 }
 
 void BareMetalPlugin::extensionsInitialized()
 {
-    GdbServerProviderManager::instance()->restoreProviders();
+    DebugServerProviderManager::instance()->restoreProviders();
 }
 
 } // namespace Internal

@@ -22,6 +22,10 @@
 ** be met: https://www.gnu.org/licenses/gpl-3.0.html.
 **
 ****************************************************************************/
+
+#pragma once
+
+#include <gtest/gtest.h>
 #include <QQueue>
 
 class QueueTest : public ::testing::Test

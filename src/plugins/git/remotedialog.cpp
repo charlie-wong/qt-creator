@@ -53,7 +53,7 @@ public:
         m_remoteNames(remoteNames)
     {
         m_ui.setupUi(this);
-        setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
+        m_ui.nameEdit->setHistoryCompleter("Git.RemoteNames");
         m_ui.nameEdit->setValidationFunction([this](Utils::FancyLineEdit *edit, QString *errorMessage) {
             if (!edit)
                 return false;
@@ -74,7 +74,7 @@ public:
 
             if (m_remoteNames.contains(input)) {
                 if (errorMessage)
-                    *errorMessage = tr("A remote with the name \"%1\" already exists.").arg(input);
+                    *errorMessage = RemoteDialog::tr("A remote with the name \"%1\" already exists.").arg(input);
                 return false;
             }
 
@@ -85,13 +85,14 @@ public:
             m_ui.buttonBox->button(QDialogButtonBox::Ok)->setEnabled(m_ui.nameEdit->isValid());
         });
 
+        m_ui.urlEdit->setHistoryCompleter("Git.RemoteUrls");
         m_ui.urlEdit->setValidationFunction([](Utils::FancyLineEdit *edit, QString *errorMessage) {
             if (!edit || edit->text().isEmpty())
                 return false;
 
             const GitRemote r(edit->text());
             if (!r.isValid && errorMessage)
-                *errorMessage = tr("The URL may not be valid.");
+                *errorMessage = RemoteDialog::tr("The URL may not be valid.");
 
             return r.isValid;
         });
@@ -127,7 +128,6 @@ RemoteDialog::RemoteDialog(QWidget *parent) :
     m_remoteModel(new RemoteModel(this))
 {
     setModal(false);
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     setAttribute(Qt::WA_DeleteOnClose, true); // Do not update unnecessarily
 
     m_ui->setupUi(this);
@@ -205,7 +205,7 @@ void RemoteDialog::pushToRemote()
 
     const int row = indexList.at(0).row();
     const QString remoteName = m_remoteModel->remoteName(row);
-    GitPlugin::client()->push(m_remoteModel->workingDirectory(), {remoteName});
+    GitClient::instance()->push(m_remoteModel->workingDirectory(), {remoteName});
 }
 
 void RemoteDialog::fetchFromRemote()
@@ -216,14 +216,14 @@ void RemoteDialog::fetchFromRemote()
 
     int row = indexList.at(0).row();
     const QString remoteName = m_remoteModel->remoteName(row);
-    GitPlugin::client()->fetch(m_remoteModel->workingDirectory(), remoteName);
+    GitClient::instance()->fetch(m_remoteModel->workingDirectory(), remoteName);
 }
 
 void RemoteDialog::updateButtonState()
 {
     const QModelIndexList indexList = m_ui->remoteView->selectionModel()->selectedIndexes();
 
-    const bool haveSelection = (indexList.count() > 0);
+    const bool haveSelection = !indexList.isEmpty();
     m_ui->addButton->setEnabled(true);
     m_ui->fetchButton->setEnabled(haveSelection);
     m_ui->pushButton->setEnabled(haveSelection);

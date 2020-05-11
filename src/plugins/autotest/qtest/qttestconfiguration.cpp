@@ -27,7 +27,10 @@
 #include "qttestconstants.h"
 #include "qttestoutputreader.h"
 #include "qttestsettings.h"
-#include "../testframeworkmanager.h"
+#include "qttest_utils.h"
+#include "../autotestplugin.h"
+#include "../itestframework.h"
+#include "../testsettings.h"
 
 namespace Autotest {
 namespace Internal {
@@ -35,33 +38,48 @@ namespace Internal {
 TestOutputReader *QtTestConfiguration::outputReader(const QFutureInterface<TestResultPtr> &fi,
                                                     QProcess *app) const
 {
-    return new QtTestOutputReader(fi, app, buildDirectory());
+    auto qtSettings = dynamic_cast<QtTestSettings *>(framework()->frameworkSettings());
+    const QtTestOutputReader::OutputMode mode = qtSettings && qtSettings->useXMLOutput
+            ? QtTestOutputReader::XML
+            : QtTestOutputReader::PlainText;
+    return new QtTestOutputReader(fi, app, buildDirectory(), projectFile(), mode, TestType::QtTest);
 }
 
-QStringList QtTestConfiguration::argumentsForTestRunner() const
+QStringList QtTestConfiguration::argumentsForTestRunner(QStringList *omitted) const
 {
-    static const Core::Id id
-            = Core::Id(Constants::FRAMEWORK_PREFIX).withSuffix(QtTest::Constants::FRAMEWORK_NAME);
-
-    QStringList arguments("-xml");
-    if (testCases().count())
-        arguments << testCases();
-
-    TestFrameworkManager *manager = TestFrameworkManager::instance();
-    auto qtSettings = qSharedPointerCast<QtTestSettings>(manager->settingsForTestFramework(id));
-    if (qtSettings.isNull())
+    QStringList arguments;
+    if (AutotestPlugin::settings()->processArgs) {
+        arguments.append(QTestUtils::filterInterfering(
+                             runnable().commandLineArguments.split(' ', QString::SkipEmptyParts),
+                             omitted, false));
+    }
+    auto qtSettings = dynamic_cast<QtTestSettings *>(framework()->frameworkSettings());
+    if (!qtSettings)
         return arguments;
+    if (qtSettings->useXMLOutput)
+        arguments << "-xml";
+    if (!testCases().isEmpty())
+        arguments << testCases();
 
     const QString &metricsOption = QtTestSettings::metricsTypeToOption(qtSettings->metrics);
     if (!metricsOption.isEmpty())
         arguments << metricsOption;
 
-    if (runMode() == DebuggableTestConfiguration::Debug) {
-        if (qtSettings->noCrashHandler)
-            arguments << "-nocrashhandler";
-    }
+    if (qtSettings->verboseBench)
+        arguments << "-vb";
+
+    if (qtSettings->logSignalsSlots)
+        arguments << "-vs";
+
+    if (isDebugRunMode() && qtSettings->noCrashHandler)
+        arguments << "-nocrashhandler";
 
     return arguments;
+}
+
+Utils::Environment QtTestConfiguration::filteredEnvironment(const Utils::Environment &original) const
+{
+    return QTestUtils::prepareBasicEnvironment(original);
 }
 
 } // namespace Internal

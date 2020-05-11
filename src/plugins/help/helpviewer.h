@@ -48,8 +48,8 @@ public:
     };
     Q_DECLARE_FLAGS(Actions, Action)
 
-    explicit HelpViewer(QWidget *parent = 0);
-    ~HelpViewer() { }
+    explicit HelpViewer(QWidget *parent = nullptr);
+    ~HelpViewer() override;
 
     virtual QFont viewerFont() const = 0;
     virtual void setViewerFont(const QFont &font) = 0;
@@ -57,12 +57,13 @@ public:
     virtual qreal scale() const = 0;
     virtual void setScale(qreal scale) = 0;
 
+    void setScrollWheelZoomingEnabled(bool enabled);
+    bool isScrollWheelZoomingEnabled() const;
+
     virtual QString title() const = 0;
 
     virtual QUrl source() const = 0;
-    // metacall in HelpPlugin::updateSideBarSource
-    Q_INVOKABLE virtual void setSource(const QUrl &url) = 0;
-    virtual void highlightId(const QString &id) { Q_UNUSED(id) }
+    virtual void setSource(const QUrl &url) = 0;
 
     virtual void setHtml(const QString &html) = 0;
 
@@ -75,7 +76,7 @@ public:
     bool isActionVisible(Action action);
 
     virtual bool findText(const QString &text, Core::FindFlags flags,
-        bool incremental, bool fromSearch, bool *wrapped = 0) = 0;
+        bool incremental, bool fromSearch, bool *wrapped = nullptr) = 0;
 
     bool handleForwardBackwardMouseButtons(QMouseEvent *e);
 
@@ -106,10 +107,16 @@ signals:
     void externalPageRequested(const QUrl &url);
 
 protected:
+    void wheelEvent(QWheelEvent *event) override;
+
     void slotLoadStarted();
     void slotLoadFinished();
 
-    Actions m_visibleActions = 0;
+    void restoreOverrideCursor();
+
+    Actions m_visibleActions;
+    bool m_scrollWheelZoomingEnabled = true;
+    int m_loadOverrideStack = 0;
 };
 
 }   // namespace Internal

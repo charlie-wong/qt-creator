@@ -38,6 +38,7 @@
 #include <QUrl>
 
 #include <QDebug>
+#include <QtCore/qregularexpression.h>
 
 namespace QmlDesigner {
 
@@ -45,10 +46,13 @@ static ModelNode createNodeFromNode(const ModelNode &modelNode,const QHash<QStri
 
 static QString fixExpression(const QString &expression, const QHash<QString, QString> &idRenamingHash)
 {
+    const QString pattern("\\b%1\\b"); // Match only full ids
     QString newExpression = expression;
-    foreach (const QString &id, idRenamingHash.keys()) {
-        if (newExpression.contains(id))
-            newExpression = newExpression.replace(id, idRenamingHash.value(id));
+    const auto keys = idRenamingHash.keys();
+    for (const QString &id : keys) {
+        QRegularExpression re(pattern.arg(id));
+        if (newExpression.contains(re))
+            newExpression = newExpression.replace(re, idRenamingHash.value(id));
     }
     return newExpression;
 }
@@ -58,6 +62,13 @@ static void syncVariantProperties(ModelNode &outputNode, const ModelNode &inputN
     foreach (const VariantProperty &variantProperty, inputNode.variantProperties()) {
         outputNode.variantProperty(variantProperty.name()).setValue(variantProperty.value());
     }
+}
+
+static void syncAuxiliaryProperties(ModelNode &outputNode, const ModelNode &inputNode)
+{
+    auto tmp = inputNode.auxiliaryData();
+    for (auto iter = tmp.begin(); iter != tmp.end(); ++iter)
+        outputNode.setAuxiliaryData(iter.key(), iter.value());
 }
 
 static void syncBindingProperties(ModelNode &outputNode, const ModelNode &inputNode, const QHash<QString, QString> &idRenamingHash)
@@ -138,6 +149,7 @@ static ModelNode createNodeFromNode(const ModelNode &modelNode,const QHash<QStri
     NodeMetaInfo nodeMetaInfo = view->model()->metaInfo(modelNode.type());
     ModelNode newNode(view->createModelNode(modelNode.type(), nodeMetaInfo.majorVersion(), nodeMetaInfo.minorVersion(),
                                             propertyList, variantPropertyList, modelNode.nodeSource(), modelNode.nodeSourceType()));
+    syncAuxiliaryProperties(newNode, modelNode);
     syncBindingProperties(newNode, modelNode, idRenamingHash);
     syncId(newNode, modelNode, idRenamingHash);
     syncNodeProperties(newNode, modelNode, idRenamingHash, view);
@@ -165,34 +177,28 @@ ModelNode ModelMerger::insertModel(const ModelNode &modelNode)
 
     return newNode;
 }
-
 void ModelMerger::replaceModel(const ModelNode &modelNode)
 {
         view()->model()->changeImports(modelNode.model()->imports(), {});
         view()->model()->setFileUrl(modelNode.model()->fileUrl());
 
-    try {
-        RewriterTransaction transaction(view()->beginRewriterTransaction(QByteArrayLiteral("ModelMerger::replaceModel")));
+        view()->executeInTransaction("ModelMerger::replaceModel", [this, modelNode](){
+            ModelNode rootNode(view()->rootModelNode());
 
-        ModelNode rootNode(view()->rootModelNode());
+            foreach (const PropertyName &propertyName, rootNode.propertyNames())
+                rootNode.removeProperty(propertyName);
 
-        foreach (const PropertyName &propertyName, rootNode.propertyNames())
-            rootNode.removeProperty(propertyName);
+            QHash<QString, QString> idRenamingHash;
+            setupIdRenamingHash(modelNode, idRenamingHash, view());
 
-        QHash<QString, QString> idRenamingHash;
-        setupIdRenamingHash(modelNode, idRenamingHash, view());
-
-        syncVariantProperties(rootNode, modelNode);
-        syncBindingProperties(rootNode, modelNode, idRenamingHash);
-        syncId(rootNode, modelNode, idRenamingHash);
-        syncNodeProperties(rootNode, modelNode, idRenamingHash, view());
-        syncNodeListProperties(rootNode, modelNode, idRenamingHash, view());
-        m_view->changeRootNodeType(modelNode.type(), modelNode.majorVersion(), modelNode.minorVersion());
-
-        transaction.commit();
-    } catch (const RewritingException &e) {
-        qWarning() << e.description(); //silent error
-    }
+            syncAuxiliaryProperties(rootNode, modelNode);
+            syncVariantProperties(rootNode, modelNode);
+            syncBindingProperties(rootNode, modelNode, idRenamingHash);
+            syncId(rootNode, modelNode, idRenamingHash);
+            syncNodeProperties(rootNode, modelNode, idRenamingHash, view());
+            syncNodeListProperties(rootNode, modelNode, idRenamingHash, view());
+            m_view->changeRootNodeType(modelNode.type(), modelNode.majorVersion(), modelNode.minorVersion());
+        });
 }
 
 } //namespace QmlDesigner

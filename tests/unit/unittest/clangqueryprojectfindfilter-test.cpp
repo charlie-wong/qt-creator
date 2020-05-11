@@ -25,6 +25,7 @@
 
 #include "googletest.h"
 
+#include "mockprogressmanager.h"
 #include "mockrefactoringserver.h"
 #include "mocksearch.h"
 #include "mocksearchhandle.h"
@@ -32,149 +33,29 @@
 #include <clangqueryprojectsfindfilter.h>
 #include <refactoringclient.h>
 
-#include <requestsourcelocationforrenamingmessage.h>
-#include <requestsourcerangesanddiagnosticsforquerymessage.h>
+#include <clangrefactoringservermessages.h>
 
-#include <cpptools/clangcompileroptionsbuilder.h>
+#include <cpptools/compileroptionsbuilder.h>
 #include <cpptools/projectpart.h>
+#include <projectexplorer/project.h>
 
 namespace {
 
-using ::testing::_;
-using ::testing::NiceMock;
-using ::testing::NotNull;
-using ::testing::Return;
-using ::testing::ReturnNew;
-using ::testing::DefaultValue;
-using ::testing::ByMove;
+using testing::_;
+using testing::AllOf;
+using testing::Field;
+using testing::NiceMock;
+using testing::NotNull;
+using testing::Return;
+using testing::ReturnNew;
+using testing::DefaultValue;
+using testing::ByMove;
 
-using CppTools::ClangCompilerOptionsBuilder;
+using CppTools::CompilerOptionsBuilder;
+using ClangBackEnd::V2::FileContainer;
 
-class ClangQueryProjectFindFilter : public ::testing::Test
-{
-protected:
-    void SetUp();
-    std::unique_ptr<ClangRefactoring::SearchHandle> createSearchHandle();
-
-protected:
-    NiceMock<MockRefactoringServer> mockRefactoringServer;
-    NiceMock<MockSearch> mockSearch;
-    ClangRefactoring::RefactoringClient refactoringClient;
-    ClangRefactoring::ClangQueryProjectsFindFilter findFilter{mockRefactoringServer, mockSearch, refactoringClient};
-    QString findDeclQueryText{"functionDecl()"};
-    QString curentDocumentFilePath{"/path/to/file.cpp"};
-    QString unsavedDocumentContent{"void f();"};
-    std::vector<Utils::SmallStringVector> commandLines;
-    std::vector<CppTools::ProjectPart::Ptr> projectsParts;
-    ClangBackEnd::V2::FileContainer unsavedContent{{"/path/to", "unsaved.cpp"},
-                                                  "void f();",
-                                                  {}};
-};
-
-TEST_F(ClangQueryProjectFindFilter, SupportedFindFlags)
-{
-    auto findFlags = findFilter.supportedFindFlags();
-
-    ASSERT_FALSE(findFlags);
-}
-
-TEST_F(ClangQueryProjectFindFilter, IsNotUsableForUnusableServer)
-{
-    auto isUsable = findFilter.isUsable();
-
-    ASSERT_FALSE(isUsable);
-}
-
-TEST_F(ClangQueryProjectFindFilter, IsUsableForUsableServer)
-{
-    mockRefactoringServer.setUsable(true);
-
-    auto isUsable = findFilter.isUsable();
-
-    ASSERT_TRUE(isUsable);
-}
-
-TEST_F(ClangQueryProjectFindFilter, ServerIsUsableForUsableFindFilter)
-{
-    findFilter.setUsable(true);
-
-    auto isUsable = mockRefactoringServer.isUsable();
-
-    ASSERT_TRUE(isUsable);
-}
-
-TEST_F(ClangQueryProjectFindFilter, SearchHandleSetIsSetAfterFindAll)
-{
-    findFilter.findAll(findDeclQueryText);
-
-    auto searchHandle = refactoringClient.searchHandle();
-
-    ASSERT_THAT(searchHandle, NotNull());
-}
-
-TEST_F(ClangQueryProjectFindFilter, FindAllIsCallingStartNewSearch)
-{
-    EXPECT_CALL(mockSearch, startNewSearch(QStringLiteral("Clang Query"),
-                                           findDeclQueryText))
-            .Times(1);
-
-    findFilter.findAll(findDeclQueryText);
-}
-
-TEST_F(ClangQueryProjectFindFilter, FindAllIsSettingExprectedResultCountInTheRefactoringClient)
-{
-    findFilter.findAll(findDeclQueryText);
-
-    ASSERT_THAT(refactoringClient.expectedResultCount(), 3);
-}
-
-TEST_F(ClangQueryProjectFindFilter, FindAllIsCallingRequestSourceRangesAndDiagnosticsForQueryMessage)
-{
-    ClangBackEnd::RequestSourceRangesAndDiagnosticsForQueryMessage message(findDeclQueryText,
-                                                                           {{{"/path/to", "file1.h"},
-                                                                             "",
-                                                                             commandLines[0].clone()},
-                                                                            {{"/path/to", "file1.cpp"},
-                                                                             "",
-                                                                             commandLines[1].clone()},
-                                                                            {{"/path/to", "file2.cpp"},
-                                                                             "",
-                                                                             commandLines[2].clone()}},
-                                                                           {unsavedContent.clone()});
-
-    EXPECT_CALL(mockRefactoringServer, requestSourceRangesAndDiagnosticsForQueryMessage(message))
-            .Times(1);
-
-    findFilter.findAll(findDeclQueryText);
-}
-
-TEST_F(ClangQueryProjectFindFilter, CancelSearch)
-{
-    EXPECT_CALL(mockRefactoringServer, cancel())
-            .Times(1);
-
-    findFilter.findAll(findDeclQueryText);
-
-    findFilter.searchHandleForTestOnly()->cancel();
-}
-
-std::vector<CppTools::ProjectPart::Ptr> createProjectParts()
-{
-    auto projectPart1 = CppTools::ProjectPart::Ptr(new CppTools::ProjectPart);
-    projectPart1->files.append({"/path/to/file1.h", CppTools::ProjectFile::CXXHeader});
-    projectPart1->files.append({"/path/to/file1.cpp", CppTools::ProjectFile::CXXSource});
-
-    auto projectPart2 = CppTools::ProjectPart::Ptr(new CppTools::ProjectPart);
-    projectPart2->files.append({"/path/to/file2.cpp", CppTools::ProjectFile::CXXSource});
-    projectPart2->files.append({"/path/to/unsaved.cpp", CppTools::ProjectFile::CXXSource});
-    projectPart2->files.append({"/path/to/cheader.h", CppTools::ProjectFile::CHeader});
-
-
-    return {projectPart1, projectPart2};
-}
-
-std::vector<Utils::SmallStringVector>
-createCommandLines(const std::vector<CppTools::ProjectPart::Ptr> &projectParts)
+std::vector<Utils::SmallStringVector> createCommandLines(
+    const std::vector<CppTools::ProjectPart::Ptr> &projectParts)
 {
     using Filter = ClangRefactoring::ClangQueryProjectsFindFilter;
 
@@ -192,26 +73,152 @@ createCommandLines(const std::vector<CppTools::ProjectPart::Ptr> &projectParts)
     return commandLines;
 }
 
-void ClangQueryProjectFindFilter::SetUp()
+class ClangQueryProjectFindFilter : public ::testing::Test
 {
-    projectsParts = createProjectParts();
-    commandLines = createCommandLines(projectsParts);
+protected:
+    void SetUp()
+    {
+        projectsParts = createProjectParts();
+        commandLines = createCommandLines(projectsParts);
 
-    findFilter.setProjectParts(projectsParts);
-    findFilter.setUnsavedContent({unsavedContent.clone()});
+        findFilter.setProjectParts(projectsParts);
+        findFilter.setUnsavedContent({unsavedContent.clone()});
 
-
-    ON_CALL(mockSearch, startNewSearch(QStringLiteral("Clang Query"), findDeclQueryText))
+        ON_CALL(mockSearch, startNewSearch(QStringLiteral("Clang Query"), findDeclQueryText))
             .WillByDefault(Return(ByMove(createSearchHandle())));
+    }
+    std::unique_ptr<ClangRefactoring::SearchHandle> createSearchHandle()
+    {
+        auto handle = std::make_unique<NiceMock<MockSearchHandle>>();
+        handle->setRefactoringServer(&mockRefactoringServer);
 
+        return handle;
+    }
+
+    std::vector<CppTools::ProjectPart::Ptr> createProjectParts()
+    {
+        auto projectPart1 = CppTools::ProjectPart::Ptr(new CppTools::ProjectPart);
+        projectPart1->project = &project;
+        projectPart1->files.append({"/path/to/file1.h", CppTools::ProjectFile::CXXHeader});
+        projectPart1->files.append({"/path/to/file1.cpp", CppTools::ProjectFile::CXXSource});
+
+        auto projectPart2 = CppTools::ProjectPart::Ptr(new CppTools::ProjectPart);
+        projectPart2->project = &project;
+        projectPart2->files.append({"/path/to/file2.cpp", CppTools::ProjectFile::CXXSource});
+        projectPart2->files.append({"/path/to/unsaved.cpp", CppTools::ProjectFile::CXXSource});
+        projectPart2->files.append({"/path/to/cheader.h", CppTools::ProjectFile::CHeader});
+
+        return {projectPart1, projectPart2};
+    }
+
+protected:
+    NiceMock<MockRefactoringServer> mockRefactoringServer;
+    NiceMock<MockSearch> mockSearch;
+    NiceMock<MockProgressManager> mockProgressManager;
+    ClangRefactoring::RefactoringClient refactoringClient{mockProgressManager};
+    ClangRefactoring::ClangQueryProjectsFindFilter findFilter{mockRefactoringServer, mockSearch, refactoringClient};
+    QString findDeclQueryText{"functionDecl()"};
+    QString curentDocumentFilePath{"/path/to/file.cpp"};
+    QString unsavedDocumentContent{"void f();"};
+    std::vector<Utils::SmallStringVector> commandLines;
+    std::vector<CppTools::ProjectPart::Ptr> projectsParts;
+    ClangBackEnd::V2::FileContainer unsavedContent{{"/path/to", "unsaved.cpp"}, 1, "void f();", {}};
+    ProjectExplorer::Project project;
+};
+
+TEST_F(ClangQueryProjectFindFilter, SupportedFindFlags)
+{
+    auto findFlags = findFilter.supportedFindFlags();
+
+    ASSERT_FALSE(findFlags);
 }
 
-std::unique_ptr<ClangRefactoring::SearchHandle> ClangQueryProjectFindFilter::createSearchHandle()
+TEST_F(ClangQueryProjectFindFilter, IsNotUsableForUnusableServer)
 {
-    std::unique_ptr<ClangRefactoring::SearchHandle> handle(new NiceMock<MockSearchHandle>);
-    handle->setRefactoringServer(&mockRefactoringServer);
+    auto isUsable = findFilter.isAvailable();
 
-    return handle;
+    ASSERT_FALSE(isUsable);
+}
+
+TEST_F(ClangQueryProjectFindFilter, IsUsableForUsableServer)
+{
+    mockRefactoringServer.setAvailable(true);
+
+    auto isUsable = findFilter.isAvailable();
+
+    ASSERT_TRUE(isUsable);
+}
+
+TEST_F(ClangQueryProjectFindFilter, ServerIsUsableForUsableFindFilter)
+{
+    findFilter.setAvailable(true);
+
+    auto isUsable = mockRefactoringServer.isAvailable();
+
+    ASSERT_TRUE(isUsable);
+}
+
+TEST_F(ClangQueryProjectFindFilter, SearchHandleSetIsSetAfterFindAll)
+{
+    findFilter.find(findDeclQueryText);
+
+    auto searchHandle = refactoringClient.searchHandle();
+
+    ASSERT_THAT(searchHandle, NotNull());
+}
+
+TEST_F(ClangQueryProjectFindFilter, FindAllIsCallingStartNewSearch)
+{
+    EXPECT_CALL(mockSearch, startNewSearch(QStringLiteral("Clang Query"),
+                                           findDeclQueryText));
+
+    findFilter.find(findDeclQueryText);
+}
+
+TEST_F(ClangQueryProjectFindFilter, FindAllIsSettingExprectedResultCountInTheRefactoringClient)
+{
+    findFilter.find(findDeclQueryText);
+
+    ASSERT_THAT(refactoringClient.expectedResultCount(), 3);
+}
+
+TEST_F(ClangQueryProjectFindFilter, FindAllIsCallingRequestSourceRangesAndDiagnosticsForQueryMessage)
+{
+    ClangBackEnd::RequestSourceRangesForQueryMessage message(
+        findDeclQueryText,
+        {{{"/path/to", "file1.h"}, 1, "", commandLines[0].clone()},
+         {{"/path/to", "file1.cpp"}, 2, "", commandLines[1].clone()},
+         {{"/path/to", "file2.cpp"}, 3, "", commandLines[2].clone()}},
+        {unsavedContent.clone()});
+
+    EXPECT_CALL(mockRefactoringServer, requestSourceRangesForQueryMessage(message));
+
+    findFilter.find(findDeclQueryText);
+}
+
+TEST_F(ClangQueryProjectFindFilter, CancelSearch)
+{
+    auto searchHandle = findFilter.find(findDeclQueryText);
+
+    EXPECT_CALL(mockRefactoringServer, cancel());
+
+    searchHandle->cancel();
+}
+
+TEST_F(ClangQueryProjectFindFilter, CallingRequestSourceRangesAndDiagnostics)
+{
+    using Message = ClangBackEnd::RequestSourceRangesAndDiagnosticsForQueryMessage;
+    Utils::SmallString queryText = "functionDecl()";
+    Utils::SmallString exampleContent = "void foo();";
+
+    EXPECT_CALL(mockRefactoringServer,
+                requestSourceRangesAndDiagnosticsForQueryMessage(
+                    AllOf(
+                        Field(&Message::source,
+                              Field(&FileContainer::unsavedFileContent, exampleContent)),
+                        Field(&Message::query, queryText))));
+
+    findFilter.requestSourceRangesAndDiagnostics(QString(queryText), QString(exampleContent));
 }
 
 }

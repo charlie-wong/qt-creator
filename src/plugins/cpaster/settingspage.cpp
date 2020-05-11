@@ -34,72 +34,59 @@
 
 namespace CodePaster {
 
-SettingsWidget::SettingsWidget(const QStringList &protocols, QWidget *parent) :
-    QWidget(parent)
+class SettingsWidget final : public Core::IOptionsPageWidget
+{
+public:
+    SettingsWidget(const QStringList &protocols, Settings *settings);
+
+private:
+    void apply() final;
+
+    Settings *m_settings;
+    Internal::Ui::SettingsPage m_ui;
+};
+
+SettingsWidget::SettingsWidget(const QStringList &protocols, Settings *settings)
+    : m_settings(settings)
 {
     m_ui.setupUi(this);
     m_ui.defaultProtocol->addItems(protocols);
-}
 
-void SettingsWidget::setSettings(const Settings &settings)
-{
-    m_ui.userEdit->setText(settings.username);
-    const int index = m_ui.defaultProtocol->findText(settings.protocol);
+    m_ui.userEdit->setText(m_settings->username);
+    const int index = m_ui.defaultProtocol->findText(m_settings->protocol);
     m_ui.defaultProtocol->setCurrentIndex(index == -1 ? 0  : index);
-    m_ui.expirySpinBox->setValue(settings.expiryDays);
-    m_ui.clipboardBox->setChecked(settings.copyToClipboard);
-    m_ui.displayBox->setChecked(settings.displayOutput);
+    m_ui.expirySpinBox->setValue(m_settings->expiryDays);
+    m_ui.publicCheckBox->setChecked(m_settings->publicPaste);
+    m_ui.clipboardBox->setChecked(m_settings->copyToClipboard);
+    m_ui.displayBox->setChecked(m_settings->displayOutput);
 }
 
-Settings SettingsWidget::settings()
+void SettingsWidget::apply()
 {
     Settings rc;
     rc.username = m_ui.userEdit->text();
     rc.protocol = m_ui.defaultProtocol->currentText();
     rc.expiryDays = m_ui.expirySpinBox->value();
+    rc.publicPaste = m_ui.publicCheckBox->isChecked();
     rc.copyToClipboard = m_ui.clipboardBox->isChecked();
     rc.displayOutput = m_ui.displayBox->isChecked();
-    return rc;
-}
 
-SettingsPage::SettingsPage(const QSharedPointer<Settings> &settings) :
-    m_settings(settings), m_widget(nullptr)
-{
-    setId("A.CodePaster.General");
-    setDisplayName(tr("General"));
-    setCategory(Constants::CPASTER_SETTINGS_CATEGORY);
-    setDisplayCategory(QCoreApplication::translate("CodePaster",
-        Constants::CPASTER_SETTINGS_TR_CATEGORY));
-    setCategoryIcon(Utils::Icon(Constants::SETTINGS_CATEGORY_CPASTER_ICON));
-}
-
-SettingsPage::~SettingsPage()
-{
-}
-
-QWidget *SettingsPage::widget()
-{
-    if (!m_widget) {
-        m_widget = new SettingsWidget(m_protocols);
-        m_widget->setSettings(*m_settings);
-    }
-    return m_widget;
-}
-
-void SettingsPage::apply()
-{
-    if (!m_widget) // page was never shown
-        return;
-    const Settings newSettings = m_widget->settings();
-    if (newSettings != *m_settings) {
-        *m_settings = newSettings;
+    if (rc != *m_settings) {
+        *m_settings = rc;
         m_settings->toSettings(Core::ICore::settings());
     }
 }
 
-void SettingsPage::addProtocol(const QString &name)
+SettingsPage::SettingsPage(Settings *settings, const QStringList &protocolNames)
 {
-    m_protocols.append(name);
+    setId("A.CodePaster.General");
+    setDisplayName(tr("General"));
+    setCategory(Constants::CPASTER_SETTINGS_CATEGORY);
+    setDisplayCategory(QCoreApplication::translate("CodePaster", "Code Pasting"));
+    setCategoryIconPath(":/cpaster/images/settingscategory_cpaster.png");
+    setWidgetCreator([settings, protocolNames] {
+        return new SettingsWidget(protocolNames, settings);
+    });
 }
 
 } // namespace CodePaster

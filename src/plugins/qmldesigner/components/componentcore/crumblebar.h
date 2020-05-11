@@ -36,10 +36,10 @@ class CrumbleBar : public QObject
 {
     Q_OBJECT
 public:
-    explicit CrumbleBar(QObject *parent = 0);
-    ~CrumbleBar();
+    explicit CrumbleBar(QObject *parent = nullptr);
+    ~CrumbleBar() override;
 
-    void pushFile(const Utils::FileName &fileName);
+    void pushFile(const Utils::FilePath &fileName);
     void pushInFileComponent(const ModelNode &modelNode);
 
     void nextFileIsCalledInternally();
@@ -58,7 +58,7 @@ private:
 
 class CrumbleBarInfo {
 public:
-    Utils::FileName fileName;
+    Utils::FilePath fileName;
     QString displayName;
     ModelNode modelNode;
 };

@@ -25,11 +25,15 @@
 
 #include "quicktestvisitors.h"
 
+#include <cplusplus/Overview.h>
 #include <qmljs/parser/qmljsast_p.h>
 #include <qmljs/qmljsbind.h>
 #include <qmljs/qmljslink.h>
 #include <qmljs/qmljsutils.h>
 #include <utils/algorithm.h>
+#include <utils/qtcassert.h>
+
+#include <QDebug>
 
 namespace Autotest {
 namespace Internal {
@@ -84,6 +88,7 @@ static bool isDerivedFromTestCase(QmlJS::AST::UiQualifiedId *id, const QmlJS::Do
 bool TestQmlVisitor::visit(QmlJS::AST::UiObjectDefinition *ast)
 {
     const QStringRef name = ast->qualifiedTypeNameId->name;
+    m_objectIsTestStack.push(false);
     if (name != "TestCase") {
         if (!isDerivedFromTestCase(ast->qualifiedTypeNameId, m_currentDoc, m_snapshot))
             return true;
@@ -91,14 +96,21 @@ bool TestQmlVisitor::visit(QmlJS::AST::UiObjectDefinition *ast)
         return true; // find nested TestCase items as well
     }
 
-    m_typeIsTestCase = true;
-    m_currentTestCaseName.clear();
+    m_objectIsTestStack.top() = true;
     const auto sourceLocation = ast->firstSourceLocation();
-    m_testCaseLocation.m_name = m_currentDoc->fileName();
-    m_testCaseLocation.m_line = sourceLocation.startLine;
-    m_testCaseLocation.m_column = sourceLocation.startColumn - 1;
-    m_testCaseLocation.m_type = TestTreeItem::TestCase;
+    QuickTestCaseSpec currentSpec;
+    currentSpec.m_locationAndType.m_name = m_currentDoc->fileName();
+    currentSpec.m_locationAndType.m_line = sourceLocation.startLine;
+    currentSpec.m_locationAndType.m_column = sourceLocation.startColumn - 1;
+    currentSpec.m_locationAndType.m_type = TestTreeItem::TestCase;
+    m_caseParseStack.push(currentSpec);
     return true;
+}
+
+void TestQmlVisitor::endVisit(QmlJS::AST::UiObjectDefinition *)
+{
+    if (!m_objectIsTestStack.isEmpty() && m_objectIsTestStack.pop() && !m_caseParseStack.isEmpty())
+        m_testCases << m_caseParseStack.pop();
 }
 
 bool TestQmlVisitor::visit(QmlJS::AST::ExpressionStatement *ast)
@@ -109,12 +121,22 @@ bool TestQmlVisitor::visit(QmlJS::AST::ExpressionStatement *ast)
 
 bool TestQmlVisitor::visit(QmlJS::AST::UiScriptBinding *ast)
 {
-    const QStringRef name = ast->qualifiedId->name;
-    return name == "name";
+    if (m_objectIsTestStack.top())
+        m_expectTestCaseName = ast->qualifiedId->name == "name";
+    return m_expectTestCaseName;
+}
+
+void TestQmlVisitor::endVisit(QmlJS::AST::UiScriptBinding *)
+{
+    if (m_expectTestCaseName)
+        m_expectTestCaseName = false;
 }
 
 bool TestQmlVisitor::visit(QmlJS::AST::FunctionDeclaration *ast)
 {
+    if (m_caseParseStack.isEmpty())
+        return false;
+
     const QStringRef name = ast->name;
     if (name.startsWith("test_")
             || name.startsWith("benchmark_")
@@ -130,17 +152,80 @@ bool TestQmlVisitor::visit(QmlJS::AST::FunctionDeclaration *ast)
         else if (name.endsWith("_data"))
             locationAndType.m_type = TestTreeItem::TestDataFunction;
         else
-            locationAndType.m_type = TestTreeItem::TestFunctionOrSet;
+            locationAndType.m_type = TestTreeItem::TestFunction;
 
-        m_testFunctions.insert(name.toString(), locationAndType);
+        const QString nameStr = name.toString();
+        // identical test functions inside the same file are not working - will fail at runtime
+        if (!Utils::anyOf(m_caseParseStack.top().m_functions,
+                          [nameStr, locationAndType](const QuickTestFunctionSpec func) {
+                          return func.m_locationAndType.m_type == locationAndType.m_type
+                          && func.m_functionName == nameStr
+                          && func.m_locationAndType.m_name == locationAndType.m_name;
+        })) {
+            m_caseParseStack.top().m_functions.append(
+                        QuickTestFunctionSpec{nameStr, locationAndType});
+        }
     }
     return false;
 }
 
 bool TestQmlVisitor::visit(QmlJS::AST::StringLiteral *ast)
 {
-    if (m_typeIsTestCase)
-        m_currentTestCaseName = ast->value.toString();
+    if (m_expectTestCaseName) {
+        QTC_ASSERT(!m_caseParseStack.isEmpty(), return false);
+        m_caseParseStack.top().m_caseName = ast->value.toString();
+        m_expectTestCaseName = false;
+    }
+    return false;
+}
+
+void TestQmlVisitor::throwRecursionDepthError()
+{
+    qWarning("Warning: Hit maximum recursion depth while visiting AST in TestQmlVisitor");
+}
+
+/************************************** QuickTestAstVisitor *************************************/
+
+QuickTestAstVisitor::QuickTestAstVisitor(CPlusPlus::Document::Ptr doc,
+                                         const CPlusPlus::Snapshot &snapshot)
+    : ASTVisitor(doc->translationUnit())
+    , m_currentDoc(doc)
+    , m_snapshot(snapshot)
+{
+}
+
+bool QuickTestAstVisitor::visit(CPlusPlus::CallAST *ast)
+{
+    if (m_currentDoc.isNull())
+        return false;
+
+    if (const auto expressionAST = ast->base_expression) {
+        if (const auto idExpressionAST = expressionAST->asIdExpression()) {
+            if (const auto simpleNameAST = idExpressionAST->name->asSimpleName()) {
+                const CPlusPlus::Overview o;
+                const QString prettyName = o.prettyName(simpleNameAST->name);
+                if (prettyName == "quick_test_main" || prettyName == "quick_test_main_with_setup") {
+                    if (auto expressionListAST = ast->expression_list) {
+                        // third argument is the one we need, so skip current and next
+                        expressionListAST = expressionListAST->next; // argv
+                        expressionListAST = expressionListAST ? expressionListAST->next : nullptr; // testcase literal
+
+                        if (expressionListAST && expressionListAST->value) {
+                            const auto *stringLitAST = expressionListAST->value->asStringLiteral();
+                            if (!stringLitAST)
+                                return false;
+                            const auto *string
+                                    = translationUnit()->stringLiteral(stringLitAST->literal_token);
+                            if (string) {
+                                m_testBaseName = QString::fromUtf8(string->chars(),
+                                                                   int(string->size()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     return false;
 }
 

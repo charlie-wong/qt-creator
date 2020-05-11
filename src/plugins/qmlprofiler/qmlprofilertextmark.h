@@ -25,25 +25,27 @@
 #pragma once
 
 #include "qmleventlocation.h"
-#include "qmlprofilertool.h"
 #include <texteditor/textmark.h>
 
 namespace QmlProfiler {
 namespace Internal {
 
+class QmlProfilerViewManager;
+
 class QmlProfilerTextMark : public TextEditor::TextMark
 {
 public:
-    QmlProfilerTextMark(QmlProfilerTool *tool, int typeId, const QString &fileName, int lineNumber);
+    QmlProfilerTextMark(QmlProfilerViewManager *viewManager, int typeId,
+                        const Utils::FilePath &fileName, int lineNumber);
     void addTypeId(int typeId);
 
-    void paint(QPainter *painter, const QRect &rect) const override;
+    void paintIcon(QPainter *painter, const QRect &rect) const override;
     void clicked() override;
     bool isClickable() const override { return true; }
-    bool addToolTipContent(QLayout *target) override;
+    bool addToolTipContent(QLayout *target) const override;
 
 private:
-    QmlProfilerTool *m_tool;
+    QmlProfilerViewManager *m_viewManager;
     QVector<int> m_typeIds;
 };
 
@@ -51,11 +53,14 @@ class QmlProfilerTextMarkModel : public QObject
 {
 public:
     QmlProfilerTextMarkModel(QObject *parent = nullptr);
-    ~QmlProfilerTextMarkModel();
+    ~QmlProfilerTextMarkModel() override;
 
     void clear();
     void addTextMarkId(int typeId, const QmlEventLocation &location);
-    void createMarks(QmlProfilerTool *tool, const QString &fileName);
+    void createMarks(QmlProfilerViewManager *viewManager, const QString &fileName);
+
+    void showTextMarks();
+    void hideTextMarks();
 
 private:
     struct TextMarkId {

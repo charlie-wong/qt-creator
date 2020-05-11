@@ -27,6 +27,8 @@
 #include "layeritem.h"
 #include "formeditoritem.h"
 #include "formeditorscene.h"
+#include "formeditorwidget.h"
+#include "formeditorgraphicsview.h"
 
 #include <qmlanchors.h>
 #include <nodehints.h>
@@ -40,7 +42,7 @@
 
 #include <limits>
 
-static Q_LOGGING_CATEGORY(moveManipulatorInfo, "qtc.qmldesigner.formeditor");
+static Q_LOGGING_CATEGORY(moveManipulatorInfo, "qtc.qmldesigner.formeditor", QtWarningMsg);
 
 namespace QmlDesigner {
 
@@ -73,10 +75,10 @@ void MoveManipulator::setItems(const QList<FormEditorItem*> &itemList)
 {
     m_itemList = itemList;
     if (!m_itemList.isEmpty()) {
-        if (m_itemList.first()->parentItem())
-            m_snapper.setContainerFormEditorItem(m_itemList.first()->parentItem());
+        if (m_itemList.constFirst()->parentItem())
+            m_snapper.setContainerFormEditorItem(m_itemList.constFirst()->parentItem());
         else
-            m_snapper.setContainerFormEditorItem(m_itemList.first());
+            m_snapper.setContainerFormEditorItem(m_itemList.constFirst());
         m_snapper.setTransformtionSpaceFormEditorItem(m_snapper.containerFormEditorItem());
     }
 }
@@ -103,8 +105,8 @@ void MoveManipulator::synchronizeParent(const QList<FormEditorItem*> &itemList, 
 
 void MoveManipulator::synchronizeInstanceParent(const QList<FormEditorItem*> &itemList)
 {
-    if (m_view->model() && !m_itemList.isEmpty() && m_itemList.first()->qmlItemNode().hasInstanceParent())
-        synchronizeParent(itemList, m_itemList.first()->qmlItemNode().instanceParent());
+    if (m_view->model() && !m_itemList.isEmpty() && m_itemList.constFirst()->qmlItemNode().hasInstanceParent())
+        synchronizeParent(itemList, m_itemList.constFirst()->qmlItemNode().instanceParent());
 }
 
 bool MoveManipulator::itemsCanReparented() const
@@ -129,6 +131,7 @@ void MoveManipulator::setDirectUpdateInNodeInstances(bool directUpdate)
 
 void MoveManipulator::begin(const QPointF &beginPoint)
 {
+    m_view->formEditorWidget()->graphicsView()->viewport()->setCursor(Qt::SizeAllCursor);
     m_isActive = true;
 
     m_snapper.updateSnappingLines(m_itemList);
@@ -143,7 +146,7 @@ void MoveManipulator::begin(const QPointF &beginPoint)
     QTransform fromContentItemToSceneTransform = m_snapper.containerFormEditorItem()->qmlItemNode().instanceSceneContentItemTransform();
     foreach (FormEditorItem* item, m_itemList) {
         if (item && item->qmlItemNode().isValid()) {
-            QPointF positionInScenesSpace = fromContentItemToSceneTransform.map(item->qmlItemNode().instancePosition());
+            QPointF positionInScenesSpace = fromContentItemToSceneTransform.map(item->instancePosition());
             m_beginPositionInSceneSpaceHash.insert(item, positionInScenesSpace);
         }
     }
@@ -178,9 +181,9 @@ QPointF MoveManipulator::findSnappingOffset(const QHash<FormEditorItem*, QRectF>
     QMap<double, double> verticalOffsetMap;
     QMap<double, double> horizontalOffsetMap;
 
-    QHashIterator<FormEditorItem*, QRectF> hashIterator(boundingRectHash);
-    while (hashIterator.hasNext()) {
-        hashIterator.next();
+    for (auto hashIterator = boundingRectHash.cbegin(), end = boundingRectHash.cend();
+              hashIterator != end;
+              ++hashIterator) {
         FormEditorItem *formEditorItem = hashIterator.key();
         QRectF boundingRect = hashIterator.value();
 
@@ -227,10 +230,10 @@ QHash<FormEditorItem*, QRectF> MoveManipulator::tanslatedBoundingRects(const QHa
 {
     QHash<FormEditorItem*, QRectF> translatedBoundingRectHash;
 
-    QHashIterator<FormEditorItem*, QRectF> hashIterator(boundingRectHash);
-    while (hashIterator.hasNext()) {
+    for (auto hashIterator = boundingRectHash.cbegin(), end = boundingRectHash.cend();
+              hashIterator != end;
+              ++hashIterator) {
         QPointF alignedOffset(offsetVector);
-        hashIterator.next();
         FormEditorItem *formEditorItem = hashIterator.key();
         QRectF boundingRect = transform.mapRect(hashIterator.value());
 
@@ -303,9 +306,9 @@ void MoveManipulator::update(const QPointF& updatePoint, Snapper::Snapping useSn
                 if (anchors.instanceHasAnchor(AnchorLineVerticalCenter))
                     anchors.setMargin(AnchorLineVerticalCenter, m_beginVerticalCenterHash.value(item) + offsetVector.y());
 
-                item->qmlItemNode().setPosition(positionInContainerSpace);
+                item->setDataModelPosition(positionInContainerSpace);
             } else {
-                item->qmlItemNode().setPostionInBaseState(positionInContainerSpace);
+                item->setDataModelPositionInBaseState(positionInContainerSpace);
             }
         }
     }
@@ -329,7 +332,7 @@ void MoveManipulator::clear()
     m_beginVerticalCenterHash.clear();
 }
 
-void MoveManipulator::reparentTo(FormEditorItem *newParent)
+void MoveManipulator::reparentTo(FormEditorItem *newParent, ReparentFlag flag)
 {
     deleteSnapLines();
 
@@ -345,7 +348,8 @@ void MoveManipulator::reparentTo(FormEditorItem *newParent)
             && newParent->qmlItemNode().modelNode().hasParentProperty()) {
         ModelNode grandParent = newParent->qmlItemNode().modelNode().parentProperty().parentModelNode();
         if (grandParent.metaInfo().isLayoutable()
-                && !NodeHints::fromModelNode(grandParent).isStackedContainer())
+                && !NodeHints::fromModelNode(grandParent).isStackedContainer()
+                && flag == DoNotEnforceReparent)
             newParent = m_view.data()->scene()->itemForQmlItemNode(QmlItemNode(grandParent));
     }
 
@@ -377,6 +381,7 @@ void MoveManipulator::reparentTo(FormEditorItem *newParent)
 
 void MoveManipulator::end()
 {
+    m_view->formEditorWidget()->graphicsView()->viewport()->unsetCursor();
     setDirectUpdateInNodeInstances(false);
     m_isActive = false;
     deleteSnapLines();
@@ -421,8 +426,8 @@ void MoveManipulator::moveBy(double deltaX, double deltaY)
         if (anchors.instanceHasAnchor(AnchorLineVerticalCenter))
             anchors.setMargin(AnchorLineVerticalCenter, anchors.instanceMargin(AnchorLineVerticalCenter) + deltaY);
 
-        item->qmlItemNode().setPosition(QPointF(item->qmlItemNode().instanceValue("x").toDouble() + deltaX,
-                                                  item->qmlItemNode().instanceValue("y").toDouble() + deltaY));
+        item->setDataModelPosition(QPointF(item->qmlItemNode().instanceValue("x").toDouble() + deltaX,
+                                           item->qmlItemNode().instanceValue("y").toDouble() + deltaY));
     }
 }
 

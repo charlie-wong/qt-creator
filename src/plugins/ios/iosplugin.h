@@ -28,19 +28,22 @@
 #include <extensionsystem/iplugin.h>
 
 namespace Ios {
+namespace Internal {
 
-class IosPlugin : public ExtensionSystem::IPlugin
+class IosPlugin final : public ExtensionSystem::IPlugin
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QtCreatorPlugin" FILE "Ios.json")
 
 public:
-    IosPlugin();
+    IosPlugin() = default;
+    ~IosPlugin() final;
 
-    bool initialize(const QStringList &arguments, QString *errorMessage) override;
-    void extensionsInitialized() override;
 private:
-    void kitsRestored();
+    bool initialize(const QStringList &arguments, QString *errorMessage) final;
+
+    class IosPluginPrivate *d = nullptr;
 };
 
+} // namespace Internal
 } // namespace Ios

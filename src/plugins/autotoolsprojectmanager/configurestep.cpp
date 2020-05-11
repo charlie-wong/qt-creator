@@ -26,120 +26,121 @@
 ****************************************************************************/
 
 #include "configurestep.h"
-#include "autotoolsproject.h"
+
 #include "autotoolsbuildconfiguration.h"
 #include "autotoolsprojectconstants.h"
 
-#include <projectexplorer/buildsteplist.h>
+#include <projectexplorer/abstractprocessstep.h>
+#include <projectexplorer/processparameters.h>
+#include <projectexplorer/projectconfigurationaspects.h>
+#include <projectexplorer/project.h>
 #include <projectexplorer/target.h>
-#include <projectexplorer/toolchain.h>
-#include <projectexplorer/gnumakeparser.h>
-#include <projectexplorer/projectexplorer.h>
-#include <projectexplorer/projectexplorerconstants.h>
-#include <utils/qtcprocess.h>
 
-#include <QVariantMap>
 #include <QDateTime>
-#include <QLineEdit>
-#include <QFormLayout>
+#include <QDir>
 
-using namespace AutotoolsProjectManager;
-using namespace AutotoolsProjectManager::Internal;
 using namespace ProjectExplorer;
+using namespace Utils;
 
-const char CONFIGURE_ADDITIONAL_ARGUMENTS_KEY[] = "AutotoolsProjectManager.ConfigureStep.AdditionalArguments";
-const char CONFIGURE_STEP_ID[] = "AutotoolsProjectManager.ConfigureStep";
+namespace AutotoolsProjectManager {
+namespace Internal {
 
-/////////////////////
 // Helper Function
-/////////////////////
-static QString projectDirRelativeToBuildDir(BuildConfiguration *bc) {
+
+static QString projectDirRelativeToBuildDir(BuildConfiguration *bc)
+{
     const QDir buildDir(bc->buildDirectory().toString());
     QString projDirToBuildDir = buildDir.relativeFilePath(
-                bc->target()->project()->projectDirectory().toString());
+        bc->project()->projectDirectory().toString());
     if (projDirToBuildDir.isEmpty())
-        return QLatin1String("./");
-    if (!projDirToBuildDir.endsWith(QLatin1Char('/')))
-        projDirToBuildDir.append(QLatin1Char('/'));
+        return QString("./");
+    if (!projDirToBuildDir.endsWith('/'))
+        projDirToBuildDir.append('/');
     return projDirToBuildDir;
 }
 
-////////////////////////////////
-// ConfigureStepFactory Class
-////////////////////////////////
-ConfigureStepFactory::ConfigureStepFactory(QObject *parent) : IBuildStepFactory(parent)
-{ }
+// ConfigureStep
 
-QList<BuildStepInfo> ConfigureStepFactory::availableSteps(BuildStepList *parent) const
+///**
+// * @brief Implementation of the ProjectExplorer::AbstractProcessStep interface.
+// *
+// * A configure step can be configured by selecting the "Projects" button of Qt
+// * Creator (in the left hand side menu) and under "Build Settings".
+// *
+// * It is possible for the user to specify custom arguments. The corresponding
+// * configuration widget is created by MakeStep::createConfigWidget and is
+// * represented by an instance of the class MakeStepConfigWidget.
+// */
+
+class ConfigureStep : public ProjectExplorer::AbstractProcessStep
 {
-    if (parent->target()->project()->id() != Constants::AUTOTOOLS_PROJECT_ID
-            || parent->id() != ProjectExplorer::Constants::BUILDSTEPS_BUILD)
-        return {};
+    Q_DECLARE_TR_FUNCTIONS(AutotoolsProjectManager::Internal::ConfigureStep)
 
-    QString display = tr("Configure", "Display name for AutotoolsProjectManager::ConfigureStep id.");
-    return {{CONFIGURE_STEP_ID, display}};
-}
+public:
+    ConfigureStep(BuildStepList *bsl, Core::Id id);
 
-BuildStep *ConfigureStepFactory::create(BuildStepList *parent, Core::Id id)
-{
-    Q_UNUSED(id)
-    return new ConfigureStep(parent);
-}
+    void setAdditionalArguments(const QString &list);
 
-BuildStep *ConfigureStepFactory::clone(BuildStepList *parent, BuildStep *source)
-{
-    return new ConfigureStep(parent, static_cast<ConfigureStep *>(source));
-}
+private:
+    bool init() override;
+    void doRun() override;
 
+    ProjectExplorer::BaseStringAspect *m_additionalArgumentsAspect = nullptr;
+    bool m_runConfigure = false;
+};
 
-////////////////////////
-// ConfigureStep class
-////////////////////////
-ConfigureStep::ConfigureStep(BuildStepList* bsl) :
-    AbstractProcessStep(bsl, Core::Id(CONFIGURE_STEP_ID))
-{
-    ctor();
-}
-
-ConfigureStep::ConfigureStep(BuildStepList *bsl, Core::Id id) : AbstractProcessStep(bsl, id)
-{
-    ctor();
-}
-
-ConfigureStep::ConfigureStep(BuildStepList *bsl, ConfigureStep *bs) : AbstractProcessStep(bsl, bs),
-    m_additionalArguments(bs->additionalArguments())
-{
-    ctor();
-}
-
-void ConfigureStep::ctor()
+ConfigureStep::ConfigureStep(BuildStepList *bsl, Core::Id id)
+    : AbstractProcessStep(bsl, id)
 {
     setDefaultDisplayName(tr("Configure"));
+
+    m_additionalArgumentsAspect = addAspect<BaseStringAspect>();
+    m_additionalArgumentsAspect->setDisplayStyle(BaseStringAspect::LineEditDisplay);
+    m_additionalArgumentsAspect->setSettingsKey(
+                "AutotoolsProjectManager.ConfigureStep.AdditionalArguments");
+    m_additionalArgumentsAspect->setLabelText(tr("Arguments:"));
+    m_additionalArgumentsAspect->setHistoryCompleter("AutotoolsPM.History.ConfigureArgs");
+
+    connect(m_additionalArgumentsAspect, &ProjectConfigurationAspect::changed, this, [this] {
+        m_runConfigure = true;
+    });
+
+    setSummaryUpdater([this] {
+        BuildConfiguration *bc = buildConfiguration();
+
+        ProcessParameters param;
+        param.setMacroExpander(macroExpander());
+        param.setEnvironment(buildEnvironment());
+        param.setWorkingDirectory(buildDirectory());
+        param.setCommandLine({FilePath::fromString(projectDirRelativeToBuildDir(bc) + "configure"),
+                              m_additionalArgumentsAspect->value(),
+                              CommandLine::Raw});
+
+        return param.summaryInWorkdir(displayName());
+    });
 }
 
-bool ConfigureStep::init(QList<const BuildStep *> &earlierSteps)
+bool ConfigureStep::init()
 {
     BuildConfiguration *bc = buildConfiguration();
 
     ProcessParameters *pp = processParameters();
-    pp->setMacroExpander(bc->macroExpander());
-    pp->setEnvironment(bc->environment());
-    pp->setWorkingDirectory(bc->buildDirectory().toString());
-    pp->setCommand(projectDirRelativeToBuildDir(bc) + QLatin1String("configure"));
-    pp->setArguments(additionalArguments());
-    pp->resolveAll();
+    pp->setMacroExpander(macroExpander());
+    pp->setEnvironment(buildEnvironment());
+    pp->setWorkingDirectory(buildDirectory());
+    pp->setCommandLine({FilePath::fromString(projectDirRelativeToBuildDir(bc) + "configure"),
+                        m_additionalArgumentsAspect->value(),
+                        CommandLine::Raw});
 
-    return AbstractProcessStep::init(earlierSteps);
+    return AbstractProcessStep::init();
 }
 
-void ConfigureStep::run(QFutureInterface<bool>& fi)
+void ConfigureStep::doRun()
 {
-    BuildConfiguration *bc = buildConfiguration();
-
     //Check whether we need to run configure
-    const QString projectDir(bc->target()->project()->projectDirectory().toString());
-    const QFileInfo configureInfo(projectDir + QLatin1String("/configure"));
-    const QFileInfo configStatusInfo(bc->buildDirectory().toString() + QLatin1String("/config.status"));
+    const QString projectDir(project()->projectDirectory().toString());
+    const QFileInfo configureInfo(projectDir + "/configure");
+    const QFileInfo configStatusInfo(buildDirectory().toString() + "/config.status");
 
     if (!configStatusInfo.exists()
         || configStatusInfo.lastModified() < configureInfo.lastModified()) {
@@ -148,105 +149,29 @@ void ConfigureStep::run(QFutureInterface<bool>& fi)
 
     if (!m_runConfigure) {
         emit addOutput(tr("Configuration unchanged, skipping configure step."), BuildStep::OutputFormat::NormalMessage);
-        reportRunResult(fi, true);
+        emit finished(true);
         return;
     }
 
     m_runConfigure = false;
-    AbstractProcessStep::run(fi);
+    AbstractProcessStep::doRun();
 }
 
-BuildStepConfigWidget *ConfigureStep::createConfigWidget()
+// ConfigureStepFactory
+
+/**
+ * @brief Implementation of the ProjectExplorer::IBuildStepFactory interface.
+ *
+ * The factory is used to create instances of ConfigureStep.
+ */
+
+ConfigureStepFactory::ConfigureStepFactory()
 {
-    return new ConfigureStepConfigWidget(this);
+    registerStep<ConfigureStep>(Constants::CONFIGURE_STEP_ID);
+    setDisplayName(ConfigureStep::tr("Configure", "Display name for AutotoolsProjectManager::ConfigureStep id."));
+    setSupportedProjectType(Constants::AUTOTOOLS_PROJECT_ID);
+    setSupportedStepList(ProjectExplorer::Constants::BUILDSTEPS_BUILD);
 }
 
-bool ConfigureStep::immutable() const
-{
-    return false;
-}
-
-void ConfigureStep::setAdditionalArguments(const QString &list)
-{
-    if (list == m_additionalArguments)
-        return;
-
-    m_additionalArguments = list;
-    m_runConfigure = true;
-
-    emit additionalArgumentsChanged(list);
-}
-
-void ConfigureStep::notifyBuildDirectoryChanged()
-{
-    emit buildDirectoryChanged();
-}
-
-QString ConfigureStep::additionalArguments() const
-{
-    return m_additionalArguments;
-}
-
-QVariantMap ConfigureStep::toMap() const
-{
-    QVariantMap map = AbstractProcessStep::toMap();
-
-    map.insert(QLatin1String(CONFIGURE_ADDITIONAL_ARGUMENTS_KEY), m_additionalArguments);
-    return map;
-}
-
-bool ConfigureStep::fromMap(const QVariantMap &map)
-{
-    m_additionalArguments = map.value(QLatin1String(CONFIGURE_ADDITIONAL_ARGUMENTS_KEY)).toString();
-
-    return BuildStep::fromMap(map);
-}
-
-/////////////////////////////////////
-// ConfigureStepConfigWidget class
-/////////////////////////////////////
-ConfigureStepConfigWidget::ConfigureStepConfigWidget(ConfigureStep *configureStep) :
-    m_configureStep(configureStep),
-    m_additionalArguments(new QLineEdit)
-{
-    QFormLayout *fl = new QFormLayout(this);
-    fl->setMargin(0);
-    fl->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
-    setLayout(fl);
-
-    fl->addRow(tr("Arguments:"), m_additionalArguments);
-    m_additionalArguments->setText(m_configureStep->additionalArguments());
-
-    updateDetails();
-
-    connect(m_additionalArguments, &QLineEdit::textChanged,
-            configureStep, &ConfigureStep::setAdditionalArguments);
-    connect(configureStep, &ConfigureStep::additionalArgumentsChanged,
-            this, &ConfigureStepConfigWidget::updateDetails);
-    connect(configureStep, &ConfigureStep::buildDirectoryChanged,
-            this, &ConfigureStepConfigWidget::updateDetails);
-}
-
-QString ConfigureStepConfigWidget::displayName() const
-{
-    return tr("Configure", "AutotoolsProjectManager::ConfigureStepConfigWidget display name.");
-}
-
-QString ConfigureStepConfigWidget::summaryText() const
-{
-    return m_summaryText;
-}
-
-void ConfigureStepConfigWidget::updateDetails()
-{
-    BuildConfiguration *bc = m_configureStep->buildConfiguration();
-
-    ProcessParameters param;
-    param.setMacroExpander(bc->macroExpander());
-    param.setEnvironment(bc->environment());
-    param.setWorkingDirectory(bc->buildDirectory().toString());
-    param.setCommand(projectDirRelativeToBuildDir(bc) + QLatin1String("configure"));
-    param.setArguments(m_configureStep->additionalArguments());
-    m_summaryText = param.summaryInWorkdir(displayName());
-    emit updateSummary();
-}
+} // namespace Internal
+} // namespace AutotoolsProjectManager

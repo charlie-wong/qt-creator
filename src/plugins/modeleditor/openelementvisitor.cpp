@@ -37,6 +37,7 @@
 #include "qmt/diagram/ddependency.h"
 #include "qmt/diagram/dinheritance.h"
 #include "qmt/diagram/dassociation.h"
+#include "qmt/diagram/dconnection.h"
 
 #include "qmt/model/melement.h"
 #include "qmt/model/mpackage.h"
@@ -121,14 +122,24 @@ void OpenDiagramElementVisitor::visitDAssociation(const qmt::DAssociation *assoc
     visitDRelation(association);
 }
 
+void OpenDiagramElementVisitor::visitDConnection(const qmt::DConnection *connection)
+{
+    visitDRelation(connection);
+}
+
 void OpenDiagramElementVisitor::visitDAnnotation(const qmt::DAnnotation *annotation)
 {
-    Q_UNUSED(annotation);
+    Q_UNUSED(annotation)
 }
 
 void OpenDiagramElementVisitor::visitDBoundary(const qmt::DBoundary *boundary)
 {
-    Q_UNUSED(boundary);
+    Q_UNUSED(boundary)
+}
+
+void OpenDiagramElementVisitor::visitDSwimlane(const qmt::DSwimlane *swimlane)
+{
+    Q_UNUSED(swimlane)
 }
 
 void OpenModelElementVisitor::setElementTasks(ElementTasks *elementTasks)
@@ -138,12 +149,12 @@ void OpenModelElementVisitor::setElementTasks(ElementTasks *elementTasks)
 
 void OpenModelElementVisitor::visitMElement(const qmt::MElement *element)
 {
-    Q_UNUSED(element);
+    Q_UNUSED(element)
 }
 
 void OpenModelElementVisitor::visitMObject(const qmt::MObject *object)
 {
-    Q_UNUSED(object);
+    Q_UNUSED(object)
 }
 
 void OpenModelElementVisitor::visitMPackage(const qmt::MPackage *package)
@@ -181,22 +192,27 @@ void OpenModelElementVisitor::visitMItem(const qmt::MItem *item)
 
 void OpenModelElementVisitor::visitMRelation(const qmt::MRelation *relation)
 {
-    Q_UNUSED(relation);
+    Q_UNUSED(relation)
 }
 
 void OpenModelElementVisitor::visitMDependency(const qmt::MDependency *dependency)
 {
-    Q_UNUSED(dependency);
+    Q_UNUSED(dependency)
 }
 
 void OpenModelElementVisitor::visitMInheritance(const qmt::MInheritance *inheritance)
 {
-    Q_UNUSED(inheritance);
+    Q_UNUSED(inheritance)
 }
 
 void OpenModelElementVisitor::visitMAssociation(const qmt::MAssociation *association)
 {
-    Q_UNUSED(association);
+    Q_UNUSED(association)
+}
+
+void OpenModelElementVisitor::visitMConnection(const qmt::MConnection *connection)
+{
+    Q_UNUSED(connection)
 }
 
 } // namespace Internal

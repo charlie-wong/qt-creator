@@ -41,16 +41,16 @@ void dumpBacktrace(int maxdepth)
     if (maxdepth == -1)
         maxdepth = 200;
 #if defined(Q_OS_LINUX)
-    void *bt[200] = {0};
+    void *bt[200] = {nullptr};
     qDebug() << "BACKTRACE:";
     int size = backtrace(bt, sizeof(bt) / sizeof(bt[0]));
     for (int i = 0; i < qMin(size, maxdepth); i++)
         qDebug() << "0x" + QByteArray::number(quintptr(bt[i]), 16);
     QProcess proc;
     QStringList args;
-    args.append(QLatin1String("-e"));
+    args.append("-e");
     args.append(QCoreApplication::arguments().at(0));
-    proc.start(QLatin1String("addr2line"), args);
+    proc.start("addr2line", args);
     proc.waitForStarted();
     for (int i = 0; i < qMin(size, maxdepth); i++)
         proc.write("0x" + QByteArray::number(quintptr(bt[i]), 16) + '\n');

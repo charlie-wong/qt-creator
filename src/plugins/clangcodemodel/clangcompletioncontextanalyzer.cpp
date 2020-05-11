@@ -91,7 +91,7 @@ void ClangCompletionContextAnalyzer::analyze()
     }
 }
 
-bool ClangCompletionContextAnalyzer::looksLikeAFunctionCall(int endOfOperator) const
+int ClangCompletionContextAnalyzer::startOfFunctionCall(int endOfOperator) const
 {
     int index = ActivationSequenceContextProcessor::skipPrecedingWhitespace(m_interface,
                                                                             endOfOperator);
@@ -101,25 +101,29 @@ bool ClangCompletionContextAnalyzer::looksLikeAFunctionCall(int endOfOperator) c
     ExpressionUnderCursor euc(m_languageFeatures);
     index = euc.startOfFunctionCall(textCursor);
     index = ActivationSequenceContextProcessor::skipPrecedingWhitespace(m_interface, index);
-    const int functionNameStart = ActivationSequenceContextProcessor::findStartOfName(m_interface,
-                                                                                      index);
+    const int functionNameStart = ActivationSequenceContextProcessor::findStartOfName(
+        m_interface, index, ActivationSequenceContextProcessor::NameCategory::Function);
     if (functionNameStart == -1)
-        return false;
+        return -1;
 
     QTextCursor functionNameSelector(m_interface->textDocument());
     functionNameSelector.setPosition(functionNameStart);
     functionNameSelector.setPosition(index, QTextCursor::KeepAnchor);
     const QString functionName = functionNameSelector.selectedText().trimmed();
+    if (functionName.isEmpty() && m_completionOperator == T_LBRACE)
+        return endOfOperator;
 
-    return !functionName.isEmpty();
+    return functionName.isEmpty() ? -1 : functionNameStart;
 }
 
 void ClangCompletionContextAnalyzer::setActionAndClangPosition(CompletionAction action,
-                                                               int position)
+                                                               int position,
+                                                               int functionNameStart)
 {
     QTC_CHECK(position >= -1);
     m_completionAction = action;
     m_positionForClang = position;
+    m_functionNameStart = functionNameStart;
 }
 
 void
@@ -137,13 +141,16 @@ void ClangCompletionContextAnalyzer::handleCommaInFunctionCall()
         const int start = expressionUnderCursor.startOfFunctionCall(textCursor);
         m_positionEndOfExpression = start;
         m_positionForProposal = start + 1; // After '(' of function call
-        m_completionOperator = T_LPAREN;
+        if (m_interface->characterAt(start) == '(')
+            m_completionOperator = T_LPAREN;
+        else
+            m_completionOperator = T_LBRACE;
     }
 }
 
 void ClangCompletionContextAnalyzer::handleFunctionCall(int afterOperatorPosition)
 {
-    if (m_completionOperator == T_LPAREN) {
+    if (m_completionOperator == T_LPAREN || m_completionOperator == T_LBRACE) {
         ExpressionUnderCursor expressionUnderCursor(m_languageFeatures);
         QTextCursor textCursor(m_interface->textDocument());
         textCursor.setPosition(m_positionEndOfExpression);
@@ -155,17 +162,24 @@ void ClangCompletionContextAnalyzer::handleFunctionCall(int afterOperatorPositio
             setActionAndClangPosition(CompleteSlot, afterOperatorPosition);
         } else if (m_interface->position() != afterOperatorPosition) {
             // No function completion if cursor is not after '(' or ','
+            m_addSnippets = true;
             m_positionForProposal = afterOperatorPosition;
             setActionAndClangPosition(PassThroughToLibClang, afterOperatorPosition);
-        } else if (looksLikeAFunctionCall(afterOperatorPosition)) {
-            // Always pass the position right after '(' to libclang because
-            // positions after the comma might be problematic if a preceding
-            // argument is invalid code.
-            setActionAndClangPosition(PassThroughToLibClangAfterLeftParen,
-                                      m_positionForProposal);
-        } else { // e.g. "(" without any function name in front
-            m_positionForProposal = afterOperatorPosition;
-            setActionAndClangPosition(PassThroughToLibClang, afterOperatorPosition);
+        } else {
+            const int functionNameStart = startOfFunctionCall(afterOperatorPosition);
+            if (functionNameStart >= 0) {
+                m_addSnippets = functionNameStart == afterOperatorPosition;
+                // Always pass the position right after '(' to libclang because
+                // positions after the comma might be problematic if a preceding
+                // argument is invalid code.
+                setActionAndClangPosition(PassThroughToLibClangAfterLeftParen,
+                                          m_positionForProposal,
+                                          functionNameStart);
+            } else { // e.g. "(" without any function name in front
+                m_addSnippets = true;
+                m_positionForProposal = afterOperatorPosition;
+                setActionAndClangPosition(PassThroughToLibClang, afterOperatorPosition);
+            }
         }
     }
 }
@@ -173,6 +187,8 @@ void ClangCompletionContextAnalyzer::handleFunctionCall(int afterOperatorPositio
 bool ClangCompletionContextAnalyzer::handleNonFunctionCall(int position)
 {
     if (isTokenForPassThrough(m_completionOperator)) {
+        if (m_completionOperator == T_EOF_SYMBOL)
+            m_addSnippets = true;
         setActionAndClangPosition(PassThroughToLibClang, position);
         return true;
     } else if (m_completionOperator == T_DOXY_COMMENT) {

@@ -42,11 +42,10 @@ class TEXTEDITOR_EXPORT SimpleCodeStylePreferencesWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit SimpleCodeStylePreferencesWidget(QWidget *parent = 0);
+    explicit SimpleCodeStylePreferencesWidget(QWidget *parent = nullptr);
 
     void setPreferences(ICodeStylePreferences *tabPreferences);
 
-    void setFlat(bool on);
     TabSettingsWidget *tabSettingsWidget() const;
 
 private:
@@ -54,7 +53,7 @@ private:
     void slotTabSettingsChanged(const TextEditor::TabSettings &settings);
 
     TabSettingsWidget *m_tabSettingsWidget;
-    ICodeStylePreferences *m_preferences;
+    ICodeStylePreferences *m_preferences = nullptr;
 };
 
 } // namespace TextEditor

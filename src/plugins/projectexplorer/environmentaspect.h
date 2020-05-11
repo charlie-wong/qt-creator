@@ -36,38 +36,64 @@
 
 namespace ProjectExplorer {
 
-class PROJECTEXPLORER_EXPORT EnvironmentAspect : public IRunConfigurationAspect
+class PROJECTEXPLORER_EXPORT EnvironmentAspect : public ProjectConfigurationAspect
 {
     Q_OBJECT
 
 public:
-    virtual QList<int> possibleBaseEnvironments() const = 0;
-    virtual QString baseEnvironmentDisplayName(int base) const = 0;
+    EnvironmentAspect();
+
+    // The environment including the user's modifications.
+    Utils::Environment environment() const;
+
+    // Environment including modifiers, but without explicit user changes.
+    Utils::Environment modifiedBaseEnvironment() const;
 
     int baseEnvironmentBase() const;
     void setBaseEnvironmentBase(int base);
 
-    QList<Utils::EnvironmentItem> userEnvironmentChanges() const { return m_changes; }
-    void setUserEnvironmentChanges(const QList<Utils::EnvironmentItem> &diff);
+    Utils::EnvironmentItems userEnvironmentChanges() const { return m_userChanges; }
+    void setUserEnvironmentChanges(const Utils::EnvironmentItems &diff);
 
-    // The environment the user chose as base for his modifications.
-    virtual Utils::Environment baseEnvironment() const = 0;
-    // The environment including the user's modifications.
-    Utils::Environment environment() const;
+    void addSupportedBaseEnvironment(const QString &displayName,
+                                     const std::function<Utils::Environment()> &getter);
+    void addPreferredBaseEnvironment(const QString &displayName,
+                                     const std::function<Utils::Environment()> &getter);
+
+    QString currentDisplayName() const;
+
+    const QStringList displayNames() const;
+
+    using EnvironmentModifier = std::function<void(Utils::Environment &)>;
+    void addModifier(const EnvironmentModifier &);
+
+    bool isLocal() const { return m_isLocal; }
 
 signals:
     void baseEnvironmentChanged();
-    void userEnvironmentChangesChanged(const QList<Utils::EnvironmentItem> &diff);
+    void userEnvironmentChangesChanged(const Utils::EnvironmentItems &diff);
     void environmentChanged();
 
 protected:
-    explicit EnvironmentAspect(RunConfiguration *rc);
     void fromMap(const QVariantMap &map) override;
     void toMap(QVariantMap &map) const override;
 
+    void setIsLocal(bool local) { m_isLocal = local; }
+
 private:
-    mutable int m_base;
-    QList<Utils::EnvironmentItem> m_changes;
+    // One possible choice in the Environment aspect.
+    struct BaseEnvironment {
+        Utils::Environment unmodifiedBaseEnvironment() const;
+
+        std::function<Utils::Environment()> getter;
+        QString displayName;
+    };
+
+    Utils::EnvironmentItems m_userChanges;
+    QList<EnvironmentModifier> m_modifiers;
+    QList<BaseEnvironment> m_baseEnvironments;
+    int m_base = -1;
+    bool m_isLocal = false;
 };
 
 } // namespace ProjectExplorer

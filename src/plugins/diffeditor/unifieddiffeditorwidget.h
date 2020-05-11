@@ -35,15 +35,11 @@ class DisplaySettings;
 class FontSettings;
 }
 
-QT_BEGIN_NAMESPACE
-class QSplitter;
-class QTextCharFormat;
-QT_END_NAMESPACE
-
 namespace DiffEditor {
 
 class ChunkData;
 class FileData;
+class ChunkSelection;
 
 namespace Internal {
 
@@ -53,8 +49,8 @@ class UnifiedDiffEditorWidget : public SelectableTextEditorWidget
 {
     Q_OBJECT
 public:
-    UnifiedDiffEditorWidget(QWidget *parent = 0);
-    ~UnifiedDiffEditorWidget();
+    UnifiedDiffEditorWidget(QWidget *parent = nullptr);
+    ~UnifiedDiffEditorWidget() override;
 
     void setDocument(DiffEditorDocument *document);
     DiffEditorDocument *diffDocument() const;
@@ -64,6 +60,8 @@ public:
     void setCurrentDiffFileIndex(int diffFileIndex);
 
     void saveState();
+
+    using TextEditor::TextEditorWidget::restoreState;
     void restoreState();
 
     void clear(const QString &message = QString());
@@ -74,6 +72,7 @@ signals:
 
 protected:
     void mouseDoubleClickEvent(QMouseEvent *e) override;
+    void keyPressEvent(QKeyEvent *e) override;
     void contextMenuEvent(QContextMenuEvent *e) override;
     QString lineNumber(int blockNumber) const override;
     int lineNumberDigits() const override;
@@ -83,8 +82,8 @@ private:
 
     void slotCursorPositionChangedInEditor();
 
-    void setLeftLineNumber(int blockNumber, int lineNumber);
-    void setRightLineNumber(int blockNumber, int lineNumber);
+    void setLeftLineNumber(int blockNumber, int lineNumber, int rowNumberInChunk);
+    void setRightLineNumber(int blockNumber, int lineNumber, int rowNumberInChunk);
     void setFileInfo(int blockNumber,
                      const DiffFileInfo &leftFileInfo,
                      const DiffFileInfo &rightFileInfo);
@@ -100,12 +99,13 @@ private:
     int chunkIndexForBlockNumber(int blockNumber) const;
     void jumpToOriginalFile(const QTextCursor &cursor);
     void addContextMenuActions(QMenu *menu,
-                               int diffFileIndex,
-                               int chunkIndex);
+                               int fileIndex,
+                               int chunkIndex,
+                               const ChunkSelection &selection);
 
-    // block number, visual line number.
-    QMap<int, int> m_leftLineNumbers;
-    QMap<int, int> m_rightLineNumbers;
+    // block number, visual line number, chunk row number
+    QMap<int, QPair<int, int> > m_leftLineNumbers;
+    QMap<int, QPair<int, int> > m_rightLineNumbers;
 
     DiffEditorWidgetController m_controller;
 
@@ -117,7 +117,7 @@ private:
     QMap<int, QPair<int, int> > m_chunkInfo;
 
     QByteArray m_state;
-    Core::IContext *m_context;
+    Core::IContext *m_context = nullptr;
 };
 
 } // namespace Internal

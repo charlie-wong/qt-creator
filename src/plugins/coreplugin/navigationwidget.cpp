@@ -70,7 +70,7 @@ NavigationWidgetPlaceHolder::NavigationWidgetPlaceHolder(Id mode, Side side, QWi
     :QWidget(parent), m_mode(mode), m_side(side)
 {
     setLayout(new QVBoxLayout);
-    layout()->setMargin(0);
+    layout()->setContentsMargins(0, 0, 0, 0);
     connect(ModeManager::instance(), &ModeManager::currentModeAboutToChange,
             this, &NavigationWidgetPlaceHolder::currentModeAboutToChange);
 }
@@ -87,7 +87,7 @@ NavigationWidgetPlaceHolder::~NavigationWidgetPlaceHolder()
 
 void NavigationWidgetPlaceHolder::applyStoredSize()
 {
-    QSplitter *splitter = qobject_cast<QSplitter *>(parentWidget());
+    auto splitter = qobject_cast<QSplitter *>(parentWidget());
     if (splitter) {
         // A splitter we need to resize the splitter sizes
         QList<int> sizes = splitter->sizes();
@@ -260,7 +260,7 @@ void NavigationWidget::setFactories(const QList<INavigationWidgetFactory *> &fac
         }
 
         QStandardItem *newRow = new QStandardItem(factory->displayName());
-        newRow->setData(qVariantFromValue(factory), FactoryObjectRole);
+        newRow->setData(QVariant::fromValue(factory), FactoryObjectRole);
         newRow->setData(QVariant::fromValue(factory->id()), FactoryIdRole);
         newRow->setData(factory->priority(), FactoryPriorityRole);
         d->m_factoryModel->appendRow(newRow);
@@ -312,6 +312,15 @@ void NavigationWidget::resizeEvent(QResizeEvent *re)
     MiniSplitter::resizeEvent(re);
 }
 
+static QIcon closeIconForSide(Side side, int itemCount)
+{
+    if (itemCount > 1)
+        return Utils::Icons::CLOSE_SPLIT_TOP.icon();
+    return side == Side::Left
+            ? Utils::Icons::CLOSE_SPLIT_LEFT.icon()
+            : Utils::Icons::CLOSE_SPLIT_RIGHT.icon();
+}
+
 Internal::NavigationSubWidget *NavigationWidget::insertSubItem(int position, int factoryIndex)
 {
     for (int pos = position + 1; pos < d->m_subWidgets.size(); ++pos) {
@@ -323,7 +332,7 @@ Internal::NavigationSubWidget *NavigationWidget::insertSubItem(int position, int
     if (!d->m_subWidgets.isEmpty()) // Make all icons the bottom icon
         d->m_subWidgets.at(0)->setCloseIcon(Utils::Icons::CLOSE_SPLIT_BOTTOM.icon());
 
-    Internal::NavigationSubWidget *nsw = new Internal::NavigationSubWidget(this, position, factoryIndex);
+    auto nsw = new Internal::NavigationSubWidget(this, position, factoryIndex);
     connect(nsw, &Internal::NavigationSubWidget::splitMe,  this, &NavigationWidget::splitSubWidget);
     connect(nsw, &Internal::NavigationSubWidget::closeMe, this, &NavigationWidget::closeSubWidget);
     connect(nsw, &Internal::NavigationSubWidget::factoryIndexChanged,
@@ -331,9 +340,7 @@ Internal::NavigationSubWidget *NavigationWidget::insertSubItem(int position, int
     insertWidget(position, nsw);
 
     d->m_subWidgets.insert(position, nsw);
-    d->m_subWidgets.at(0)->setCloseIcon(d->m_subWidgets.size() == 1
-                                        ? Utils::Icons::CLOSE_SPLIT_LEFT.icon()
-                                        : Utils::Icons::CLOSE_SPLIT_TOP.icon());
+    d->m_subWidgets.at(0)->setCloseIcon(closeIconForSide(d->m_side, d->m_subWidgets.size()));
     NavigationWidgetPrivate::updateActivationsMap(nsw->factory()->id(), {d->m_side, position});
     return nsw;
 }
@@ -364,7 +371,7 @@ QWidget *NavigationWidget::activateSubWidget(Id factoryId, int preferredPosition
 
 void NavigationWidget::splitSubWidget(int factoryIndex)
 {
-    Internal::NavigationSubWidget *original = qobject_cast<Internal::NavigationSubWidget *>(sender());
+    auto original = qobject_cast<Internal::NavigationSubWidget *>(sender());
     int pos = indexOf(original) + 1;
     insertSubItem(pos, factoryIndex);
 }
@@ -372,7 +379,7 @@ void NavigationWidget::splitSubWidget(int factoryIndex)
 void NavigationWidget::closeSubWidget()
 {
     if (d->m_subWidgets.count() != 1) {
-        Internal::NavigationSubWidget *subWidget = qobject_cast<Internal::NavigationSubWidget *>(sender());
+        auto subWidget = qobject_cast<Internal::NavigationSubWidget *>(sender());
         subWidget->saveSettings();
 
         int position = d->m_subWidgets.indexOf(subWidget);
@@ -386,10 +393,8 @@ void NavigationWidget::closeSubWidget()
         subWidget->hide();
         subWidget->deleteLater();
         // update close button of top item
-        if (d->m_subWidgets.size() == 1)
-            d->m_subWidgets.at(0)->setCloseIcon(d->m_subWidgets.size() == 1
-                                                ? Utils::Icons::CLOSE_SPLIT_LEFT.icon()
-                                                : Utils::Icons::CLOSE_SPLIT_TOP.icon());
+        if (!d->m_subWidgets.isEmpty())
+            d->m_subWidgets.at(0)->setCloseIcon(closeIconForSide(d->m_side, d->m_subWidgets.size()));
     } else {
         setShown(false);
     }
@@ -537,8 +542,8 @@ QString NavigationWidget::settingsKey(const QString &key) const
 
 void NavigationWidget::onSubWidgetFactoryIndexChanged(int factoryIndex)
 {
-    Q_UNUSED(factoryIndex);
-    Internal::NavigationSubWidget *subWidget = qobject_cast<Internal::NavigationSubWidget *>(sender());
+    Q_UNUSED(factoryIndex)
+    auto subWidget = qobject_cast<Internal::NavigationSubWidget *>(sender());
     QTC_ASSERT(subWidget, return);
     Id factoryId = subWidget->factory()->id();
     NavigationWidgetPrivate::updateActivationsMap(factoryId, {d->m_side, subWidget->position()});

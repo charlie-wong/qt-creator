@@ -27,17 +27,21 @@
 
 #include "debuggeritemmanager.h"
 #include "debuggeritem.h"
-#include "debuggerkitconfigwidget.h"
+
+#include <coreplugin/icore.h>
 
 #include <projectexplorer/toolchain.h>
 #include <projectexplorer/projectexplorerconstants.h>
+#include <projectexplorer/runcontrol.h>
 
 #include <utils/environment.h>
 #include <utils/fileutils.h>
 #include <utils/macroexpander.h>
 #include <utils/qtcassert.h>
 
+#include <QComboBox>
 #include <QFileInfo>
+#include <QPushButton>
 #include <utility>
 
 using namespace ProjectExplorer;
@@ -46,37 +50,112 @@ using namespace Utils;
 namespace Debugger {
 
 // --------------------------------------------------------------------------
-// DebuggerKitInformation
+// DebuggerKitAspect
 // --------------------------------------------------------------------------
 
-DebuggerKitInformation::DebuggerKitInformation()
+namespace Internal {
+
+class DebuggerKitAspectWidget : public KitAspectWidget
 {
-    setObjectName(QLatin1String("DebuggerKitInformation"));
-    setId(DebuggerKitInformation::id());
+    Q_DECLARE_TR_FUNCTIONS(Debugger::DebuggerKitAspect)
+
+public:
+    DebuggerKitAspectWidget(Kit *workingCopy, const KitAspect *ki)
+        : KitAspectWidget(workingCopy, ki)
+    {
+        m_comboBox = new QComboBox;
+        m_comboBox->setSizePolicy(QSizePolicy::Ignored, m_comboBox->sizePolicy().verticalPolicy());
+        m_comboBox->setEnabled(true);
+
+        refresh();
+        m_comboBox->setToolTip(ki->description());
+        connect(m_comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, &DebuggerKitAspectWidget::currentDebuggerChanged);
+
+        m_manageButton = new QPushButton(KitAspectWidget::msgManage());
+        m_manageButton->setContentsMargins(0, 0, 0, 0);
+        connect(m_manageButton, &QAbstractButton::clicked,
+                this, &DebuggerKitAspectWidget::manageDebuggers);
+    }
+
+    ~DebuggerKitAspectWidget() override
+    {
+        delete m_comboBox;
+        delete m_manageButton;
+    }
+
+private:
+    QWidget *buttonWidget() const override { return m_manageButton; }
+    QWidget *mainWidget() const override { return m_comboBox; }
+
+    void makeReadOnly() override
+    {
+        m_manageButton->setEnabled(false);
+        m_comboBox->setEnabled(false);
+    }
+
+    void refresh() override
+    {
+        m_ignoreChanges = true;
+        m_comboBox->clear();
+        m_comboBox->addItem(tr("None"), QString());
+        for (const DebuggerItem &item : DebuggerItemManager::debuggers())
+            m_comboBox->addItem(item.displayName(), item.id());
+
+        const DebuggerItem *item = DebuggerKitAspect::debugger(m_kit);
+        updateComboBox(item ? item->id() : QVariant());
+        m_ignoreChanges = false;
+    }
+
+    void manageDebuggers()
+    {
+        Core::ICore::showOptionsDialog(ProjectExplorer::Constants::DEBUGGER_SETTINGS_PAGE_ID,
+                                       buttonWidget());
+    }
+
+    void currentDebuggerChanged(int idx)
+    {
+        Q_UNUSED(idx)
+        if (m_ignoreChanges)
+            return;
+
+        int currentIndex = m_comboBox->currentIndex();
+        QVariant id = m_comboBox->itemData(currentIndex);
+        m_kit->setValue(DebuggerKitAspect::id(), id);
+    }
+
+    QVariant currentId() const { return m_comboBox->itemData(m_comboBox->currentIndex()); }
+
+    void updateComboBox(const QVariant &id)
+    {
+        for (int i = 0; i < m_comboBox->count(); ++i) {
+            if (id == m_comboBox->itemData(i)) {
+                m_comboBox->setCurrentIndex(i);
+                return;
+            }
+        }
+        m_comboBox->setCurrentIndex(0);
+    }
+
+    bool m_ignoreChanges = false;
+    QComboBox *m_comboBox;
+    QPushButton *m_manageButton;
+};
+} // namespace Internal
+
+DebuggerKitAspect::DebuggerKitAspect()
+{
+    setObjectName("DebuggerKitAspect");
+    setId(DebuggerKitAspect::id());
+    setDisplayName(tr("Debugger"));
+    setDescription(tr("The debugger to use for this kit."));
     setPriority(28000);
 }
 
-QVariant DebuggerKitInformation::defaultValue(const Kit *k) const
+void DebuggerKitAspect::setup(Kit *k)
 {
-    const Abi toolChainAbi = ToolChainKitInformation::targetAbi(k);
-    const QStringList paths = Environment::systemEnvironment().path();
-    QVariant nextBestFit;
-    foreach (const DebuggerItem &item, DebuggerItemManager::debuggers()) {
-        foreach (const Abi targetAbi, item.abis()) {
-            if (targetAbi.isCompatibleWith(toolChainAbi)) {
-                if (paths.contains(item.command().toFileInfo().absolutePath()))
-                    return item.id(); // prefer debuggers found in PATH over those found elsewhere
-                if (nextBestFit.isNull())
-                    nextBestFit = item.id();
-            }
-        }
-    }
+    QTC_ASSERT(k, return);
 
-    return nextBestFit;
-}
-
-void DebuggerKitInformation::setup(Kit *k)
-{
     // This can be anything (Id, binary path, "auto")
     // With 3.0 we have:
     // <value type="QString" key="Debugger.Information">{75ecf347-f221-44c3-b613-ea1d29929cd4}</value>
@@ -90,9 +169,9 @@ void DebuggerKitInformation::setup(Kit *k)
     //    <value type="QString" key="Binary">auto</value>
     //    <value type="int" key="EngineType">4</value>
     //  </valuemap>
-    const QVariant rawId = k->value(DebuggerKitInformation::id());
+    const QVariant rawId = k->value(DebuggerKitAspect::id());
 
-    const Abi tcAbi = ToolChainKitInformation::targetAbi(k);
+    const Abi tcAbi = ToolChainKitAspect::targetAbi(k);
 
     // Get the best of the available debugger matching the kit's toolchain.
     // The general idea is to find an item that exactly matches what
@@ -101,13 +180,20 @@ void DebuggerKitInformation::setup(Kit *k)
 
     DebuggerItem bestItem;
     DebuggerItem::MatchLevel bestLevel = DebuggerItem::DoesNotMatch;
-
-    foreach (const DebuggerItem &item, DebuggerItemManager::debuggers()) {
+    const Environment systemEnvironment = Environment::systemEnvironment();
+    for (const DebuggerItem &item : DebuggerItemManager::debuggers()) {
         DebuggerItem::MatchLevel level = DebuggerItem::DoesNotMatch;
 
         if (rawId.isNull()) {
             // Initial setup of a kit.
             level = item.matchTarget(tcAbi);
+            // Hack to prefer a debugger from PATH (e.g. autodetected) over other matches.
+            // This improves the situation a bit if a cross-compilation tool chain has the
+            // same ABI as the host.
+            if (level == DebuggerItem::MatchesPerfectly
+                    && systemEnvironment.path().contains(item.command().parentDir())) {
+                level = DebuggerItem::MatchesPerfectlyInPath;
+            }
         } else if (rawId.type() == QVariant::String) {
             // New structure.
             if (item.id() == rawId) {
@@ -121,18 +207,18 @@ void DebuggerKitInformation::setup(Kit *k)
         } else {
             // Old structure.
             const QMap<QString, QVariant> map = rawId.toMap();
-            QString binary = map.value(QLatin1String("Binary")).toString();
-            if (binary == QLatin1String("auto")) {
+            QString binary = map.value("Binary").toString();
+            if (binary == "auto") {
                 // This is close to the "new kit" case, except that we know
                 // an engine type.
-                DebuggerEngineType autoEngine = DebuggerEngineType(map.value(QLatin1String("EngineType")).toInt());
+                DebuggerEngineType autoEngine = DebuggerEngineType(map.value("EngineType").toInt());
                 if (item.engineType() == autoEngine) {
                     // Use item if host toolchain fits, but only as fallback.
                     level = std::min(item.matchTarget(tcAbi), DebuggerItem::MatchesSomewhat);
                 }
             } else {
                 // We have an executable path.
-                FileName fileName = FileName::fromUserInput(binary);
+                FilePath fileName = FilePath::fromUserInput(binary);
                 if (item.command() == fileName) {
                     // And it's is the path of this item.
                     level = std::min(item.matchTarget(tcAbi), DebuggerItem::MatchesSomewhat);
@@ -151,15 +237,17 @@ void DebuggerKitInformation::setup(Kit *k)
     }
 
     // Use the best id we found, or an invalid one.
-    k->setValue(DebuggerKitInformation::id(), bestLevel != DebuggerItem::DoesNotMatch ? bestItem.id() : QVariant());
+    k->setValue(DebuggerKitAspect::id(), bestLevel != DebuggerItem::DoesNotMatch ? bestItem.id() : QVariant());
 }
 
 
 // This handles the upgrade path from 2.8 to 3.0
-void DebuggerKitInformation::fix(Kit *k)
+void DebuggerKitAspect::fix(Kit *k)
 {
+    QTC_ASSERT(k, return);
+
     // This can be Id, binary path, but not "auto" anymore.
-    const QVariant rawId = k->value(DebuggerKitInformation::id());
+    const QVariant rawId = k->value(DebuggerKitAspect::id());
 
     if (rawId.isNull()) // No debugger set, that is fine.
         return;
@@ -168,40 +256,40 @@ void DebuggerKitInformation::fix(Kit *k)
         if (!DebuggerItemManager::findById(rawId)) {
             qWarning("Unknown debugger id %s in kit %s",
                      qPrintable(rawId.toString()), qPrintable(k->displayName()));
-            k->setValue(DebuggerKitInformation::id(), QVariant());
+            k->setValue(DebuggerKitAspect::id(), QVariant());
         }
         return; // All fine (now).
     }
 
     QMap<QString, QVariant> map = rawId.toMap();
-    QString binary = map.value(QLatin1String("Binary")).toString();
-    if (binary == QLatin1String("auto")) {
+    QString binary = map.value("Binary").toString();
+    if (binary == "auto") {
         // This should not happen as "auto" is handled by setup() already.
         QTC_CHECK(false);
-        k->setValue(DebuggerKitInformation::id(), QVariant());
+        k->setValue(DebuggerKitAspect::id(), QVariant());
         return;
     }
 
-    FileName fileName = FileName::fromUserInput(binary);
+    FilePath fileName = FilePath::fromUserInput(binary);
     const DebuggerItem *item = DebuggerItemManager::findByCommand(fileName);
     if (!item) {
         qWarning("Debugger command %s invalid in kit %s",
                  qPrintable(binary), qPrintable(k->displayName()));
-        k->setValue(DebuggerKitInformation::id(), QVariant());
+        k->setValue(DebuggerKitAspect::id(), QVariant());
         return;
     }
 
-    k->setValue(DebuggerKitInformation::id(), item->id());
+    k->setValue(DebuggerKitAspect::id(), item->id());
 }
 
 // Check the configuration errors and return a flag mask. Provide a quick check and
 // a verbose one with a list of errors.
 
-DebuggerKitInformation::ConfigurationErrors DebuggerKitInformation::configurationErrors(const Kit *k)
+DebuggerKitAspect::ConfigurationErrors DebuggerKitAspect::configurationErrors(const Kit *k)
 {
     QTC_ASSERT(k, return NoDebugger);
 
-    const DebuggerItem *item = DebuggerKitInformation::debugger(k);
+    const DebuggerItem *item = DebuggerKitAspect::debugger(k);
     if (!item)
         return NoDebugger;
 
@@ -215,10 +303,10 @@ DebuggerKitInformation::ConfigurationErrors DebuggerKitInformation::configuratio
     else if (!fi.isExecutable())
         result |= DebuggerNotExecutable;
 
-    const Abi tcAbi = ToolChainKitInformation::targetAbi(k);
+    const Abi tcAbi = ToolChainKitAspect::targetAbi(k);
     if (item->matchTarget(tcAbi) == DebuggerItem::DoesNotMatch) {
         // currently restricting the check to desktop devices, may be extended to all device types
-        const IDevice::ConstPtr device = DeviceKitInformation::device(k);
+        const IDevice::ConstPtr device = DeviceKitAspect::device(k);
         if (device && device->type() == ProjectExplorer::Constants::DESKTOP_DEVICE_TYPE)
             result |= DebuggerDoesNotMatch;
     }
@@ -236,18 +324,18 @@ DebuggerKitInformation::ConfigurationErrors DebuggerKitInformation::configuratio
     return result;
 }
 
-const DebuggerItem *DebuggerKitInformation::debugger(const Kit *kit)
+const DebuggerItem *DebuggerKitAspect::debugger(const Kit *kit)
 {
-    QTC_ASSERT(kit, return 0);
-    const QVariant id = kit->value(DebuggerKitInformation::id());
+    QTC_ASSERT(kit, return nullptr);
+    const QVariant id = kit->value(DebuggerKitAspect::id());
     return DebuggerItemManager::findById(id);
 }
 
-StandardRunnable DebuggerKitInformation::runnable(const Kit *kit)
+Runnable DebuggerKitAspect::runnable(const Kit *kit)
 {
-    StandardRunnable runnable;
+    Runnable runnable;
     if (const DebuggerItem *item = debugger(kit)) {
-        runnable.executable = item->command().toString();
+        runnable.executable = item->command();
         runnable.workingDirectory = item->workingDirectory().toString();
         runnable.environment = Utils::Environment::systemEnvironment();
         runnable.environment.set("LC_NUMERIC", "C");
@@ -255,9 +343,9 @@ StandardRunnable DebuggerKitInformation::runnable(const Kit *kit)
     return runnable;
 }
 
-QList<Task> DebuggerKitInformation::validateDebugger(const Kit *k)
+Tasks DebuggerKitAspect::validateDebugger(const Kit *k)
 {
-    QList<Task> result;
+    Tasks result;
 
     const ConfigurationErrors errors = configurationErrors(k);
     if (errors == NoConfigurationError)
@@ -267,79 +355,79 @@ QList<Task> DebuggerKitInformation::validateDebugger(const Kit *k)
     if (const DebuggerItem *item = debugger(k))
         path = item->command().toUserOutput();
 
-    const Core::Id id = ProjectExplorer::Constants::TASK_CATEGORY_BUILDSYSTEM;
     if (errors & NoDebugger)
-        result << Task(Task::Warning, tr("No debugger set up."), FileName(), -1, id);
+        result << BuildSystemTask(Task::Warning, tr("No debugger set up."));
 
     if (errors & DebuggerNotFound)
-        result << Task(Task::Error, tr("Debugger \"%1\" not found.").arg(path),
-                       FileName(), -1, id);
+        result << BuildSystemTask(Task::Error, tr("Debugger \"%1\" not found.").arg(path));
+
     if (errors & DebuggerNotExecutable)
-        result << Task(Task::Error, tr("Debugger \"%1\" not executable.").arg(path), FileName(), -1, id);
+        result << BuildSystemTask(Task::Error, tr("Debugger \"%1\" not executable.").arg(path));
 
     if (errors & DebuggerNeedsAbsolutePath) {
         const QString message =
                 tr("The debugger location must be given as an "
                    "absolute path (%1).").arg(path);
-        result << Task(Task::Error, message, FileName(), -1, id);
+        result << BuildSystemTask(Task::Error, message);
     }
 
     if (errors & DebuggerDoesNotMatch) {
         const QString message = tr("The ABI of the selected debugger does not "
                                    "match the toolchain ABI.");
-        result << Task(Task::Warning, message, FileName(), -1, id);
+        result << BuildSystemTask(Task::Warning, message);
     }
     return result;
 }
 
-KitConfigWidget *DebuggerKitInformation::createConfigWidget(Kit *k) const
+KitAspectWidget *DebuggerKitAspect::createConfigWidget(Kit *k) const
 {
-    return new Internal::DebuggerKitConfigWidget(k, this);
+    return new Internal::DebuggerKitAspectWidget(k, this);
 }
 
-void DebuggerKitInformation::addToMacroExpander(Kit *kit, MacroExpander *expander) const
+void DebuggerKitAspect::addToMacroExpander(Kit *kit, MacroExpander *expander) const
 {
+    QTC_ASSERT(kit, return);
     expander->registerVariable("Debugger:Name", tr("Name of Debugger"),
-                               [this, kit]() -> QString {
+                               [kit]() -> QString {
                                    const DebuggerItem *item = debugger(kit);
                                    return item ? item->displayName() : tr("Unknown debugger");
                                });
 
     expander->registerVariable("Debugger:Type", tr("Type of Debugger Backend"),
-                               [this, kit]() -> QString {
+                               [kit]() -> QString {
                                    const DebuggerItem *item = debugger(kit);
                                    return item ? item->engineTypeName() : tr("Unknown debugger type");
                                });
 
     expander->registerVariable("Debugger:Version", tr("Debugger"),
-                               [this, kit]() -> QString {
+                               [kit]() -> QString {
                                    const DebuggerItem *item = debugger(kit);
                                    return item && !item->version().isEmpty()
                                         ? item->version() : tr("Unknown debugger version");
                                });
 
     expander->registerVariable("Debugger:Abi", tr("Debugger"),
-                               [this, kit]() -> QString {
+                               [kit]() -> QString {
                                    const DebuggerItem *item = debugger(kit);
                                    return item && !item->abis().isEmpty()
-                                           ? item->abiNames().join(QLatin1Char(' '))
+                                           ? item->abiNames().join(' ')
                                            : tr("Unknown debugger ABI");
                                });
 }
 
-KitInformation::ItemList DebuggerKitInformation::toUserOutput(const Kit *k) const
+KitAspect::ItemList DebuggerKitAspect::toUserOutput(const Kit *k) const
 {
-    return ItemList() << qMakePair(tr("Debugger"), displayString(k));
+    return {{tr("Debugger"), displayString(k)}};
 }
 
-DebuggerEngineType DebuggerKitInformation::engineType(const Kit *k)
+DebuggerEngineType DebuggerKitAspect::engineType(const Kit *k)
 {
     const DebuggerItem *item = debugger(k);
     QTC_ASSERT(item, return NoEngineType);
     return item->engineType();
 }
 
-QString DebuggerKitInformation::displayString(const Kit *k)
+QString DebuggerKitAspect::displayString(const Kit *k)
 {
     const DebuggerItem *item = debugger(k);
     if (!item)
@@ -349,14 +437,15 @@ QString DebuggerKitInformation::displayString(const Kit *k)
     return binary.isEmpty() ? tr("%1 <None>").arg(name) : tr("%1 using \"%2\"").arg(name, binary);
 }
 
-void DebuggerKitInformation::setDebugger(Kit *k, const QVariant &id)
+void DebuggerKitAspect::setDebugger(Kit *k, const QVariant &id)
 {
     // Only register reasonably complete debuggers.
     QTC_ASSERT(DebuggerItemManager::findById(id), return);
-    k->setValue(DebuggerKitInformation::id(), id);
+    QTC_ASSERT(k, return);
+    k->setValue(DebuggerKitAspect::id(), id);
 }
 
-Core::Id DebuggerKitInformation::id()
+Core::Id DebuggerKitAspect::id()
 {
     return "Debugger.Information";
 }

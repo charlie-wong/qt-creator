@@ -42,7 +42,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QRegExp>
-#include <QRegExpValidator>
+#include <QRegularExpressionValidator>
 #include <QToolBar>
 #include <QToolButton>
 #include <QUndoStack>
@@ -63,9 +63,9 @@ QWidget *TreeItemDelegate::createEditor(QWidget *parent, const QStyleOptionViewI
     if (index.isValid()) {
         auto edit = new QLineEdit(parent);
         edit->setFocusPolicy(Qt::StrongFocus);
-        QRegExp rx("^(?!xml)[_a-z][a-z0-9-._]*$");
-        rx.setCaseSensitivity(Qt::CaseInsensitive);
-        edit->setValidator(new QRegExpValidator(rx, parent));
+        QRegularExpression rx("^(?!xml)[_a-z][a-z0-9-._]*$");
+        rx.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
+        edit->setValidator(new QRegularExpressionValidator(rx, parent));
         return edit;
     }
     return QStyledItemDelegate::createEditor(parent, option, index);
@@ -202,7 +202,7 @@ void Structure::rowEntered(const QModelIndex &index)
     QModelIndex ind = m_proxyModel->mapToSource(index);
     auto tag = static_cast<ScxmlTag*>(ind.internalPointer());
     if (tag)
-        m_scene->highlightItems(QVector<ScxmlTag*>() << tag);
+        m_scene->highlightItems({tag});
     else
         m_scene->unhighlightAll();
 }
@@ -239,7 +239,7 @@ void Structure::childAdded(const QModelIndex &childIndex)
 
 void Structure::keyPressEvent(QKeyEvent *e)
 {
-    if (e->key() == Qt::Key_Delete) {
+    if (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) {
         QModelIndex ind = m_proxyModel->mapToSource(m_structureView->currentIndex());
         auto tag = static_cast<ScxmlTag*>(ind.internalPointer());
         if (tag && m_currentDocument) {
@@ -270,7 +270,7 @@ void Structure::createUi()
 
     m_checkboxFrame = new QWidget;
     m_checkboxFrame->setLayout(new QVBoxLayout);
-    m_checkboxFrame->layout()->setMargin(0);
+    m_checkboxFrame->layout()->setContentsMargins(0, 0, 0, 0);
     auto spacer = new QWidget;
     spacer->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Expanding);
 
@@ -279,18 +279,18 @@ void Structure::createUi()
     m_tagVisibilityFrame->layout()->addWidget(m_visibleTagsTitle);
     m_tagVisibilityFrame->layout()->addWidget(m_checkboxFrame);
     m_tagVisibilityFrame->layout()->addWidget(spacer);
-    m_tagVisibilityFrame->layout()->setMargin(0);
+    m_tagVisibilityFrame->layout()->setContentsMargins(0, 0, 0, 0);
 
     auto paneInnerFrame = new QWidget;
     paneInnerFrame->setLayout(new QHBoxLayout);
     paneInnerFrame->layout()->addWidget(m_structureView);
     paneInnerFrame->layout()->addWidget(m_tagVisibilityFrame);
-    paneInnerFrame->layout()->setMargin(0);
+    paneInnerFrame->layout()->setContentsMargins(0, 0, 0, 0);
 
     setLayout(new QVBoxLayout);
     layout()->addWidget(toolBar);
     layout()->addWidget(paneInnerFrame);
-    layout()->setMargin(0);
+    layout()->setContentsMargins(0, 0, 0, 0);
     layout()->setSpacing(0);
 }
 
@@ -325,7 +325,7 @@ void Structure::showMenu(const QModelIndex &index, const QPoint &globalPos)
                     m_currentDocument->undoStack()->beginMacro(tr("Remove items"));
                     m_currentDocument->setCurrentTag(tag);
                     m_currentDocument->removeTag(tag);
-                    m_currentDocument->setCurrentTag(0);
+                    m_currentDocument->setCurrentTag(nullptr);
                     m_currentDocument->undoStack()->endMacro();
                 } else if (actionType == TagUtils::AddChild) {
                     tag->document()->undoStack()->beginMacro(tr("Add child"));

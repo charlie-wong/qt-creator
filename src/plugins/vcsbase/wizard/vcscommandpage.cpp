@@ -40,6 +40,7 @@
 
 using namespace Core;
 using namespace ProjectExplorer;
+using namespace Utils;
 
 namespace VcsBase {
 namespace Internal {
@@ -68,12 +69,11 @@ VcsCommandPageFactory::VcsCommandPageFactory()
     setTypeIdsSuffix(QLatin1String("VcsCommand"));
 }
 
-Utils::WizardPage *VcsCommandPageFactory::create(JsonWizard *wizard, Id typeId,
-                                                 const QVariant &data)
+WizardPage *VcsCommandPageFactory::create(JsonWizard *wizard, Id typeId, const QVariant &data)
 {
-    Q_UNUSED(wizard);
+    Q_UNUSED(wizard)
 
-    QTC_ASSERT(canCreate(typeId), return 0);
+    QTC_ASSERT(canCreate(typeId), return nullptr);
 
     QVariantMap tmp = data.toMap();
 
@@ -87,11 +87,9 @@ Utils::WizardPage *VcsCommandPageFactory::create(JsonWizard *wizard, Id typeId,
         if (argsVar.type() == QVariant::String) {
             args << argsVar.toString();
         } else if (argsVar.type() == QVariant::List) {
-            args = Utils::transform(argsVar.toList(), [](const QVariant &in) {
-                return in.toString();
-            });
+            args = Utils::transform(argsVar.toList(), &QVariant::toString);
         } else {
-            return 0;
+            return nullptr;
         }
     }
 
@@ -288,8 +286,8 @@ void VcsCommandPage::delayedInitialize()
         extraArgs << tmp;
     }
 
-    ShellCommand *command
-            = vc->createInitialCheckoutCommand(repo, Utils::FileName::fromString(base),
+    Core::ShellCommand *command
+            = vc->createInitialCheckoutCommand(repo, FilePath::fromString(base),
                                                name, extraArgs);
 
     foreach (const JobData &job, m_additionalJobs) {
@@ -312,7 +310,7 @@ void VcsCommandPage::delayedInitialize()
 
         const QString dir = wiz->expander()->expand(job.workDirectory);
         const int timeoutS = command->defaultTimeoutS() * job.timeOutFactor;
-        command->addJob(Utils::FileName::fromUserInput(commandString), args, timeoutS, dir);
+        command->addJob({FilePath::fromUserInput(commandString), args}, timeoutS, dir);
     }
 
     start(command);

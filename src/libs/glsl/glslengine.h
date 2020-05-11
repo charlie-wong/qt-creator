@@ -71,7 +71,7 @@ template <typename Type>
 class TypeTable
 {
 public:
-    struct Compare: std::binary_function<Type, Type, bool> {
+    struct Compare {
         bool operator()(const Type &value, const Type &other) const {
             return value.isLessThan(&other);
         }
@@ -112,9 +112,9 @@ public:
 
     // symbols
     Namespace *newNamespace();
-    Struct *newStruct(Scope *scope = 0);
-    Block *newBlock(Scope *scope = 0);
-    Function *newFunction(Scope *scope = 0);
+    Struct *newStruct(Scope *scope = nullptr);
+    Block *newBlock(Scope *scope = nullptr);
+    Function *newFunction(Scope *scope = nullptr);
     Argument *newArgument(Function *function, const QString &name, const Type *type);
     Variable *newVariable(Scope *scope, const QString &name, const Type *type, int qualifiers = 0);
 

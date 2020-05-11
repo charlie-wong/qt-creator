@@ -26,6 +26,8 @@
 
 #include <documentwarningwidget.h>
 
+#include <coreplugin/icontext.h>
+
 #include <QWidget>
 #include <QPointer>
 
@@ -44,7 +46,6 @@ class FormEditorGraphicsView;
 class ToolBox;
 class QmlItemNode;
 
-
 class FormEditorWidget : public QWidget
 {
     Q_OBJECT
@@ -55,6 +56,7 @@ public:
     QAction *showBoundingRectAction() const;
     QAction *snappingAction() const;
     QAction *snappingAndAnchoringAction() const;
+    QAction *resetAction() const;
 
     void setScene(FormEditorScene *scene);
     ToolBox *toolBox() const;
@@ -62,7 +64,7 @@ public:
     double spacing() const;
     double containerPadding() const;
 
-    QString contextHelpId() const;
+    void contextHelp(const Core::IContext::HelpCallback &callback) const;
 
     void setRootItemRect(const QRectF &rect);
     QRectF rootItemRect() const;
@@ -84,7 +86,7 @@ public:
     FormEditorGraphicsView *graphicsView() const;
 
 protected:
-    void wheelEvent(QWheelEvent *event);
+    void wheelEvent(QWheelEvent *event) override;
     QActionGroup *toolActionGroup() const;
     DocumentWarningWidget *errorWidget();
 
@@ -94,9 +96,8 @@ private:
     void changeRootItemWidth(const QString &widthText);
     void changeRootItemHeight(const QString &heightText);
     void changeBackgound(const QColor &color);
-    void resetNodeInstanceView();
+    void registerActionAsCommand(QAction *action, Core::Id id, const QKeySequence &keysequence);
 
-private:
     QPointer<FormEditorView> m_formEditorView;
     QPointer<FormEditorGraphicsView> m_graphicsView;
     QPointer<ZoomAction> m_zoomAction;
@@ -112,6 +113,7 @@ private:
     QPointer<BackgroundAction> m_backgroundAction;
     QPointer<QAction> m_resetAction;
     QPointer<DocumentWarningWidget> m_documentErrorWidget;
+    Core::IContext *m_context = nullptr;
 };
 
 } // namespace QmlDesigner

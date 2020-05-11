@@ -51,13 +51,13 @@ namespace Internal {
 class GitSubmitFileModel : public SubmitFileModel
 {
 public:
-    GitSubmitFileModel(QObject *parent = 0) : SubmitFileModel(parent)
+    GitSubmitFileModel(QObject *parent = nullptr) : SubmitFileModel(parent)
     { }
 
     void updateSelections(SubmitFileModel *source) override
     {
         QTC_ASSERT(source, return);
-        GitSubmitFileModel *gitSource = static_cast<GitSubmitFileModel *>(source);
+        auto gitSource = static_cast<GitSubmitFileModel *>(source);
         int j = 0;
         for (int i = 0; i < rowCount() && j < source->rowCount(); ++i) {
             CommitData::StateFilePair stateFile = stateFilePair(i);
@@ -88,8 +88,8 @@ CommitDataFetchResult CommitDataFetchResult::fetch(CommitType commitType, const 
     CommitDataFetchResult result;
     result.commitData.commitType = commitType;
     QString commitTemplate;
-    result.success = GitPlugin::client()->getCommitData(workingDirectory, &commitTemplate,
-                                                        result.commitData, &result.errorMessage);
+    result.success = GitClient::instance()->getCommitData(
+                workingDirectory, &commitTemplate, result.commitData, &result.errorMessage);
     return result;
 }
 
@@ -98,20 +98,18 @@ CommitDataFetchResult CommitDataFetchResult::fetch(CommitType commitType, const 
  * option for staged files. So, we sort apart the diff file lists
  * according to a type flag we add to the model. */
 
-GitSubmitEditor::GitSubmitEditor(const VcsBaseSubmitEditorParameters *parameters) :
-    VcsBaseSubmitEditor(parameters, new GitSubmitEditorWidget)
+GitSubmitEditor::GitSubmitEditor() :
+    VcsBaseSubmitEditor(new GitSubmitEditorWidget)
 {
     connect(this, &VcsBaseSubmitEditor::diffSelectedRows, this, &GitSubmitEditor::slotDiffSelected);
     connect(submitEditorWidget(), &GitSubmitEditorWidget::show, this, &GitSubmitEditor::showCommit);
-    connect(GitPlugin::instance()->versionControl(), &Core::IVersionControl::repositoryChanged,
+    connect(GitPlugin::versionControl(), &Core::IVersionControl::repositoryChanged,
             this, &GitSubmitEditor::forceUpdateFileModel);
     connect(&m_fetchWatcher, &QFutureWatcher<CommitDataFetchResult>::finished,
             this, &GitSubmitEditor::commitDataRetrieved);
 }
 
-GitSubmitEditor::~GitSubmitEditor()
-{
-}
+GitSubmitEditor::~GitSubmitEditor() = default;
 
 GitSubmitEditorWidget *GitSubmitEditor::submitEditorWidget()
 {
@@ -204,15 +202,15 @@ void GitSubmitEditor::slotDiffSelected(const QList<int> &rows)
         }
     }
     if (!unstagedFiles.empty() || !stagedFiles.empty())
-        GitPlugin::client()->diffFiles(m_workingDirectory, unstagedFiles, stagedFiles);
+        GitClient::instance()->diffFiles(m_workingDirectory, unstagedFiles, stagedFiles);
     if (!unmergedFiles.empty())
-        GitPlugin::client()->merge(m_workingDirectory, unmergedFiles);
+        GitClient::instance()->merge(m_workingDirectory, unmergedFiles);
 }
 
 void GitSubmitEditor::showCommit(const QString &commit)
 {
     if (!m_workingDirectory.isEmpty())
-        GitPlugin::client()->show(m_workingDirectory, commit);
+        GitClient::instance()->show(m_workingDirectory, commit);
 }
 
 void GitSubmitEditor::updateFileModel()
@@ -232,7 +230,7 @@ void GitSubmitEditor::updateFileModel()
     Core::ProgressManager::addTask(m_fetchWatcher.future(), tr("Refreshing Commit Data"),
                                    TASK_UPDATE_COMMIT);
 
-    GitPlugin::client()->addFuture(m_fetchWatcher.future());
+    GitClient::instance()->addFuture(m_fetchWatcher.future());
 }
 
 void GitSubmitEditor::forceUpdateFileModel()

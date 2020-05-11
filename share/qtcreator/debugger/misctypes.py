@@ -23,7 +23,9 @@
 #
 ############################################################################
 
-from dumper import *
+from dumper import Children, SubItem
+from utils import TypeCode, DisplayFormat
+import re
 
 #######################################################################
 #
@@ -31,39 +33,46 @@ from dumper import *
 #
 #######################################################################
 
+
 def qdump____m128(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         d.putArrayData(value.address(), 4, d.lookupType('float'))
+
 
 def qdump____m256(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         d.putArrayData(value.address(), 8, d.lookupType('float'))
 
+
 def qdump____m512(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         d.putArrayData(value.address(), 16, d.lookupType('float'))
+
 
 def qdump____m128d(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         d.putArrayData(value.address(), 2, d.lookupType('double'))
 
+
 def qdump____m256d(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         d.putArrayData(value.address(), 4, d.lookupType('double'))
+
 
 def qdump____m512d(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         d.putArrayData(value.address(), 8, d.lookupType('double'))
 
+
 def qdump____m128i(d, value):
     data = d.hexencode(value.data(16))
-    d.putValue(':'.join('%04x' % int(data[i:i+4], 16) for i in xrange(0, 32, 4)))
+    d.putValue(':'.join('%04x' % int(data[i:i + 4], 16) for i in range(0, 32, 4)))
     if d.isExpanded():
         with Children(d):
             addr = value.address()
@@ -72,9 +81,10 @@ def qdump____m128i(d, value):
             d.putArrayItem('uint32x4', addr, 4, 'unsigned int')
             d.putArrayItem('uint64x2', addr, 2, 'unsigned long long')
 
+
 def qdump____m256i(d, value):
     data = d.hexencode(value.data(32))
-    d.putValue(':'.join('%04x' % int(data[i:i+4], 16) for i in xrange(0, 64, 4)))
+    d.putValue(':'.join('%04x' % int(data[i:i + 4], 16) for i in range(0, 64, 4)))
     if d.isExpanded():
         with Children(d):
             addr = value.address()
@@ -83,14 +93,37 @@ def qdump____m256i(d, value):
             d.putArrayItem('uint32x8', addr, 8, 'unsigned int')
             d.putArrayItem('uint64x4', addr, 4, 'unsigned long long')
 
+
 def qdump____m512i(d, value):
     data = d.hexencode(value.data(64))
-    d.putValue(':'.join('%04x' % int(data[i:i+4], 16) for i in xrange(0, 64, 4))
-               + ', ' + ':'.join('%04x' % int(data[i:i+4], 16) for i in xrange(64, 128, 4)))
+    d.putValue(':'.join('%04x' % int(data[i:i + 4], 16) for i in range(0, 64, 4))
+               + ', ' + ':'.join('%04x' % int(data[i:i + 4], 16) for i in range(64, 128, 4)))
     if d.isExpanded():
         with Children(d):
             d.putArrayItem('uint32x16', value.address(), 16, 'unsigned int')
             d.putArrayItem('uint64x8', value.address(), 8, 'unsigned long long')
+
+#######################################################################
+#
+# GSL
+#
+#######################################################################
+
+
+def qform__std__array():
+    return [DisplayFormat.ArrayPlot]
+
+
+def qdump__gsl__span(d, value):
+    size, pointer = value.split('pp')
+    d.putItemCount(size)
+    if d.isExpanded():
+        d.putPlotData(pointer, size, value.type[0])
+
+
+def qdump__gsl__byte(d, value):
+    d.putNumChild(0)
+    d.putValue(value.integer())
 
 #######################################################################
 #
@@ -100,6 +133,7 @@ def qdump____m512i(d, value):
 
 #def qform__Eigen__Matrix():
 #    return 'Transposed'
+
 
 def qdump__Eigen__Matrix(d, value):
     innerType = value.type[0]
@@ -161,11 +195,13 @@ def qdump__Eigen__Matrix(d, value):
 def qdump__NimStringDesc(d, value):
     size, reserved = value.split('pp')
     data = value.address() + 2 * d.ptrSize()
+    d.putBetterType('string')
     d.putCharArrayHelper(data, size, d.createType('char'), 'utf8')
 
-def qdump__NimGenericSequence__(d, value, regex = '^TY[\d]+$'):
+
+def qdump__NimGenericSequence__(d, value, regex=r'^TY[\d]+$'):
     code = value.type.stripTypedefs().code
-    if code == TypeCodeStruct:
+    if code == TypeCode.Struct:
         size, reserved = d.split('pp', value)
         data = value.address() + 2 * d.ptrSize()
         typeobj = value['data'].type.dereference()
@@ -175,6 +211,7 @@ def qdump__NimGenericSequence__(d, value, regex = '^TY[\d]+$'):
     else:
         d.putEmptyValue()
         d.putPlainChildren(value)
+
 
 def qdump__TNimNode(d, value):
     name = value['name'].pointer()
@@ -199,6 +236,7 @@ def qdump__TNimNode(d, value):
 
 def cleanDType(type):
     return str(type).replace('uns long long', 'string')
+
 
 def qdump_Array(d, value):
     n = value['length']
@@ -229,7 +267,7 @@ def qdump_AArray(d, value):
     d.putEmptyValue()
     if d.isExpanded():
         with Children(d, 1):
-                d.putSubItem('ptr', p)
+            d.putSubItem('ptr', p)
 
 
 #######################################################################
@@ -242,7 +280,7 @@ if False:
 
     def qdump__tree_entry(d, value):
         d.putValue('len: %s, offset: %s, type: %s' %
-            (value['blocklength'], value['offset'], value['type']))
+                   (value['blocklength'], value['offset'], value['type']))
         d.putNumChild(0)
 
     def qdump__tree(d, value):
@@ -251,42 +289,42 @@ if False:
         base = value['base'].pointer()
         d.putItemCount(count)
         if d.isExpanded():
-          with Children(d):
-            with SubItem(d, 'tree'):
-              d.putEmptyValue()
-              d.putNoType()
-              if d.isExpanded():
-                with Children(d):
-                  for i in xrange(count):
-                      d.putSubItem(Item(entries[i], iname))
-            with SubItem(d, 'data'):
-              d.putEmptyValue()
-              d.putNoType()
-              if d.isExpanded():
-                 with Children(d):
-                    for i in xrange(count):
-                      with SubItem(d, i):
-                        entry = entries[i]
-                        mpitype = str(entry['type'])
-                        d.putType(mpitype)
-                        length = int(entry['blocklength'])
-                        offset = int(entry['offset'])
-                        d.putValue('%s items at %s' % (length, offset))
-                        if mpitype == 'MPI_INT':
-                          innerType = 'int'
-                        elif mpitype == 'MPI_CHAR':
-                          innerType = 'char'
-                        elif mpitype == 'MPI_DOUBLE':
-                          innerType = 'double'
-                        else:
-                          length = 0
-                        d.putNumChild(length)
-                        if d.isExpanded():
-                           with Children(d):
-                              t = d.lookupType(innerType).pointer()
-                              p = (base + offset).cast(t)
-                              for j in range(length):
-                                d.putSubItem(j, p.dereference())
+            with Children(d):
+                with SubItem(d, 'tree'):
+                    d.putEmptyValue()
+                    d.putNoType()
+                    if d.isExpanded():
+                        with Children(d):
+                            for i in range(count):
+                                d.putSubItem(Item(entries[i], iname))
+                with SubItem(d, 'data'):
+                    d.putEmptyValue()
+                    d.putNoType()
+                    if d.isExpanded():
+                        with Children(d):
+                            for i in range(count):
+                                with SubItem(d, i):
+                                    entry = entries[i]
+                                    mpitype = str(entry['type'])
+                                    d.putType(mpitype)
+                                    length = int(entry['blocklength'])
+                                    offset = int(entry['offset'])
+                                    d.putValue('%s items at %s' % (length, offset))
+                                    if mpitype == 'MPI_INT':
+                                        innerType = 'int'
+                                    elif mpitype == 'MPI_CHAR':
+                                        innerType = 'char'
+                                    elif mpitype == 'MPI_DOUBLE':
+                                        innerType = 'double'
+                                    else:
+                                        length = 0
+                                    d.putNumChild(length)
+                                    if d.isExpanded():
+                                        with Children(d):
+                                            t = d.lookupType(innerType).pointer()
+                                            p = (base + offset).cast(t)
+                                            for j in range(length):
+                                                d.putSubItem(j, p.dereference())
 
 
 #######################################################################
@@ -300,8 +338,9 @@ def qdump__KDSoapValue1(d, value):
     d.putStringValue(inner['m_name'])
     d.putPlainChildren(inner)
 
+
 def qdump__KDSoapValue(d, value):
-    p = (value.cast(lookupType('char*')) + 4).dereference().cast(lookupType('QString'))
+    p = (value.cast(d.lookupType('char*')) + 4).dereference().cast(d.lookupType('QString'))
     d.putStringValue(p)
     d.putPlainChildren(value['d']['d'].dereference())
 
@@ -334,12 +373,178 @@ def qdump__WTF__String(d, value):
 
 #######################################################################
 #
+# Python
+#
+#######################################################################
+
+def get_python_interpreter_major_version(d):
+    key = 'python_interpreter_major_version'
+    if key in d.generalCache:
+        return d.generalCache[key]
+
+    e = "(char*)Py_GetVersion()"
+    result = d.nativeParseAndEvaluate(e)
+    result_str = str(result)
+    matches = re.search(r'(\d+?)\.(\d+?)\.(\d+?)', result_str)
+    if matches:
+        result_str = matches.group(1)
+    d.generalCache[key] = result_str
+    return result_str
+
+
+def is_python_3(d):
+    return get_python_interpreter_major_version(d) == '3'
+
+
+def repr_cache_decorator(namespace):
+    def real_decorator(func_to_decorate):
+        def wrapper(d, address):
+            if namespace in d.perStepCache and address in d.perStepCache[namespace]:
+                return d.perStepCache[namespace][address]
+
+            if namespace not in d.perStepCache:
+                d.perStepCache[namespace] = {}
+
+            if address == 0:
+                result_str = d.perStepCache[namespace][address] = "<nullptr>"
+                return result_str
+
+            result = func_to_decorate(d, address)
+            d.perStepCache[namespace][address] = result
+            return result
+        return wrapper
+    return real_decorator
+
+
+@repr_cache_decorator('py_object')
+def get_py_object_repr_helper(d, address):
+    # The code below is a long way to evaluate:
+    # ((PyBytesObject *)PyUnicode_AsEncodedString(PyObject_Repr(
+    #        (PyObject*){}), \"utf-8\", \"backslashreplace\"))->ob_sval"
+    # But with proper object cleanup.
+
+    e_decref = "Py_DecRef((PyObject *){})"
+
+    e = "PyObject_Repr((PyObject*){})"
+    repr_object_value = d.parseAndEvaluate(e.format(address))
+    repr_object_address = d.fromPointerData(repr_object_value.ldata)[0]
+
+    if is_python_3(d):
+        # Try to get a UTF-8 encoded string from the repr object.
+        e = "PyUnicode_AsEncodedString((PyObject*){}, \"utf-8\", \"backslashreplace\")"
+        string_object_value = d.parseAndEvaluate(e.format(repr_object_address))
+        string_object_address = d.fromPointerData(string_object_value.ldata)[0]
+
+        e = "(char*)(((PyBytesObject *){})->ob_sval)"
+        result = d.nativeParseAndEvaluate(e.format(string_object_address))
+
+        # It's important to stringify the result before any other evaluations happen.
+        result_str = str(result)
+
+        # Clean up.
+        d.nativeParseAndEvaluate(e_decref.format(string_object_address))
+
+    else:
+        # Retrieve non-unicode string.
+        e = "(char*)(PyString_AsString((PyObject*){}))"
+        result = d.nativeParseAndEvaluate(e.format(repr_object_address))
+
+        # It's important to stringify the result before any other evaluations happen.
+        result_str = str(result)
+
+    # Do some string stripping.
+    # FIXME when using cdb engine.
+    matches = re.search(r'.+?"(.+)"$', result_str)
+    if matches:
+        result_str = matches.group(1)
+
+    # Clean up.
+    d.nativeParseAndEvaluate(e_decref.format(repr_object_address))
+
+    return result_str
+
+
+@repr_cache_decorator('py_object_type')
+def get_py_object_type(d, object_address):
+    e = "((PyObject *){})->ob_type"
+    type_value = d.parseAndEvaluate(e.format(object_address))
+    type_address = d.fromPointerData(type_value.ldata)[0]
+    type_repr = get_py_object_repr_helper(d, type_address)
+    return type_repr
+
+
+@repr_cache_decorator('py_object_meta_type')
+def get_py_object_meta_type(d, object_address):
+    # The python3 object layout has a few more indirections.
+    if is_python_3(d):
+        e = "((PyObject *){})->ob_type->ob_base->ob_base->ob_type"
+    else:
+        e = "((PyObject *){})->ob_type->ob_type"
+    type_value = d.parseAndEvaluate(e.format(object_address))
+    type_address = d.fromPointerData(type_value.ldata)[0]
+    type_repr = get_py_object_repr_helper(d, type_address)
+    return type_repr
+
+
+@repr_cache_decorator('py_object_base_class')
+def get_py_object_base_class(d, object_address):
+    e = "((PyObject *){})->ob_type->tp_base"
+    base_value = d.parseAndEvaluate(e.format(object_address))
+    base_address = d.fromPointerData(base_value.ldata)[0]
+    base_repr = get_py_object_repr_helper(d, base_address)
+    return base_repr
+
+
+def get_py_object_repr(d, value):
+    address = value.address()
+    repr_available = False
+    try:
+        result = get_py_object_repr_helper(d, address)
+        d.putValue(d.hexencode(result), encoding='utf8')
+        repr_available = True
+    except:
+        d.putEmptyValue()
+
+    def sub_item(name, functor, address):
+        with SubItem(d, '[{}]'.format(name)):
+            sub_value = functor(d, address)
+            d.putValue(d.hexencode(sub_value), encoding='utf8')
+
+    d.putNumChild(1)
+    if d.isExpanded():
+        with Children(d):
+            if repr_available:
+                sub_item('class', get_py_object_type, address)
+                sub_item('super class', get_py_object_base_class, address)
+                sub_item('meta type', get_py_object_meta_type, address)
+            d.putFields(value)
+
+
+def qdump__PyTypeObject(d, value):
+    get_py_object_repr(d, value)
+
+
+def qdump___typeobject(d, value):
+    get_py_object_repr(d, value)
+
+
+def qdump__PyObject(d, value):
+    get_py_object_repr(d, value)
+
+
+def qdump__PyVarObject(d, value):
+    get_py_object_repr(d, value)
+
+
+#######################################################################
+#
 # Internal test
 #
 #######################################################################
 
 def qdump__QtcDumperTest_FieldAccessByIndex(d, value):
     d.putValue(value["d"][2].integer())
+
 
 def qdump__QtcDumperTest_PointerArray(d, value):
     foos = value["foos"]
@@ -348,6 +553,7 @@ def qdump__QtcDumperTest_PointerArray(d, value):
         with Children(d, 10):
             for i in d.childRange():
                 d.putSubItem(i, foos[i])
+
 
 def qdump__QtcDumperTest_BufArray(d, value):
     maxItems = 1000
@@ -362,3 +568,37 @@ def qdump__QtcDumperTest_BufArray(d, value):
             for i in d.childRange():
                 d.putSubItem(i, (buffer + (i * objsize)).dereference().cast(valueType))
 
+
+def qdump__QtcDumperTest_List__NodeX(d, value):
+    typename = value.type.unqualified().name
+    pos0 = typename.find('<')
+    pos1 = typename.find('>')
+    tName = typename[pos0 + 1:pos1]
+    d.putBetterType('QtcDumperTest_List<' + tName + '>::Node')
+    d.putNumChild(1)
+    if d.isExpanded():
+        obj_type = d.lookupType(tName)
+        with Children(d):
+            d.putSubItem("this", value.cast(obj_type))
+            d.putFields(value)
+    #d.putPlainChildren(value)
+
+
+def qdump__QtcDumperTest_List(d, value):
+    innerType = value.type[0]
+    d.putNumChild(1)
+    p = value['root']
+    if d.isExpanded():
+        with Children(d):
+            d.putSubItem("[p]", p)
+            d.putSubItem("[root]", value["root"].cast(innerType))
+            d.putFields(value)
+    #d.putPlainChildren(value)
+
+
+def qdump__QtcDumperTest_String(d, value):
+    with Children(d):
+        first = d.hexdecode(d.putSubItem('first', value['first']).value)
+        second = d.hexdecode(d.putSubItem('second', value['second']).value)
+        third = d.hexdecode(d.putSubItem('third', value['third']).value)[:-1]
+    d.putValue(first + ', ' + second + ', ' + third)

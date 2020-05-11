@@ -31,8 +31,9 @@
 
 #include <QObject>
 
-namespace QSsh { class SshHostKeyDatabase; }
-namespace Utils { class FileName; }
+#include <memory>
+
+namespace Utils { class FilePath; }
 
 namespace ProjectExplorer {
 class IDevice;
@@ -95,18 +96,17 @@ private:
     static void replaceInstance();
     static void removeClonedInstance();
 
-    static QString hostKeysFilePath();
-    QSharedPointer<QSsh::SshHostKeyDatabase> hostKeyDatabase() const;
-    static Utils::FileName settingsFilePath(const QString &extension);
-    static Utils::FileName systemSettingsFilePath(const QString &deviceFileRelativePath);
+    static Utils::FilePath settingsFilePath(const QString &extension);
+    static Utils::FilePath systemSettingsFilePath(const QString &deviceFileRelativePath);
     static void copy(const DeviceManager *source, DeviceManager *target, bool deep);
 
-    Internal::DeviceManagerPrivate * const d;
+    const std::unique_ptr<Internal::DeviceManagerPrivate> d;
 
     static DeviceManager *m_instance;
 
     friend class Internal::DeviceManagerPrivate;
     friend class ProjectExplorerPlugin;
+    friend class ProjectExplorerPluginPrivate;
 };
 
 } // namespace ProjectExplorer

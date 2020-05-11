@@ -31,15 +31,16 @@ namespace Mercurial {
 namespace Constants {
 
 enum { debug = 0 };
+const char MERCURIAL_PLUGIN[] = "MercurialPlugin";
 const char MERCURIALREPO[] = ".hg";
 const char MERCURIALDEFAULT[] = "hg";
 const char MERCURIAL_CONTEXT[] = "Mercurial Context";
 
 // Changeset identifiers
-const char CHANGESETID12[] = " ([a-f0-9]{12,12}) "; //match 12 hex chars and capture
-const char CHANGESETID40[] = " ([a-f0-9]{40,40}) ";
-const char CHANGEIDEXACT12[] = "[a-f0-9]{12,12}"; //match 12 hex chars a
-const char CHANGEIDEXACT40[] = "[a-f0-9]{40,40}";
+const char CHANGESETID12[] = " ([a-f0-9]{12}) "; //match 12 hex chars and capture
+const char CHANGESETID40[] = " ([a-f0-9]{40}) ";
+const char CHANGEIDEXACT12[] = "[a-f0-9]{12}"; //match 12 hex chars
+const char CHANGEIDEXACT40[] = "[a-f0-9]{40}";
 // match diff header. e.g. +++ b/filename
 const char DIFFIDENTIFIER[] = "^(?:diff --git a/|[+-]{3} (?:/dev/null|[ab]/(.+$)))";
 
@@ -85,9 +86,6 @@ const char INCOMING[] = "Mercurial.Action.Incoming";
 const char OUTGOING[] = "Mercurial.Action.Outgoing";
 const char COMMIT[] = "Mercurial.Action.Commit";
 const char CREATE_REPOSITORY[] = "Mercurial.Action.CreateRepository";
-
-// Submit editor actions
-const char DIFFEDITOR[] = "Mercurial.Action.Editor.Diff";
 
 } // namespace Constants
 } // namespace mercurial

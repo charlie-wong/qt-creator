@@ -33,8 +33,8 @@
 
 using namespace ClearCase::Internal;
 
-ClearCaseSubmitEditor::ClearCaseSubmitEditor(const VcsBase::VcsBaseSubmitEditorParameters *parameters) :
-    VcsBase::VcsBaseSubmitEditor(parameters, new ClearCaseSubmitEditorWidget)
+ClearCaseSubmitEditor::ClearCaseSubmitEditor() :
+    VcsBase::VcsBaseSubmitEditor(new ClearCaseSubmitEditorWidget)
 {
     document()->setPreferredDisplayName(tr("ClearCase Check In"));
 }
@@ -51,7 +51,7 @@ void ClearCaseSubmitEditor::setIsUcm(bool isUcm)
 
 void ClearCaseSubmitEditor::setStatusList(const QStringList &statusOutput)
 {
-    typedef QStringList::const_iterator ConstIterator;
+    using ConstIterator = QStringList::const_iterator;
     auto model = new VcsBase::SubmitFileModel(this);
     model->setRepositoryRoot(checkScriptWorkingDirectory());
 

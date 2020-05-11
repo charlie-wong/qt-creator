@@ -24,24 +24,174 @@
 ****************************************************************************/
 
 #include "projectconfiguration.h"
+#include "target.h"
+
+#include <utils/algorithm.h>
+#include <utils/qtcassert.h>
+
+#include <QFormLayout>
+#include <QWidget>
 
 using namespace ProjectExplorer;
 
 const char CONFIGURATION_ID_KEY[] = "ProjectExplorer.ProjectConfiguration.Id";
 const char DISPLAY_NAME_KEY[] = "ProjectExplorer.ProjectConfiguration.DisplayName";
-const char DEFAULT_DISPLAY_NAME_KEY[] = "ProjectExplorer.ProjectConfiguration.DefaultDisplayName";
 
-ProjectConfiguration::ProjectConfiguration(QObject *parent, Core::Id id) : QObject(parent),
-    m_id(id)
-{ setObjectName(id.toString()); }
+// ProjectConfigurationAspect
 
-ProjectConfiguration::ProjectConfiguration(QObject *parent, const ProjectConfiguration *source) :
-    QObject(parent),
-    m_id(source->m_id),
-    m_defaultDisplayName(source->m_defaultDisplayName)
+ProjectConfigurationAspect::ProjectConfigurationAspect() = default;
+
+ProjectConfigurationAspect::~ProjectConfigurationAspect() = default;
+
+void ProjectConfigurationAspect::setConfigWidgetCreator
+    (const ConfigWidgetCreator &configWidgetCreator)
 {
-    Q_ASSERT(source);
-    m_displayName = tr("Clone of %1").arg(source->displayName());
+    m_configWidgetCreator = configWidgetCreator;
+}
+
+QWidget *ProjectConfigurationAspect::createConfigWidget() const
+{
+    return m_configWidgetCreator ? m_configWidgetCreator() : nullptr;
+}
+
+void ProjectConfigurationAspect::addToLayout(LayoutBuilder &)
+{
+}
+
+// LayoutBuilder
+
+LayoutBuilder::LayoutBuilder(QWidget *parent)
+    : m_layout(new QFormLayout(parent))
+{
+    m_layout->setContentsMargins(0, 0, 0, 0);
+    if (auto fl = qobject_cast<QFormLayout *>(m_layout))
+        fl->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+}
+
+LayoutBuilder::~LayoutBuilder()
+{
+    flushPendingItems();
+}
+
+LayoutBuilder &LayoutBuilder::startNewRow()
+{
+    flushPendingItems();
+    return *this;
+}
+
+void LayoutBuilder::flushPendingItems()
+{
+    if (m_pendingItems.isEmpty())
+        return;
+
+    if (auto fl = qobject_cast<QFormLayout *>(m_layout)) {
+        // If there are more than two items, we cram the last ones in one hbox.
+        if (m_pendingItems.size() > 2) {
+            auto hbox = new QHBoxLayout;
+            for (int i = 1; i < m_pendingItems.size(); ++i) {
+                if (QWidget *w = m_pendingItems.at(i).widget)
+                    hbox->addWidget(w);
+                else if (QLayout *l = m_pendingItems.at(i).layout)
+                    hbox->addItem(l);
+                else
+                    QTC_CHECK(false);
+            }
+            while (m_pendingItems.size() >= 2)
+                m_pendingItems.takeLast();
+            m_pendingItems.append(LayoutItem(hbox));
+        }
+
+        if (m_pendingItems.size() == 1) { // One one item given, so this spans both columns.
+            if (auto layout = m_pendingItems.at(0).layout)
+                fl->addRow(layout);
+            else if (auto widget = m_pendingItems.at(0).widget)
+                fl->addRow(widget);
+        } else if (m_pendingItems.size() == 2) { // Normal case, both columns used.
+            if (auto label = m_pendingItems.at(0).widget) {
+                if (auto layout = m_pendingItems.at(1).layout)
+                    fl->addRow(label, layout);
+                else if (auto widget = m_pendingItems.at(1).widget)
+                    fl->addRow(label, widget);
+            } else  {
+                if (auto layout = m_pendingItems.at(1).layout)
+                    fl->addRow(m_pendingItems.at(0).text, layout);
+                else if (auto widget = m_pendingItems.at(1).widget)
+                    fl->addRow(m_pendingItems.at(0).text, widget);
+            }
+        } else {
+            QTC_CHECK(false);
+        }
+    } else {
+        QTC_CHECK(false);
+    }
+
+    m_pendingItems.clear();
+}
+
+QLayout *LayoutBuilder::layout() const
+{
+    return m_layout;
+}
+
+LayoutBuilder &LayoutBuilder::addItem(LayoutItem item)
+{
+    if (item.widget && !item.widget->parent())
+        item.widget->setParent(m_layout->parentWidget());
+    m_pendingItems.append(item);
+    return *this;
+}
+
+
+// ProjectConfigurationAspects
+
+ProjectConfigurationAspects::ProjectConfigurationAspects() = default;
+
+ProjectConfigurationAspects::~ProjectConfigurationAspects()
+{
+    qDeleteAll(base());
+}
+
+ProjectConfigurationAspect *ProjectConfigurationAspects::aspect(Core::Id id) const
+{
+    return Utils::findOrDefault(base(), Utils::equal(&ProjectConfigurationAspect::id, id));
+}
+
+void ProjectConfigurationAspects::fromMap(const QVariantMap &map) const
+{
+    for (ProjectConfigurationAspect *aspect : *this)
+        aspect->fromMap(map);
+}
+
+void ProjectConfigurationAspects::toMap(QVariantMap &map) const
+{
+    for (ProjectConfigurationAspect *aspect : *this)
+        aspect->toMap(map);
+}
+
+
+// ProjectConfiguration
+
+ProjectConfiguration::ProjectConfiguration(QObject *parent, Core::Id id)
+    : QObject(parent)
+    , m_id(id)
+{
+    QTC_CHECK(parent);
+    QTC_CHECK(id.isValid());
+    setObjectName(id.toString());
+
+    for (QObject *obj = this; obj; obj = obj->parent()) {
+        m_target = qobject_cast<Target *>(obj);
+        if (m_target)
+            break;
+    }
+    QTC_CHECK(m_target);
+}
+
+ProjectConfiguration::~ProjectConfiguration() = default;
+
+Project *ProjectConfiguration::project() const
+{
+    return m_target->project();
 }
 
 Core::Id ProjectConfiguration::id() const
@@ -49,31 +199,20 @@ Core::Id ProjectConfiguration::id() const
     return m_id;
 }
 
-QString ProjectConfiguration::displayName() const
+QString ProjectConfiguration::settingsIdKey()
 {
-    if (!m_displayName.isEmpty())
-        return m_displayName;
-    return m_defaultDisplayName;
+    return QString(CONFIGURATION_ID_KEY);
 }
 
 void ProjectConfiguration::setDisplayName(const QString &name)
 {
-    if (displayName() == name)
-        return;
-    if (name == m_defaultDisplayName)
-        m_displayName.clear();
-    else
-        m_displayName = name;
-    emit displayNameChanged();
+    if (m_displayName.setValue(name))
+        emit displayNameChanged();
 }
 
 void ProjectConfiguration::setDefaultDisplayName(const QString &name)
 {
-    if (m_defaultDisplayName == name)
-        return;
-    const QString originalName = displayName();
-    m_defaultDisplayName = name;
-    if (originalName != displayName())
+    if (m_displayName.setDefaultValue(name))
         emit displayNameChanged();
 }
 
@@ -90,36 +229,45 @@ QString ProjectConfiguration::toolTip() const
     return m_toolTip;
 }
 
-bool ProjectConfiguration::usesDefaultDisplayName() const
-{
-    return m_displayName.isEmpty();
-}
-
 QVariantMap ProjectConfiguration::toMap() const
 {
+    QTC_CHECK(m_id.isValid());
     QVariantMap map;
     map.insert(QLatin1String(CONFIGURATION_ID_KEY), m_id.toSetting());
-    map.insert(QLatin1String(DISPLAY_NAME_KEY), m_displayName);
-    map.insert(QLatin1String(DEFAULT_DISPLAY_NAME_KEY), m_defaultDisplayName);
+    m_displayName.toMap(map, DISPLAY_NAME_KEY);
+    m_aspects.toMap(map);
     return map;
+}
+
+Target *ProjectConfiguration::target() const
+{
+    return m_target;
 }
 
 bool ProjectConfiguration::fromMap(const QVariantMap &map)
 {
-    m_id = Core::Id::fromSetting(map.value(QLatin1String(CONFIGURATION_ID_KEY)));
-    m_displayName = map.value(QLatin1String(DISPLAY_NAME_KEY), QString()).toString();
-    m_defaultDisplayName = map.value(QLatin1String(DEFAULT_DISPLAY_NAME_KEY),
-                                     m_defaultDisplayName.isEmpty() ?
-                                         m_displayName : m_defaultDisplayName).toString();
-    return m_id.isValid();
+    Core::Id id = Core::Id::fromSetting(map.value(QLatin1String(CONFIGURATION_ID_KEY)));
+    // Note: This is only "startsWith", not ==, as RunConfigurations currently still
+    // mangle in their build keys.
+    QTC_ASSERT(id.toString().startsWith(m_id.toString()), return false);
+
+    m_displayName.fromMap(map, DISPLAY_NAME_KEY);
+    m_aspects.fromMap(map);
+    return true;
+}
+
+ProjectConfigurationAspect *ProjectConfiguration::aspect(Core::Id id) const
+{
+    return m_aspects.aspect(id);
+}
+
+void ProjectConfiguration::acquaintAspects()
+{
+    for (ProjectConfigurationAspect *aspect : m_aspects)
+        aspect->acquaintSiblings(m_aspects);
 }
 
 Core::Id ProjectExplorer::idFromMap(const QVariantMap &map)
 {
     return Core::Id::fromSetting(map.value(QLatin1String(CONFIGURATION_ID_KEY)));
-}
-
-QString ProjectExplorer::displayNameFromMap(const QVariantMap &map)
-{
-    return map.value(QLatin1String(DISPLAY_NAME_KEY), QString()).toString();
 }

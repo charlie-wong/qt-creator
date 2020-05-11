@@ -25,14 +25,12 @@
 
 #include "cmakeindenter.h"
 
-#include <QStack>
-#include <QDebug>
-
-#include <texteditor/tabsettings.h>
-#include <texteditor/textdocumentlayout.h>
-
 namespace CMakeProjectManager {
 namespace Internal {
+
+CMakeIndenter::CMakeIndenter(QTextDocument *doc)
+    : TextEditor::TextIndenter(doc)
+{}
 
 bool CMakeIndenter::isElectricCharacter(const QChar &ch) const
 {
@@ -98,7 +96,9 @@ static int paranthesesLevel(const QString &line)
         return -1;
 }
 
-int CMakeIndenter::indentFor(const QTextBlock &block, const TextEditor::TabSettings &tabSettings)
+int CMakeIndenter::indentFor(const QTextBlock &block,
+                             const TextEditor::TabSettings &tabSettings,
+                             int /*cursorPositionInEditor*/)
 {
     QTextBlock previousBlock = block.previous();
     // find the next previous block that is non-empty (contains non-whitespace characters)

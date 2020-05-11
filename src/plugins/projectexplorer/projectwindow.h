@@ -29,6 +29,10 @@
 
 #include <utils/fancymainwindow.h>
 
+#include <memory>
+
+namespace Core { class Id; }
+
 namespace ProjectExplorer {
 namespace Internal {
 
@@ -56,10 +60,12 @@ class ProjectWindow : public Utils::FancyMainWindow
 
 public:
     ProjectWindow();
-    ~ProjectWindow();
+    ~ProjectWindow() override;
+
+    void activateProjectPanel(Core::Id panelId);
 
 private:
-    ProjectWindowPrivate *d;
+    const std::unique_ptr<ProjectWindowPrivate> d;
 };
 
 } // namespace Internal

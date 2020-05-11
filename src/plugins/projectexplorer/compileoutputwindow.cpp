@@ -24,138 +24,74 @@
 ****************************************************************************/
 
 #include "compileoutputwindow.h"
+
 #include "buildmanager.h"
-#include "showoutputtaskhandler.h"
-#include "task.h"
+#include "ioutputparser.h"
 #include "projectexplorer.h"
 #include "projectexplorericons.h"
 #include "projectexplorersettings.h"
+#include "showoutputtaskhandler.h"
+#include "task.h"
 #include "taskhub.h"
 
 #include <coreplugin/outputwindow.h>
 #include <coreplugin/find/basetextfind.h>
 #include <coreplugin/icore.h>
+#include <coreplugin/coreconstants.h>
 #include <extensionsystem/pluginmanager.h>
 #include <texteditor/texteditorsettings.h>
 #include <texteditor/fontsettings.h>
 #include <texteditor/behaviorsettings.h>
-#include <utils/ansiescapecodehandler.h>
+#include <utils/algorithm.h>
+#include <utils/outputformatter.h>
 #include <utils/proxyaction.h>
 #include <utils/theme/theme.h>
 #include <utils/utilsicons.h>
 
+#include <QCheckBox>
+#include <QHBoxLayout>
 #include <QIcon>
-#include <QTextCharFormat>
-#include <QTextBlock>
-#include <QTextCursor>
+#include <QLabel>
 #include <QPlainTextEdit>
+#include <QSpinBox>
+#include <QTextBlock>
+#include <QTextCharFormat>
+#include <QTextCursor>
 #include <QToolButton>
-
-using namespace ProjectExplorer;
-using namespace ProjectExplorer::Internal;
-
-namespace {
-const int MAX_LINECOUNT = 100000;
-const char SETTINGS_KEY[] = "ProjectExplorer/CompileOutput/Zoom";
-const char C_COMPILE_OUTPUT[] = "ProjectExplorer.CompileOutput";
-}
+#include <QVBoxLayout>
 
 namespace ProjectExplorer {
 namespace Internal {
 
-class CompileOutputTextEdit : public Core::OutputWindow
-{
-    Q_OBJECT
-public:
-    CompileOutputTextEdit(const Core::Context &context) : Core::OutputWindow(context)
-    {
-        setWheelZoomEnabled(true);
-
-        QSettings *settings = Core::ICore::settings();
-        float zoom = settings->value(QLatin1String(SETTINGS_KEY), 0).toFloat();
-        setFontZoom(zoom);
-
-        fontSettingsChanged();
-
-        connect(TextEditor::TextEditorSettings::instance(), &TextEditor::TextEditorSettings::fontSettingsChanged,
-                this, &CompileOutputTextEdit::fontSettingsChanged);
-
-        connect(Core::ICore::instance(), &Core::ICore::saveSettingsRequested,
-                this, &CompileOutputTextEdit::saveSettings);
-
-        setMouseTracking(true);
-    }
-
-    void saveSettings()
-    {
-        QSettings *settings = Core::ICore::settings();
-        settings->setValue(QLatin1String(SETTINGS_KEY), fontZoom());
-    }
-
-    void addTask(const Task &task, int blocknumber)
-    {
-        m_taskids.insert(blocknumber, task.taskId);
-    }
-
-    void clearTasks()
-    {
-        m_taskids.clear();
-    }
-private:
-    void fontSettingsChanged()
-    {
-        setBaseFont(TextEditor::TextEditorSettings::fontSettings().font());
-    }
-
-protected:
-    void mouseMoveEvent(QMouseEvent *ev)
-    {
-        int line = cursorForPosition(ev->pos()).block().blockNumber();
-        if (m_taskids.value(line, 0))
-            viewport()->setCursor(Qt::PointingHandCursor);
-        else
-            viewport()->setCursor(Qt::IBeamCursor);
-        QPlainTextEdit::mouseMoveEvent(ev);
-    }
-
-    void mousePressEvent(QMouseEvent *ev)
-    {
-        m_mousePressPosition = ev->pos();
-        QPlainTextEdit::mousePressEvent(ev);
-    }
-
-    void mouseReleaseEvent(QMouseEvent *ev)
-    {
-        if ((m_mousePressPosition - ev->pos()).manhattanLength() < 4) {
-            int line = cursorForPosition(ev->pos()).block().blockNumber();
-            if (unsigned taskid = m_taskids.value(line, 0))
-                TaskHub::showTaskInEditor(taskid);
-        }
-
-        QPlainTextEdit::mouseReleaseEvent(ev);
-    }
-
-private:
-    QHash<int, unsigned int> m_taskids;   //Map blocknumber to taskId
-    QPoint m_mousePressPosition;
-};
-
-} // namespace Internal
-} // namespace ProjectExplorer
+const char SETTINGS_KEY[] = "ProjectExplorer/CompileOutput/Zoom";
+const char C_COMPILE_OUTPUT[] = "ProjectExplorer.CompileOutput";
+const char POP_UP_KEY[] = "ProjectExplorer/Settings/ShowCompilerOutput";
+const char WRAP_OUTPUT_KEY[] = "ProjectExplorer/Settings/WrapBuildOutput";
+const char MAX_LINES_KEY[] = "ProjectExplorer/Settings/MaxBuildOutputLines";
+const char OPTIONS_PAGE_ID[] = "C.ProjectExplorer.CompileOutputOptions";
 
 CompileOutputWindow::CompileOutputWindow(QAction *cancelBuildAction) :
     m_cancelBuildButton(new QToolButton),
-    m_zoomInButton(new QToolButton),
-    m_zoomOutButton(new QToolButton),
-    m_escapeCodeHandler(new Utils::AnsiEscapeCodeHandler)
+    m_settingsButton(new QToolButton)
 {
     Core::Context context(C_COMPILE_OUTPUT);
-    m_outputWindow = new CompileOutputTextEdit(context);
+    m_outputWindow = new Core::OutputWindow(context, SETTINGS_KEY);
     m_outputWindow->setWindowTitle(displayName());
     m_outputWindow->setWindowIcon(Icons::WINDOW.icon());
     m_outputWindow->setReadOnly(true);
     m_outputWindow->setUndoRedoEnabled(false);
-    m_outputWindow->setMaxLineCount(MAX_LINECOUNT);
+    m_outputWindow->setMaxCharCount(Core::Constants::DEFAULT_MAX_CHAR_COUNT);
+
+    outputFormatter()->overridePostPrintAction([this](Utils::OutputLineParser *parser) {
+        if (const auto taskParser = qobject_cast<OutputTaskParser *>(parser)) {
+            int offset = 0;
+            Utils::reverseForeach(taskParser->taskInfo(), [this, &offset](const OutputTaskParser::TaskInfo &ti) {
+                registerPositionOf(ti.task, ti.linkedLines, ti.skippedLines, offset);
+                offset += ti.linkedLines;
+            });
+        }
+        parser->runPostPrintActions();
+    });
 
     // Let selected text be colored as if the text edit was editable,
     // otherwise the highlight for searching is too light
@@ -170,21 +106,34 @@ CompileOutputWindow::CompileOutputWindow(QAction *cancelBuildAction) :
             Utils::ProxyAction::proxyActionWithIcon(cancelBuildAction,
                                                     Utils::Icons::STOP_SMALL_TOOLBAR.icon());
     m_cancelBuildButton->setDefaultAction(cancelBuildProxyButton);
-    m_zoomInButton->setToolTip(tr("Increase Font Size"));
-    m_zoomInButton->setIcon(Utils::Icons::PLUS_TOOLBAR.icon());
-    m_zoomOutButton->setToolTip(tr("Decrease Font Size"));
-    m_zoomOutButton->setIcon(Utils::Icons::MINUS.icon());
+    m_settingsButton->setToolTip(tr("Open Settings Page"));
+    m_settingsButton->setIcon(Utils::Icons::SETTINGS_TOOLBAR.icon());
 
+    auto updateFontSettings = [this] {
+        m_outputWindow->setBaseFont(TextEditor::TextEditorSettings::fontSettings().font());
+    };
+
+    auto updateZoomEnabled = [this] {
+        m_outputWindow->setWheelZoomEnabled(
+                    TextEditor::TextEditorSettings::behaviorSettings().m_scrollWheelZooming);
+    };
+
+    updateFontSettings();
     updateZoomEnabled();
+    setupFilterUi("CompileOutputPane.Filter");
+    setFilteringEnabled(true);
 
-    connect(TextEditor::TextEditorSettings::instance(),
-            &TextEditor::TextEditorSettings::behaviorSettingsChanged,
-            this, &CompileOutputWindow::updateZoomEnabled);
+    connect(this, &IOutputPane::zoomIn, m_outputWindow, &Core::OutputWindow::zoomIn);
+    connect(this, &IOutputPane::zoomOut, m_outputWindow, &Core::OutputWindow::zoomOut);
+    connect(this, &IOutputPane::resetZoom, m_outputWindow, &Core::OutputWindow::resetZoom);
+    connect(TextEditor::TextEditorSettings::instance(), &TextEditor::TextEditorSettings::fontSettingsChanged,
+            this, updateFontSettings);
+    connect(TextEditor::TextEditorSettings::instance(), &TextEditor::TextEditorSettings::behaviorSettingsChanged,
+            this, updateZoomEnabled);
 
-    connect(m_zoomInButton, &QToolButton::clicked,
-            this, [this]() { m_outputWindow->zoomIn(1); });
-    connect(m_zoomOutButton, &QToolButton::clicked,
-            this, [this]() { m_outputWindow->zoomOut(1); });
+    connect(m_settingsButton, &QToolButton::clicked, this, [] {
+        Core::ICore::showOptionsDialog(OPTIONS_PAGE_ID);
+    });
 
     auto agg = new Aggregation::Aggregate;
     agg->add(m_outputWindow);
@@ -194,9 +143,9 @@ CompileOutputWindow::CompileOutputWindow(QAction *cancelBuildAction) :
 
     m_handler = new ShowOutputTaskHandler(this);
     ExtensionSystem::PluginManager::addObject(m_handler);
-    connect(ProjectExplorerPlugin::instance(), &ProjectExplorerPlugin::settingsChanged,
-            this, &CompileOutputWindow::updateWordWrapMode);
-    updateWordWrapMode();
+    setupContext(C_COMPILE_OUTPUT, m_outputWindow);
+    loadSettings();
+    updateFromSettings();
 }
 
 CompileOutputWindow::~CompileOutputWindow()
@@ -204,24 +153,13 @@ CompileOutputWindow::~CompileOutputWindow()
     ExtensionSystem::PluginManager::removeObject(m_handler);
     delete m_handler;
     delete m_cancelBuildButton;
-    delete m_zoomInButton;
-    delete m_zoomOutButton;
-    delete m_escapeCodeHandler;
+    delete m_settingsButton;
 }
 
-void CompileOutputWindow::updateZoomEnabled()
+void CompileOutputWindow::updateFromSettings()
 {
-    const TextEditor::BehaviorSettings &settings
-            = TextEditor::TextEditorSettings::behaviorSettings();
-    bool zoomEnabled  = settings.m_scrollWheelZooming;
-    m_zoomInButton->setEnabled(zoomEnabled);
-    m_zoomOutButton->setEnabled(zoomEnabled);
-    m_outputWindow->setWheelZoomEnabled(zoomEnabled);
-}
-
-void CompileOutputWindow::updateWordWrapMode()
-{
-    m_outputWindow->setWordWrapEnabled(ProjectExplorerPlugin::projectExplorerSettings().wrapAppOutput);
+    m_outputWindow->setWordWrapEnabled(m_settings.wrapOutput);
+    m_outputWindow->setMaxCharCount(m_settings.maxCharCount);
 }
 
 bool CompileOutputWindow::hasFocus() const
@@ -246,42 +184,34 @@ QWidget *CompileOutputWindow::outputWidget(QWidget *)
 
 QList<QWidget *> CompileOutputWindow::toolBarWidgets() const
 {
-     return {m_cancelBuildButton, m_zoomInButton, m_zoomOutButton};
+    return QList<QWidget *>{m_cancelBuildButton, m_settingsButton} + IOutputPane::toolBarWidgets();
 }
 
 void CompileOutputWindow::appendText(const QString &text, BuildStep::OutputFormat format)
 {
-    using Utils::Theme;
-    Theme *theme = Utils::creatorTheme();
-    QTextCharFormat textFormat;
+    Utils::OutputFormat fmt = Utils::NormalMessageFormat;
     switch (format) {
     case BuildStep::OutputFormat::Stdout:
-        textFormat.setForeground(theme->color(Theme::TextColorNormal));
-        textFormat.setFontWeight(QFont::Normal);
+        fmt = Utils::StdOutFormat;
         break;
     case BuildStep::OutputFormat::Stderr:
-        textFormat.setForeground(theme->color(Theme::OutputPanes_ErrorMessageTextColor));
-        textFormat.setFontWeight(QFont::Normal);
+        fmt = Utils::StdErrFormat;
         break;
     case BuildStep::OutputFormat::NormalMessage:
-        textFormat.setForeground(theme->color(Theme::OutputPanes_MessageOutput));
+        fmt = Utils::NormalMessageFormat;
         break;
     case BuildStep::OutputFormat::ErrorMessage:
-        textFormat.setForeground(theme->color(Theme::OutputPanes_ErrorMessageTextColor));
-        textFormat.setFontWeight(QFont::Bold);
+        fmt = Utils::ErrorMessageFormat;
         break;
 
     }
 
-    foreach (const Utils::FormattedText &output,
-             m_escapeCodeHandler->parseText(Utils::FormattedText(text, textFormat)))
-        m_outputWindow->appendText(output.text, output.format);
+    m_outputWindow->appendMessage(text, fmt);
 }
 
 void CompileOutputWindow::clearContents()
 {
     m_outputWindow->clear();
-    m_outputWindow->clearTasks();
     m_taskPositions.clear();
 }
 
@@ -314,21 +244,17 @@ bool CompileOutputWindow::canNavigate() const
     return false;
 }
 
-void CompileOutputWindow::registerPositionOf(const Task &task, int linkedOutputLines, int skipLines)
+void CompileOutputWindow::registerPositionOf(const Task &task, int linkedOutputLines, int skipLines,
+                                             int offset)
 {
     if (linkedOutputLines <= 0)
         return;
-    int blocknumber = m_outputWindow->document()->blockCount();
-    if (blocknumber > MAX_LINECOUNT)
-        return;
 
-    const int startLine = blocknumber - linkedOutputLines + 1 - skipLines;
-    const int endLine = blocknumber - skipLines;
+    const int blocknumber = m_outputWindow->document()->blockCount() - offset - 1;
+    const int firstLine = blocknumber - linkedOutputLines - skipLines;
+    const int lastLine = firstLine + linkedOutputLines - 1;
 
-    m_taskPositions.insert(task.taskId, qMakePair(startLine, endLine));
-
-    for (int i = startLine; i <= endLine; ++i)
-        m_outputWindow->addTask(task, i);
+    m_taskPositions.insert(task.taskId, qMakePair(firstLine, lastLine));
 }
 
 bool CompileOutputWindow::knowsPositionOf(const Task &task)
@@ -356,8 +282,98 @@ void CompileOutputWindow::showPositionOf(const Task &task)
 
 void CompileOutputWindow::flush()
 {
-    if (m_escapeCodeHandler)
-        m_escapeCodeHandler->endFormatScope();
+    m_outputWindow->flush();
 }
 
-#include "compileoutputwindow.moc"
+void CompileOutputWindow::reset()
+{
+    m_outputWindow->reset();
+}
+
+void CompileOutputWindow::setSettings(const CompileOutputSettings &settings)
+{
+    m_settings = settings;
+    storeSettings();
+    updateFromSettings();
+}
+
+Utils::OutputFormatter *CompileOutputWindow::outputFormatter() const
+{
+    return m_outputWindow->outputFormatter();
+}
+
+void CompileOutputWindow::updateFilter()
+{
+    m_outputWindow->updateFilterProperties(filterText(), filterCaseSensitivity(),
+                                           filterUsesRegexp(), filterIsInverted());
+}
+
+void CompileOutputWindow::loadSettings()
+{
+    QSettings * const s = Core::ICore::settings();
+    m_settings.popUp = s->value(POP_UP_KEY, false).toBool();
+    m_settings.wrapOutput = s->value(WRAP_OUTPUT_KEY, true).toBool();
+    m_settings.maxCharCount = s->value(MAX_LINES_KEY,
+                                       Core::Constants::DEFAULT_MAX_CHAR_COUNT).toInt() * 100;
+}
+
+void CompileOutputWindow::storeSettings() const
+{
+    QSettings * const s = Core::ICore::settings();
+    s->setValue(POP_UP_KEY, m_settings.popUp);
+    s->setValue(WRAP_OUTPUT_KEY, m_settings.wrapOutput);
+    s->setValue(MAX_LINES_KEY, m_settings.maxCharCount / 100);
+}
+
+class CompileOutputSettingsWidget : public Core::IOptionsPageWidget
+{
+    Q_DECLARE_TR_FUNCTIONS(ProjectExplorer::Internal::CompileOutputSettingsPage)
+public:
+    CompileOutputSettingsWidget()
+    {
+        const CompileOutputSettings &settings = BuildManager::compileOutputSettings();
+        m_wrapOutputCheckBox.setText(tr("Word-wrap output"));
+        m_wrapOutputCheckBox.setChecked(settings.wrapOutput);
+        m_popUpCheckBox.setText(tr("Open pane when building"));
+        m_popUpCheckBox.setChecked(settings.popUp);
+        m_maxCharsBox.setMaximum(100000000);
+        m_maxCharsBox.setValue(settings.maxCharCount);
+        const auto layout = new QVBoxLayout(this);
+        layout->addWidget(&m_wrapOutputCheckBox);
+        layout->addWidget(&m_popUpCheckBox);
+        const auto maxCharsLayout = new QHBoxLayout;
+        const QString msg = tr("Limit output to %1 characters");
+        const QStringList parts = msg.split("%1") << QString() << QString();
+        maxCharsLayout->addWidget(new QLabel(parts.at(0).trimmed()));
+        maxCharsLayout->addWidget(&m_maxCharsBox);
+        maxCharsLayout->addWidget(new QLabel(parts.at(1).trimmed()));
+        maxCharsLayout->addStretch(1);
+        layout->addLayout(maxCharsLayout);
+        layout->addStretch(1);
+    }
+
+    void apply() final
+    {
+        CompileOutputSettings s;
+        s.wrapOutput = m_wrapOutputCheckBox.isChecked();
+        s.popUp = m_popUpCheckBox.isChecked();
+        s.maxCharCount = m_maxCharsBox.value();
+        BuildManager::setCompileOutputSettings(s);
+    }
+
+private:
+    QCheckBox m_wrapOutputCheckBox;
+    QCheckBox m_popUpCheckBox;
+    QSpinBox m_maxCharsBox;
+};
+
+CompileOutputSettingsPage::CompileOutputSettingsPage()
+{
+    setId(OPTIONS_PAGE_ID);
+    setDisplayName(CompileOutputSettingsWidget::tr("Compile Output"));
+    setCategory(Constants::BUILD_AND_RUN_SETTINGS_CATEGORY);
+    setWidgetCreator([] { return new CompileOutputSettingsWidget; });
+}
+
+} // Internal
+} // ProjectExplorer

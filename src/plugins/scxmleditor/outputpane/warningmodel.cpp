@@ -158,7 +158,8 @@ QVariant WarningModel::data(const QModelIndex &index, int role) const
 
         switch (role) {
         case WarningModel::FilterRole:
-            return it->isActive() ? Constants::C_WARNINGMODEL_FILTER_ACTIVE : Constants::C_WARNINGMODEL_FILTER_NOT;
+            return QString::fromLatin1(it->isActive() ? Constants::C_WARNINGMODEL_FILTER_ACTIVE
+                                                      : Constants::C_WARNINGMODEL_FILTER_NOT);
         case Qt::DecorationRole: {
             if (col == 0)
                 return severityIcon(it->severity());
@@ -237,14 +238,15 @@ Warning *WarningModel::getWarning(const QModelIndex &ind)
     return nullptr;
 }
 
-void WarningModel::warningDestroyed(QObject *ww)
+void WarningModel::warningDestroyed(QObject *w)
 {
-    auto w = static_cast<Warning*>(ww);
-    if (m_warnings.contains(w)) {
-        int ind = m_warnings.indexOf(w);
+    // Intentional static_cast.
+    // The Warning is being destroyed, so qobject_cast doesn't work anymore.
+    const int ind = m_warnings.indexOf(static_cast<Warning *>(w));
+    if (ind >= 0) {
         beginRemoveRows(QModelIndex(), ind, ind);
         m_warnings.removeAt(ind);
-        endResetModel();
+        endRemoveRows();
     }
 
     m_countChecker->start();

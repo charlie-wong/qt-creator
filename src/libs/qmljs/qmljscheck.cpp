@@ -29,6 +29,7 @@
 #include "qmljsutils.h"
 #include "parser/qmljsast_p.h"
 
+#include <utils/algorithm.h>
 #include <utils/qtcassert.h>
 
 #include <QColor>
@@ -65,12 +66,12 @@ public:
         return _message;
     }
 
-    void setMessage(Type type)
+    void setMessage(StaticAnalysis::Type type)
     {
         _message = Message(type, _location);
     }
 
-    virtual void visit(const NumberValue *value)
+    void visit(const NumberValue *value) override
     {
         if (const QmlEnumValue *enumValue = value_cast<QmlEnumValue>(value)) {
             if (StringLiteral *stringLiteral = cast<StringLiteral *>(_ast)) {
@@ -90,7 +91,7 @@ public:
         }
     }
 
-    virtual void visit(const BooleanValue *)
+    void visit(const BooleanValue *) override
     {
         UnaryMinusExpression *unaryMinus = cast<UnaryMinusExpression *>(_ast);
 
@@ -101,7 +102,7 @@ public:
         }
     }
 
-    virtual void visit(const StringValue *value)
+    void visit(const StringValue *value) override
     {
         UnaryMinusExpression *unaryMinus = cast<UnaryMinusExpression *>(_ast);
 
@@ -120,10 +121,8 @@ public:
                 } else {
                     QString fileName = url.toLocalFile();
                     if (!fileName.isEmpty()) {
-                        if (QFileInfo(fileName).isRelative()) {
-                            fileName.prepend(QLatin1Char('/'));
-                            fileName.prepend(_doc->path());
-                        }
+                        if (QFileInfo(fileName).isRelative())
+                            fileName = QString("/%1%2").arg(_doc->path(), fileName);
                         if (!QFileInfo::exists(fileName))
                             setMessage(WarnFileOrDirectoryDoesNotExist);
                     }
@@ -132,17 +131,18 @@ public:
         }
     }
 
-    virtual void visit(const ColorValue *)
+    void visit(const ColorValue *) override
     {
         if (StringLiteral *stringLiteral = cast<StringLiteral *>(_ast)) {
             if (!toQColor(stringLiteral->value.toString()).isValid())
                 setMessage(ErrInvalidColor);
         } else {
-            visit((StringValue *)0);
+            static const StringValue *nullStringValue = nullptr;
+            visit(nullStringValue);
         }
     }
 
-    virtual void visit(const AnchorLineValue *)
+    void visit(const AnchorLineValue *) override
     {
         if (! (_rhsValue->asAnchorLineValue() || _rhsValue->asUnknownValue()))
             setMessage(ErrAnchorLineExpected);
@@ -189,7 +189,7 @@ protected:
         return _state;
     }
 
-    virtual bool preVisit(Node *ast)
+    bool preVisit(Node *ast) override
     {
         if (ast->expressionCast())
             return false;
@@ -197,14 +197,10 @@ protected:
             return true;
         if (Statement *stmt = ast->statementCast())
             onUnreachable(stmt);
-        if (FunctionSourceElement *fun = cast<FunctionSourceElement *>(ast))
-            onUnreachable(fun->declaration);
-        if (StatementSourceElement *stmt = cast<StatementSourceElement *>(ast))
-            onUnreachable(stmt->statement);
         return false;
     }
 
-    virtual bool visit(LabelledStatement *ast)
+    bool visit(LabelledStatement *ast) override
     {
         // get the target statement
         Statement *end = ast->statement;
@@ -219,7 +215,7 @@ protected:
         return true;
     }
 
-    virtual bool visit(BreakStatement *ast)
+    bool visit(BreakStatement *ast) override
     {
         _state = Break;
         if (!ast->label.isEmpty()) {
@@ -232,12 +228,12 @@ protected:
     }
 
     // labelled continues don't change control flow...
-    virtual bool visit(ContinueStatement *) { _state = Continue; return false; }
+    bool visit(ContinueStatement *) override { _state = Continue; return false; }
 
-    virtual bool visit(ReturnStatement *) { _state = ReturnOrThrow; return false; }
-    virtual bool visit(ThrowStatement *) { _state = ReturnOrThrow; return false; }
+    bool visit(ReturnStatement *) override { _state = ReturnOrThrow; return false; }
+    bool visit(ThrowStatement *) override { _state = ReturnOrThrow; return false; }
 
-    virtual bool visit(IfStatement *ast)
+    bool visit(IfStatement *ast) override
     {
         State ok = check(ast->ok);
         State ko = check(ast->ko);
@@ -256,7 +252,7 @@ protected:
         }
     }
 
-    virtual bool visit(SwitchStatement *ast)
+    bool visit(SwitchStatement *ast) override
     {
         if (!ast->block)
             return false;
@@ -282,7 +278,7 @@ protected:
         return false;
     }
 
-    virtual bool visit(TryStatement *ast)
+    bool visit(TryStatement *ast) override
     {
         State tryBody = check(ast->statement);
         State catchBody = ReturnOrThrow;
@@ -303,13 +299,11 @@ protected:
         return false;
     }
 
-    virtual bool visit(WhileStatement *ast) { return preconditionLoopStatement(ast, ast->statement); }
-    virtual bool visit(ForStatement *ast) { return preconditionLoopStatement(ast, ast->statement); }
-    virtual bool visit(ForEachStatement *ast) { return preconditionLoopStatement(ast, ast->statement); }
-    virtual bool visit(LocalForStatement *ast) { return preconditionLoopStatement(ast, ast->statement); }
-    virtual bool visit(LocalForEachStatement *ast) { return preconditionLoopStatement(ast, ast->statement); }
+    bool visit(WhileStatement *ast) override { return preconditionLoopStatement(ast, ast->statement); }
+    bool visit(ForStatement *ast) override { return preconditionLoopStatement(ast, ast->statement); }
+    bool visit(ForEachStatement *ast) override { return preconditionLoopStatement(ast, ast->statement); }
 
-    virtual bool visit(DoWhileStatement *ast)
+    bool visit(DoWhileStatement *ast) override
     {
         check(ast->statement);
         // not necessarily an infinite loop due to labelled breaks
@@ -319,12 +313,18 @@ protected:
             _state = ReachesEnd;
         return false;
     }
+
+    void throwRecursionDepthError() override
+    {
+         // handle differently? ReturnOrThrow declares unreachable code, but probably leads to bogus warnings
+        _state = ReachesEnd;
+    }
 };
 
 class MarkUnreachableCode : protected ReachesEndCheck
 {
     QList<Message> _messages;
-    bool _emittedWarning;
+    bool _emittedWarning = false;
 
 public:
     QList<Message> operator()(Node *ast)
@@ -335,7 +335,7 @@ public:
     }
 
 protected:
-    virtual State check(Node *node)
+    State check(Node *node) override
     {
         bool oldwarning = _emittedWarning;
         _emittedWarning = false;
@@ -344,7 +344,7 @@ protected:
         return s;
     }
 
-    virtual void onUnreachable(Node *node)
+    void onUnreachable(Node *node) override
     {
         if (_emittedWarning)
             return;
@@ -358,6 +358,11 @@ protected:
         if (message.isValid())
             _messages += message;
     }
+
+    void throwRecursionDepthError() override
+    {
+        _messages.append(Message(ErrHitMaximumRecursion, SourceLocation()));
+    }
 };
 
 class DeclarationsCheck : protected Visitor
@@ -367,8 +372,8 @@ public:
     {
         clear();
         for (FormalParameterList *plist = function->formals; plist; plist = plist->next) {
-            if (!plist->name.isEmpty())
-                _formalParameterNames += plist->name.toString();
+            if (!plist->element->bindingIdentifier.isEmpty())
+                _formalParameterNames += plist->element->bindingIdentifier.toString();
         }
 
         Node::accept(function->body, this);
@@ -391,9 +396,10 @@ protected:
         _possiblyUndeclaredUses.clear();
         _seenNonDeclarationStatement = false;
         _formalParameterNames.clear();
+        QTC_ASSERT(_block == 0, _block = 0);
     }
 
-    void postVisit(Node *ast)
+    void postVisit(Node *ast) override
     {
         if (!_seenNonDeclarationStatement && ast->statementCast()
                 && !cast<VariableStatement *>(ast)) {
@@ -401,35 +407,52 @@ protected:
         }
     }
 
-    bool visit(IdentifierExpression *ast)
+    bool visit(IdentifierExpression *ast) override
     {
         if (ast->name.isEmpty())
             return false;
         const QString &name = ast->name.toString();
-        if (!_declaredFunctions.contains(name) && !_declaredVariables.contains(name))
+        if (!_declaredFunctions.contains(name)
+                && !(_declaredVariables.contains(name)
+                     || _declaredBlockVariables.contains({name, _block}))) {
             _possiblyUndeclaredUses[name].append(ast->identifierToken);
+        }
         return false;
     }
 
-    bool visit(VariableStatement *ast)
+    bool visit(VariableStatement *ast) override
     {
         if (_seenNonDeclarationStatement)
             addMessage(HintDeclarationsShouldBeAtStartOfFunction, ast->declarationKindToken);
         return true;
     }
 
-    bool visit(VariableDeclaration *ast)
+    bool visit(PatternElement *ast) override
     {
-        if (ast->name.isEmpty())
+        if (ast->bindingIdentifier.isEmpty() || !ast->isVariableDeclaration())
             return true;
-        const QString &name = ast->name.toString();
-
-        if (_formalParameterNames.contains(name))
+        const QString &name = ast->bindingIdentifier.toString();
+        VariableScope scope = ast->scope;
+        if (_formalParameterNames.contains(name)) {
             addMessage(WarnAlreadyFormalParameter, ast->identifierToken, name);
-        else if (_declaredFunctions.contains(name))
+        } else if (_declaredFunctions.contains(name)) {
             addMessage(WarnAlreadyFunction, ast->identifierToken, name);
-        else if (_declaredVariables.contains(name))
-            addMessage(WarnDuplicateDeclaration, ast->identifierToken, name);
+        } else if (scope == VariableScope::Let || scope == VariableScope::Const) {
+            if (_declaredBlockVariables.contains({name, _block}))
+                addMessage(WarnDuplicateDeclaration, ast->identifierToken, name);
+        } else if (scope == VariableScope::Var) {
+            if (_declaredVariables.contains(name)) {
+                addMessage(WarnDuplicateDeclaration, ast->identifierToken, name);
+            } else {
+                const auto found = std::find_if(_declaredBlockVariables.keyBegin(),
+                                                _declaredBlockVariables.keyEnd(),
+                                                [name](const auto &key) {
+                                                    return key.first == name;
+                                                });
+                if (found != _declaredBlockVariables.keyEnd())
+                    addMessage(WarnDuplicateDeclaration, ast->identifierToken, name);
+            }
+        }
 
         if (_possiblyUndeclaredUses.contains(name)) {
             foreach (const SourceLocation &loc, _possiblyUndeclaredUses.value(name)) {
@@ -437,12 +460,15 @@ protected:
             }
             _possiblyUndeclaredUses.remove(name);
         }
-        _declaredVariables[name] = ast;
+        if (scope == VariableScope::Let || scope == VariableScope::Const)
+            _declaredBlockVariables[{name, _block}] = ast;
+        else
+            _declaredVariables[name] = ast;
 
         return true;
     }
 
-    bool visit(FunctionDeclaration *ast)
+    bool visit(FunctionDeclaration *ast) override
     {
         if (_seenNonDeclarationStatement)
             addMessage(HintDeclarationsShouldBeAtStartOfFunction, ast->functionToken);
@@ -450,7 +476,7 @@ protected:
         return visit(static_cast<FunctionExpression *>(ast));
     }
 
-    bool visit(FunctionExpression *ast)
+    bool visit(FunctionExpression *ast) override
     {
         if (ast->name.isEmpty())
             return false;
@@ -458,7 +484,7 @@ protected:
 
         if (_formalParameterNames.contains(name))
             addMessage(WarnAlreadyFormalParameter, ast->identifierToken, name);
-        else if (_declaredVariables.contains(name))
+        else if (_declaredVariables.contains(name) || _declaredBlockVariables.contains({name, _block}))
             addMessage(WarnAlreadyVar, ast->identifierToken, name);
         else if (_declaredFunctions.contains(name))
             addMessage(WarnDuplicateDeclaration, ast->identifierToken, name);
@@ -476,18 +502,44 @@ protected:
         return false;
     }
 
+    bool visit(Block *) override
+    {
+        ++_block;
+        return true;
+    }
+
+    void endVisit(Block *) override
+    {
+        auto it = _declaredBlockVariables.begin();
+        auto end = _declaredBlockVariables.end();
+        while (it != end) {
+            if (it.key().second == _block)
+                it = _declaredBlockVariables.erase(it);
+            else
+                ++it;
+        }
+        --_block;
+    }
+
+    void throwRecursionDepthError() override
+    {
+        addMessage(ErrHitMaximumRecursion, SourceLocation());
+    }
+
 private:
-    void addMessage(Type type, const SourceLocation &loc, const QString &arg1 = QString())
+    void addMessage(StaticAnalysis::Type type, const SourceLocation &loc, const QString &arg1 = QString())
     {
         _messages.append(Message(type, loc, arg1));
     }
 
     QList<Message> _messages;
     QStringList _formalParameterNames;
-    QHash<QString, VariableDeclaration *> _declaredVariables;
+    QHash<QString, PatternElement *> _declaredVariables;
+    QHash<QPair<QString, uint>, PatternElement *> _declaredBlockVariables;
     QHash<QString, FunctionDeclaration *> _declaredFunctions;
     QHash<QString, QList<SourceLocation> > _possiblyUndeclaredUses;
     bool _seenNonDeclarationStatement;
+    uint _block = 0;
 };
 
 class IdsThatShouldNotBeUsedInDesigner  : public QStringList
@@ -521,61 +573,55 @@ public:
                                                       "scale",
                                                       "enabled",
                                                       "anchors"})
-    {
-    }
-
+    {}
 };
 
 class VisualAspectsPropertyBlackList : public QStringList
 {
 public:
-   VisualAspectsPropertyBlackList()
-   {
-       (*this) << QLatin1String("x") << QLatin1String("y") << QLatin1String("z")
-            << QLatin1String("width") << QLatin1String("height") << QLatin1String("color")
-            << QLatin1String("opacity") << QLatin1String("scale")
-            << QLatin1String("rotation") << QLatin1String("margins")
-            << QLatin1String("verticalCenterOffset") << QLatin1String("horizontalCenterOffset")
-            << QLatin1String("baselineOffset") << QLatin1String("bottomMargin")
-            << QLatin1String("topMargin") << QLatin1String("leftMargin")
-            << QLatin1String("rightMargin") << QLatin1String("baseline")
-            << QLatin1String("centerIn") << QLatin1String("fill")
-            << QLatin1String("left") << QLatin1String("right")
-            << QLatin1String("mirrored") << QLatin1String("verticalCenter")
-            << QLatin1String("horizontalCenter");
-
-   }
+   VisualAspectsPropertyBlackList() : QStringList({"x",
+                                                   "y",
+                                                   "z",
+                                                   "width",
+                                                   "height",
+                                                   "color",
+                                                   "opacity",
+                                                   "scale",
+                                                   "rotation",
+                                                   "margins",
+                                                   "verticalCenterOffset",
+                                                   "horizontalCenterOffset",
+                                                   "baselineOffset",
+                                                   "bottomMargin",
+                                                   "topMargin",
+                                                   "leftMargin",
+                                                   "rightMargin",
+                                                   "baseline",
+                                                   "centerIn",
+                                                   "fill",
+                                                   "left",
+                                                   "right",
+                                                   "mirrored",
+                                                   "verticalCenter"
+                                                   "horizontalCenter"})
+   {}
 };
 
 class UnsupportedTypesByVisualDesigner : public QStringList
 {
 public:
-    UnsupportedTypesByVisualDesigner() : QStringList({"Transform",
-                                                      "Timer",
-                                                      "Rotation",
-                                                      "Scale",
-                                                      "Translate",
+    UnsupportedTypesByVisualDesigner() : QStringList({"Timer",
                                                       "Package",
                                                       "Particles"})
-    {
-
-    }
+    {}
 };
 
 class UnsupportedTypesByQmlUi : public QStringList
 {
 public:
-    UnsupportedTypesByQmlUi() : QStringList({"Binding",
-                                             "ShaderEffect",
-                                             "ShaderEffectSource",
+    UnsupportedTypesByQmlUi() : QStringList({"ShaderEffect",
                                              "Component",
                                              "Transition",
-                                             "PropertyAnimation",
-                                             "SequentialAnimation",
-                                             "PropertyAnimation",
-                                             "SequentialAnimation",
-                                             "ParallelAnimation",
-                                             "NumberAnimation",
                                              "Drawer"})
     {
         append(UnsupportedTypesByVisualDesigner());
@@ -585,24 +631,20 @@ public:
 class UnsupportedRootObjectTypesByVisualDesigner : public QStringList
 {
 public:
-    UnsupportedRootObjectTypesByVisualDesigner()
-    {
-        (*this) << QLatin1String("QtObject") << QLatin1String("ListModel")
-            << QLatin1String("Component") << QLatin1String("Timer")
-            << QLatin1String("Package");
-    }
-
+    UnsupportedRootObjectTypesByVisualDesigner() : QStringList({"QtObject"
+                                                                "ListModel"
+                                                                "Component"
+                                                                "Timer"
+                                                                "Package"})
+    {}
 };
 
 class UnsupportedRootObjectTypesByQmlUi : public QStringList
 {
 public:
-    UnsupportedRootObjectTypesByQmlUi()
-    {
-        (*this) << UnsupportedRootObjectTypesByVisualDesigner()
-                << QLatin1String("Window") << QLatin1String("ApplicationWindow");
-    }
-
+    UnsupportedRootObjectTypesByQmlUi() : QStringList({"Window",
+                                                       "ApplicationWindow"})
+    {}
 };
 
 } // end of anonymous namespace
@@ -621,17 +663,15 @@ Check::Check(Document::Ptr doc, const ContextPtr &context)
     , _scopeBuilder(&_scopeChain)
     , _importsOk(false)
     , _inStatementBinding(false)
-    , _imports(0)
-    , _isQtQuick2(false)
+    , _imports(nullptr)
 
 {
     _imports = context->imports(doc.data());
     if (_imports && !_imports->importFailed()) {
         _importsOk = true;
-        _isQtQuick2 = isQtQuick2();
     }
 
-    _enabledMessages = Message::allMessageTypes().toSet();
+    _enabledMessages = Utils::toSet(Message::allMessageTypes());
     disableMessage(HintAnonymousFunctionSpacing);
     disableMessage(HintDeclareVarsInOneLine);
     disableMessage(HintDeclarationsShouldBeAtStartOfFunction);
@@ -639,12 +679,9 @@ Check::Check(Document::Ptr doc, const ContextPtr &context)
     disableMessage(HintOneStatementPerLine);
     disableMessage(HintExtraParentheses);
 
-    if (isQtQuick2Ui()) {
-        disableQmlDesignerChecks();
-    } else {
-        disableQmlDesignerChecks();
+    disableQmlDesignerChecks();
+    if (!isQtQuick2Ui())
         disableQmlDesignerUiFileChecks();
-    }
 }
 
 Check::~Check()
@@ -662,12 +699,12 @@ QList<Message> Check::operator()()
     return _messages;
 }
 
-void Check::enableMessage(Type type)
+void Check::enableMessage(StaticAnalysis::Type type)
 {
     _enabledMessages.insert(type);
 }
 
-void Check::disableMessage(Type type)
+void Check::disableMessage(StaticAnalysis::Type type)
 {
     _enabledMessages.remove(type);
 }
@@ -677,7 +714,6 @@ void Check::enableQmlDesignerChecks()
     enableMessage(WarnImperativeCodeNotEditableInVisualDesigner);
     enableMessage(WarnUnsupportedTypeInVisualDesigner);
     enableMessage(WarnReferenceToParentItemNotSupportedByVisualDesigner);
-    enableMessage(WarnAboutQtQuick1InsteadQtQuick2);
     enableMessage(ErrUnsupportedRootTypeInVisualDesigner);
     enableMessage(ErrInvalidIdeInVisualDesigner);
     //## triggers too often ## check.enableMessage(StaticAnalysis::WarnUndefinedValueForVisualDesigner);
@@ -732,6 +768,26 @@ bool Check::visit(UiProgram *)
     return true;
 }
 
+bool Check::visit(UiImport *ast)
+{
+    ShortImportInfo info;
+    if (auto ver = ast->version)
+        info.second = LanguageUtils::ComponentVersion(ver->majorVersion, ver->minorVersion);
+
+    if (!ast->fileName.isNull())  // it must be a file import
+        info.first = ast->fileName.toString();
+    else                          // no file import - construct full uri
+        info.first = toString(ast->importUri);
+
+    if (m_importInfo.contains(info)) {
+        SourceLocation location = ast->firstSourceLocation();
+        location.length = ast->lastSourceLocation().end();
+        addMessage(WarnDuplicateImport, location, info.first);
+    }
+    m_importInfo.append(info);
+    return true;
+}
+
 bool Check::visit(UiObjectInitializer *)
 {
     QString typeName;
@@ -739,7 +795,7 @@ bool Check::visit(UiObjectInitializer *)
     UiQualifiedId *qualifiedTypeId = qualifiedTypeNameId(parent());
     if (qualifiedTypeId) {
         typeName = qualifiedTypeId->name.toString();
-        if (typeName == QLatin1String("Component"))
+        if (typeName == "Component")
             m_idStack.push(StringSet());
     }
 
@@ -755,12 +811,17 @@ void Check::endVisit(UiObjectInitializer *)
 {
     m_propertyStack.pop();
     m_typeStack.pop();
-    UiObjectDefinition *objectDenition = cast<UiObjectDefinition *>(parent());
-    if (objectDenition && objectDenition->qualifiedTypeNameId->name == QLatin1String("Component"))
+    UiObjectDefinition *objectDefinition = cast<UiObjectDefinition *>(parent());
+    if (objectDefinition && objectDefinition->qualifiedTypeNameId->name == "Component")
         m_idStack.pop();
     UiObjectBinding *objectBinding = cast<UiObjectBinding *>(parent());
-    if (objectBinding && objectBinding->qualifiedTypeNameId->name == QLatin1String("Component"))
+    if (objectBinding && objectBinding->qualifiedTypeNameId->name == "Component")
         m_idStack.pop();
+}
+
+void Check::throwRecursionDepthError()
+{
+    addMessage(ErrHitMaximumRecursion, SourceLocation());
 }
 
 void Check::checkProperty(UiQualifiedId *qualifiedId)
@@ -844,9 +905,9 @@ static bool checkTopLevelBindingForParentReference(ExpressionStatement *expStmt,
         return false;
 
     SourceLocation location = locationFromRange(expStmt->firstSourceLocation(), expStmt->lastSourceLocation());
-    QString stmtSource = source.mid(location.begin(), location.length);
+    QString stmtSource = source.mid(int(location.begin()), int(location.length));
 
-    if (stmtSource.contains(QRegExp(QLatin1String("(^|\\W)parent\\."))))
+    if (stmtSource.contains(QRegExp("(^|\\W)parent\\.")))
         return true;
 
     return false;
@@ -855,6 +916,10 @@ static bool checkTopLevelBindingForParentReference(ExpressionStatement *expStmt,
 void Check::visitQmlObject(Node *ast, UiQualifiedId *typeId,
                            UiObjectInitializer *initializer)
 {
+    // TODO: currently Qbs checks are not working properly
+    if (_doc->language() == Dialect::QmlQbs)
+        return;
+
     // Don't do type checks if it's a grouped property binding.
     // For instance: anchors { ... }
     if (_doc->bind()->isGroupedPropertyBinding(ast)) {
@@ -867,7 +932,7 @@ void Check::visitQmlObject(Node *ast, UiQualifiedId *typeId,
 
     const QString typeName = getRightMostIdentifier(typeId)->name.toString();
 
-    if (!m_typeStack.isEmpty() && m_typeStack.last() == QLatin1String("State")
+    if (!m_typeStack.isEmpty() && m_typeStack.last() == "State"
             && typeId->name.toString() != "AnchorChanges"
             && typeId->name.toString() != "ParentChange"
             && typeId->name.toString() != "PropertyChanges"
@@ -880,7 +945,7 @@ void Check::visitQmlObject(Node *ast, UiQualifiedId *typeId,
     if (checkTypeForQmlUiSupport(typeId))
         addMessage(ErrUnsupportedTypeInQmlUi, typeErrorLocation, typeName);
 
-    if (m_typeStack.count() > 1 && getRightMostIdentifier(typeId)->name.toString() == QLatin1String("State")) {
+    if (m_typeStack.count() > 1 && getRightMostIdentifier(typeId)->name.toString() == "State") {
         addMessage(WarnStatesOnlyInRootItemForVisualDesigner, typeErrorLocation);
         addMessage(ErrStatesOnlyInRootItemInQmlUi, typeErrorLocation);
     }
@@ -907,12 +972,6 @@ void Check::visitQmlObject(Node *ast, UiQualifiedId *typeId,
             if (iter.error() != PrototypeIterator::NoError)
                 typeError = true;
             const ObjectValue *lastPrototype = prototypes.last();
-            foreach (const ObjectValue *objectValue, prototypes) {
-                if (objectValue->className() == QLatin1String("QGraphicsObject")
-                        && _isQtQuick2) {
-                    addMessage(WarnAboutQtQuick1InsteadQtQuick2, typeErrorLocation);
-                }
-            }
 
             if (iter.error() == PrototypeIterator::ReferenceResolutionError) {
                 if (const QmlPrototypeReference *ref =
@@ -947,7 +1006,7 @@ void Check::visitQmlObject(Node *ast, UiQualifiedId *typeId,
 bool Check::visit(UiScriptBinding *ast)
 {
     // special case for id property
-    if (ast->qualifiedId->name == QLatin1String("id") && ! ast->qualifiedId->next) {
+    if (ast->qualifiedId->name == "id" && !ast->qualifiedId->next) {
         if (! ast->statement)
             return false;
 
@@ -971,7 +1030,7 @@ bool Check::visit(UiScriptBinding *ast)
             return false;
         }
 
-        if (id.isEmpty() || (!id.at(0).isLower() && id.at(0) != QLatin1Char('_'))) {
+        if (id.isEmpty() || (!id.at(0).isLower() && id.at(0) != '_')) {
             addMessage(ErrInvalidId, loc);
             return false;
         }
@@ -1043,43 +1102,48 @@ bool Check::visit(UiArrayBinding *ast)
 bool Check::visit(UiPublicMember *ast)
 {
     if (ast->type == UiPublicMember::Property) {
-        if (ast->isValid()) {
-            const QStringRef name = ast->memberTypeName();
-            if (!name.isEmpty() && name.at(0).isLower()) {
-                const QString nameS = name.toString();
-                if (!isValidBuiltinPropertyType(nameS))
-                    addMessage(ErrInvalidPropertyType, ast->typeToken, nameS);
+        if (ast->defaultToken.isValid() || ast->readonlyToken.isValid()) {
+            const QStringRef typeName = ast->memberType->name;
+            if (!typeName.isEmpty() && typeName.at(0).isLower()) {
+                const QString typeNameS = typeName.toString();
+                if (!isValidBuiltinPropertyType(typeNameS))
+                    addMessage(ErrInvalidPropertyType, ast->typeToken, typeNameS);
             }
 
+            const QStringRef name = ast->name;
+
+            if (name == "data")
+                addMessage(ErrInvalidPropertyName, ast->identifierToken, name.toString());
+
             // warn about dubious use of var/variant
-            if (name == QLatin1String("variant") || name == QLatin1String("var")) {
+            if (typeName == "variant" || typeName == "var") {
                 Evaluate evaluator(&_scopeChain);
                 const Value *init = evaluator(ast->statement);
                 QString preferredType;
                 if (init->asNumberValue())
                     preferredType = tr("'int' or 'real'");
                 else if (init->asStringValue())
-                    preferredType = QLatin1String("'string'");
+                    preferredType = "'string'";
                 else if (init->asBooleanValue())
-                    preferredType = QLatin1String("'bool'");
+                    preferredType = "'bool'";
                 else if (init->asColorValue())
-                    preferredType = QLatin1String("'color'");
+                    preferredType = "'color'";
                 else if (init == _context->valueOwner()->qmlPointObject())
-                    preferredType = QLatin1String("'point'");
+                    preferredType = "'point'";
                 else if (init == _context->valueOwner()->qmlRectObject())
-                    preferredType = QLatin1String("'rect'");
+                    preferredType = "'rect'";
                 else if (init == _context->valueOwner()->qmlSizeObject())
-                    preferredType = QLatin1String("'size'");
+                    preferredType = "'size'";
                 else if (init == _context->valueOwner()->qmlVector2DObject())
-                    preferredType = QLatin1String("'vector2d'");
+                    preferredType = "'vector2d'";
                 else if (init == _context->valueOwner()->qmlVector3DObject())
-                    preferredType = QLatin1String("'vector3d'");
+                    preferredType = "'vector3d'";
                 else if (init == _context->valueOwner()->qmlVector4DObject())
-                    preferredType = QLatin1String("'vector4d'");
+                    preferredType = "'vector4d'";
                 else if (init == _context->valueOwner()->qmlQuaternionObject())
-                    preferredType = QLatin1String("'quaternion'");
+                    preferredType = "'quaternion'";
                 else if (init == _context->valueOwner()->qmlMatrix4x4Object())
-                    preferredType = QLatin1String("'matrix4x4'");
+                    preferredType = "'matrix4x4'";
 
                 if (!preferredType.isEmpty())
                     addMessage(HintPreferNonVarPropertyType, ast->typeToken, preferredType);
@@ -1207,8 +1271,8 @@ bool Check::visit(BinaryExpression *ast)
 
     // check spacing
     SourceLocation op = ast->operatorToken;
-    if ((op.begin() > 0 && !source.at(op.begin() - 1).isSpace())
-            || (int(op.end()) < source.size() && !source.at(op.end()).isSpace())) {
+    if ((op.begin() > 0 && !source.at(int(op.begin()) - 1).isSpace())
+        || (int(op.end()) < source.size() && !source.at(int(op.end())).isSpace())) {
         addMessage(HintBinaryOperatorSpacing, op);
     }
 
@@ -1232,26 +1296,24 @@ bool Check::visit(BinaryExpression *ast)
     const QLatin1Char newline('\n');
     if (ast->op == QSOperator::Add || ast->op == QSOperator::Sub) {
         QChar match;
-        Type msg;
+        StaticAnalysis::Type msg;
         if (ast->op == QSOperator::Add) {
-            match = QLatin1Char('+');
+            match = '+';
             msg = WarnConfusingPluses;
         } else {
             QTC_CHECK(ast->op == QSOperator::Sub);
-            match = QLatin1Char('-');
+            match = '-';
             msg = WarnConfusingMinuses;
         }
 
         if (int(op.end()) + 1 < source.size()) {
-            const QChar next = source.at(op.end());
-            if (next.isSpace() && next != newline
-                    && source.at(op.end() + 1) == match)
-                addMessage(msg, SourceLocation(op.begin(), 3, op.startLine, op.startColumn));
+            const QChar next = source.at(int(op.end()));
+            if (next.isSpace() && next != newline && source.at(int(op.end()) + 1) == match)
+                addMessage(msg, SourceLocation((op.begin()), 3, op.startLine, op.startColumn));
         }
         if (op.begin() >= 2) {
-            const QChar prev = source.at(op.begin() - 1);
-            if (prev.isSpace() && prev != newline
-                    && source.at(op.begin() - 2) == match)
+            const QChar prev = source.at(int(op.begin()) - 1);
+            if (prev.isSpace() && prev != newline && source.at(int(op.begin()) - 2) == match)
                 addMessage(msg, SourceLocation(op.begin() - 2, 3, op.startLine, op.startColumn - 2));
         }
     }
@@ -1263,7 +1325,7 @@ bool Check::visit(Block *ast)
 {
 
     bool isDirectInConnectionsScope =
-            (!m_typeStack.isEmpty() && m_typeStack.last() == QLatin1String("Connections"));
+            (!m_typeStack.isEmpty() && m_typeStack.last() == "Connections");
 
     if (!isDirectInConnectionsScope)
         addMessage(ErrBlocksNotSupportedInQmlUi, locationFromRange(ast->firstSourceLocation(), ast->lastSourceLocation()));
@@ -1276,8 +1338,6 @@ bool Check::visit(Block *ast)
                 && !cast<Finally *>(p)
                 && !cast<ForStatement *>(p)
                 && !cast<ForEachStatement *>(p)
-                && !cast<LocalForStatement *>(p)
-                && !cast<LocalForEachStatement *>(p)
                 && !cast<DoWhileStatement *>(p)
                 && !cast<WhileStatement *>(p)
                 && !cast<IfStatement *>(p)
@@ -1310,8 +1370,7 @@ bool Check::visit(Expression *ast)
 {
     if (ast->left && ast->right) {
         Node *p = parent();
-        if (!cast<ForStatement *>(p)
-                && !cast<LocalForStatement *>(p)) {
+        if (!cast<ForStatement *>(p)) {
             addMessage(WarnComma, ast->commaToken);
         }
     }
@@ -1327,6 +1386,7 @@ bool Check::visit(ExpressionStatement *ast)
                 || cast<PreIncrementExpression *>(ast->expression)
                 || cast<PostIncrementExpression *>(ast->expression)
                 || cast<PostDecrementExpression *>(ast->expression)
+                || cast<YieldExpression *>(ast->expression)
                 || cast<FunctionExpression *>(ast->expression);
         if (BinaryExpression *binary = cast<BinaryExpression *>(ast->expression)) {
             switch (binary->op) {
@@ -1343,6 +1403,7 @@ bool Check::visit(ExpressionStatement *ast)
             case QSOperator::InplaceURightShift:
             case QSOperator::InplaceXor:
                 ok = true;
+                break;
             default: break;
             }
         }
@@ -1365,13 +1426,6 @@ bool Check::visit(IfStatement *ast)
 }
 
 bool Check::visit(ForStatement *ast)
-{
-    if (ast->condition)
-        checkAssignInCondition(ast->condition);
-    return true;
-}
-
-bool Check::visit(LocalForStatement *ast)
 {
     if (ast->condition)
         checkAssignInCondition(ast->condition);
@@ -1482,8 +1536,9 @@ static bool hasOnlySpaces(const QString &s)
 void Check::addMessage(const Message &message)
 {
     if (message.isValid() && _enabledMessages.contains(message.type)) {
-        if (m_disabledMessageTypesByLine.contains(message.location.startLine)) {
-            QList<MessageTypeAndSuppression> &disabledMessages = m_disabledMessageTypesByLine[message.location.startLine];
+        if (m_disabledMessageTypesByLine.contains(int(message.location.startLine))) {
+            QList<MessageTypeAndSuppression> &disabledMessages
+                = m_disabledMessageTypesByLine[int(message.location.startLine)];
             for (int i = 0; i < disabledMessages.size(); ++i) {
                 if (disabledMessages[i].type == message.type) {
                     disabledMessages[i].wasSuppressed = true;
@@ -1496,7 +1551,7 @@ void Check::addMessage(const Message &message)
     }
 }
 
-void Check::addMessage(Type type, const SourceLocation &location, const QString &arg1, const QString &arg2)
+void Check::addMessage(StaticAnalysis::Type type, const SourceLocation &location, const QString &arg1, const QString &arg2)
 {
     addMessage(Message(type, location, arg1, arg2));
 }
@@ -1507,11 +1562,11 @@ void Check::scanCommentsForAnnotations()
     QRegExp disableCommentPattern(Message::suppressionPattern());
 
     foreach (const SourceLocation &commentLoc, _doc->engine()->comments()) {
-        const QString &comment = _doc->source().mid(commentLoc.begin(), commentLoc.length);
+        const QString &comment = _doc->source().mid(int(commentLoc.begin()), int(commentLoc.length));
 
         // enable all checks annotation
-        if (comment.contains(QLatin1String("@enable-all-checks")))
-            _enabledMessages = Message::allMessageTypes().toSet();
+        if (comment.contains("@enable-all-checks"))
+            _enabledMessages = Utils::toSet(Message::allMessageTypes());
 
         // find all disable annotations
         int lastOffset = -1;
@@ -1523,34 +1578,34 @@ void Check::scanCommentsForAnnotations()
             MessageTypeAndSuppression entry;
             entry.type = static_cast<StaticAnalysis::Type>(disableCommentPattern.cap(1).toInt());
             entry.wasSuppressed = false;
-            entry.suppressionSource = SourceLocation(commentLoc.offset + lastOffset,
-                                                     disableCommentPattern.matchedLength(),
+            entry.suppressionSource = SourceLocation(commentLoc.offset + quint32(lastOffset),
+                                                     quint32(disableCommentPattern.matchedLength()),
                                                      commentLoc.startLine,
-                                                     commentLoc.startColumn + lastOffset);
+                                                     commentLoc.startColumn + quint32(lastOffset));
             disabledMessageTypes += entry;
         }
         if (!disabledMessageTypes.isEmpty()) {
-            int appliesToLine = commentLoc.startLine;
+            quint32 appliesToLine = commentLoc.startLine;
 
             // if the comment is preceded by spaces only, it applies to the next line
             // note: startColumn is 1-based and *after* the starting // or /*
             if (commentLoc.startColumn >= 3) {
-                const QString &beforeComment = _doc->source().mid(commentLoc.begin() - commentLoc.startColumn + 1,
-                                                                  commentLoc.startColumn - 3);
+                const QString &beforeComment = _doc->source().mid(int(commentLoc.begin()
+                                                                      - commentLoc.startColumn + 1),
+                                                                  int(commentLoc.startColumn) - 3);
                 if (hasOnlySpaces(beforeComment))
                     ++appliesToLine;
             }
 
-            m_disabledMessageTypesByLine[appliesToLine] += disabledMessageTypes;
+            m_disabledMessageTypesByLine[int(appliesToLine)] += disabledMessageTypes;
         }
     }
 }
 
 void Check::warnAboutUnnecessarySuppressions()
 {
-    QHashIterator< int, QList<MessageTypeAndSuppression> > it(m_disabledMessageTypesByLine);
-    while (it.hasNext()) {
-        it.next();
+    for (auto it = m_disabledMessageTypesByLine.cbegin(), end = m_disabledMessageTypesByLine.cend();
+           it != end; ++it) {
         foreach (const MessageTypeAndSuppression &entry, it.value()) {
             if (!entry.wasSuppressed)
                 addMessage(WarnUnnecessaryMessageSuppression, entry.suppressionSource);
@@ -1562,7 +1617,7 @@ bool Check::isQtQuick2() const
 {
     if (_doc->language() == Dialect::Qml) {
         foreach (const Import &import, _imports->all()) {
-            if (import.info.name() == QLatin1String("QtQuick")
+            if (import.info.name() == "QtQuick"
                     && import.info.version().majorVersion() == 2)
                 return true;
         }
@@ -1589,15 +1644,15 @@ bool Check::visit(NewMemberExpression *ast)
     // check for Number, Boolean, etc constructor usage
     if (IdentifierExpression *idExp = cast<IdentifierExpression *>(ast->base)) {
         const QStringRef name = idExp->name;
-        if (name == QLatin1String("Number")) {
+        if (name == "Number") {
             addMessage(WarnNumberConstructor, idExp->identifierToken);
-        } else if (name == QLatin1String("Boolean")) {
+        } else if (name == "Boolean") {
             addMessage(WarnBooleanConstructor, idExp->identifierToken);
-        } else if (name == QLatin1String("String")) {
+        } else if (name == "String") {
             addMessage(WarnStringConstructor, idExp->identifierToken);
-        } else if (name == QLatin1String("Object")) {
+        } else if (name == "Object") {
             addMessage(WarnObjectConstructor, idExp->identifierToken);
-        } else if (name == QLatin1String("Array")) {
+        } else if (name == "Array") {
             bool ok = false;
             if (ast->arguments && ast->arguments->expression && !ast->arguments->next) {
                 Evaluate evaluate(&_scopeChain);
@@ -1607,7 +1662,7 @@ bool Check::visit(NewMemberExpression *ast)
             }
             if (!ok)
                 addMessage(WarnArrayConstructor, idExp->identifierToken);
-        } else if (name == QLatin1String("Function")) {
+        } else if (name == "Function") {
             addMessage(WarnFunctionConstructor, idExp->identifierToken);
         }
     }
@@ -1625,28 +1680,33 @@ bool Check::visit(CallExpression *ast)
 
     // We have to allow the translation functions
 
-    const QStringList translationFunctions = {"qsTr", "qsTrId", "qsTranslate",
-                                              "qsTrNoOp", "qsTrIdNoOp", "qsTranslateNoOp"};
+    static const QStringList translationFunctions = {"qsTr", "qsTrId", "qsTranslate",
+                                                     "qsTrNoOp", "qsTrIdNoOp", "qsTranslateNoOp"};
 
-    const bool isTranslationFunction = translationFunctions.contains(name);
+    static const QStringList whiteListedFunctions = {"toString", "toFixed", "toExponential", "toPrecision", "isFinite", "isNaN", "valueOf",
+                                                     "toLowerCase", "toLocaleString", "toLocaleLowerCase", "toUpperCase", "toLocaleUpperCase",
+                                                     "substring" , "charAt", "charCodeAt", "concat", "endsWith", "includes", "indexOf", "lastIndexOf"};
+
+    static const QStringList colorFunctions = {"lighter", "darker", "rgba",  "tint", "hsla", "hsva"};
+
+    static const QStringList qtFunction = {"point", "rect", "size", "vector2d", "vector3d", "vector4d", "quaternion" "matrix4x4", "formatDate",
+                                           "formatDateTime", "formatTime"};
+
+    const bool whiteListedFunction =  translationFunctions.contains(name) || whiteListedFunctions.contains(name) || colorFunctions.contains(name) || qtFunction.contains(name);
 
     // We allow the Math. functions
     const bool isMathFunction = namespaceName == "Math";
+    const bool isDateFunction = namespaceName == "Date";
     // allow adding connections with the help of the qt quick designer ui
     bool isDirectInConnectionsScope =
             (!m_typeStack.isEmpty() && m_typeStack.last() == QLatin1String("Connections"));
-    if (!isTranslationFunction && !isMathFunction && !isDirectInConnectionsScope)
+    if (!whiteListedFunction && !isMathFunction && !isDateFunction && !isDirectInConnectionsScope)
         addMessage(ErrFunctionsNotSupportedInQmlUi, location);
 
-    if (!name.isEmpty() && name.at(0).isUpper()
-            && name != QLatin1String("String")
-            && name != QLatin1String("Boolean")
-            && name != QLatin1String("Date")
-            && name != QLatin1String("Number")
-            && name != QLatin1String("Object")
-            && name != QLatin1String("QT_TR_NOOP")
-            && name != QLatin1String("QT_TRANSLATE_NOOP")
-            && name != QLatin1String("QT_TRID_NOOP")) {
+    static const QStringList globalFunctions = {"String", "Boolean", "Date", "Number", "Object", "Array", "Symbol", "Object", "Function", "RegExp",
+                                                "QT_TR_NOOP", "QT_TRANSLATE_NOOP", "QT_TRID_NOOP"};
+
+    if (!name.isEmpty() && name.at(0).isUpper() && !globalFunctions.contains(name)) {
         addMessage(WarnExpectedNewWithUppercaseFunction, location);
     }
     if (cast<IdentifierExpression *>(ast->base) && name == QLatin1String("eval"))
@@ -1709,37 +1769,44 @@ bool Check::visit(TypeOfExpression *ast)
 /// ### Maybe put this into the context as a helper function.
 const Value *Check::checkScopeObjectMember(const UiQualifiedId *id)
 {
+
     if (!_importsOk)
-        return 0;
+        return nullptr;
 
     QList<const ObjectValue *> scopeObjects = _scopeChain.qmlScopeObjects();
     if (scopeObjects.isEmpty())
-        return 0;
+        return nullptr;
+
+    const auto getAttachedTypes = [this, &scopeObjects](const QString &propertyName) {
+        bool isAttachedProperty = false;
+        if (! propertyName.isEmpty() && propertyName[0].isUpper()) {
+            isAttachedProperty = true;
+            if (const ObjectValue *qmlTypes = _scopeChain.qmlTypes())
+                scopeObjects += qmlTypes;
+        }
+        return isAttachedProperty;
+    };
+
 
     if (! id)
-        return 0; // ### error?
+        return nullptr; // ### error?
 
     if (id->name.isEmpty()) // possible after error recovery
-        return 0;
+        return nullptr;
 
     QString propertyName = id->name.toString();
 
-    if (propertyName == QLatin1String("id") && ! id->next)
-        return 0; // ### should probably be a special value
+    if (propertyName == "id" && !id->next)
+        return nullptr; // ### should probably be a special value
 
     // attached properties
-    bool isAttachedProperty = false;
-    if (! propertyName.isEmpty() && propertyName[0].isUpper()) {
-        isAttachedProperty = true;
-        if (const ObjectValue *qmlTypes = _scopeChain.qmlTypes())
-            scopeObjects += qmlTypes;
-    }
+    bool isAttachedProperty = getAttachedTypes(propertyName);
 
     if (scopeObjects.isEmpty())
-        return 0;
+        return nullptr;
 
     // global lookup for first part of id
-    const Value *value = 0;
+    const Value *value = nullptr;
     for (int i = scopeObjects.size() - 1; i >= 0; --i) {
         value = scopeObjects[i]->lookupMember(propertyName, _context);
         if (value)
@@ -1747,12 +1814,12 @@ const Value *Check::checkScopeObjectMember(const UiQualifiedId *id)
     }
     if (!value) {
         addMessage(ErrInvalidPropertyName, id->identifierToken, propertyName);
-        return 0;
+        return nullptr;
     }
 
     // can't look up members for attached properties
     if (isAttachedProperty)
-        return 0;
+        return nullptr;
 
     // resolve references
     if (const Reference *ref = value->asReference())
@@ -1764,23 +1831,29 @@ const Value *Check::checkScopeObjectMember(const UiQualifiedId *id)
         const ObjectValue *objectValue = value_cast<ObjectValue>(value);
         if (! objectValue) {
             addMessage(ErrDoesNotHaveMembers, idPart->identifierToken, propertyName);
-            return 0;
+            return nullptr;
         }
 
         if (idPart->next->name.isEmpty()) {
             // somebody typed "id." and error recovery still gave us a valid tree,
             // so just bail out here.
-            return 0;
+            return nullptr;
         }
 
         idPart = idPart->next;
         propertyName = idPart->name.toString();
+        isAttachedProperty = getAttachedTypes(propertyName);
+        if (isAttachedProperty)
+            return nullptr;
 
         value = objectValue->lookupMember(propertyName, _context);
         if (! value) {
             addMessage(ErrInvalidMember, idPart->identifierToken, propertyName, objectValue->className());
-            return 0;
+            return nullptr;
         }
+        // resolve references
+        if (const Reference *ref = value->asReference())
+            value = _context->lookupReference(ref);
     }
 
     return value;
@@ -1814,10 +1887,11 @@ void Check::checkCaseFallthrough(StatementList *statements, SourceLocation error
                         || comment.end() > nextLoc.begin())
                     continue;
 
-                const QString &commentText = _doc->source().mid(comment.begin(), comment.length);
-                if (commentText.contains(QLatin1String("fall through"))
-                        || commentText.contains(QLatin1String("fall-through"))
-                        || commentText.contains(QLatin1String("fallthrough"))) {
+                const QString &commentText = _doc->source().mid(int(comment.begin()),
+                                                                int(comment.length));
+                if (commentText.contains("fall through")
+                        || commentText.contains("fall-through")
+                        || commentText.contains("fallthrough")) {
                     return;
                 }
             }
@@ -1831,6 +1905,6 @@ Node *Check::parent(int distance)
 {
     const int index = _chain.size() - 2 - distance;
     if (index < 0)
-        return 0;
+        return nullptr;
     return _chain.at(index);
 }

@@ -25,17 +25,16 @@
 
 #pragma once
 
-#include "coreplugin/core_global.h"
-#include "coreplugin/coreconstants.h"
-#include "coreplugin/icontext.h"
-#include <coreplugin/actionmanager/command.h>
+#include "../core_global.h"
+#include "../coreconstants.h"
+#include "../icontext.h"
+#include "command.h"
 
 #include <QObject>
 #include <QList>
 
 QT_BEGIN_NAMESPACE
 class QAction;
-class QSettings;
 class QString;
 QT_END_NAMESPACE
 
@@ -58,6 +57,9 @@ public:
 
     static ActionContainer *createMenu(Id id);
     static ActionContainer *createMenuBar(Id id);
+    static ActionContainer *createTouchBar(Id id,
+                                           const QIcon &icon,
+                                           const QString &text = QString());
 
     static Command *registerAction(QAction *action, Id id,
                                    const Context &context = Context(Constants::C_GLOBAL),
@@ -80,8 +82,8 @@ signals:
     void commandAdded(Core::Id id);
 
 private:
-    ActionManager(QObject *parent = 0);
-    ~ActionManager();
+    ActionManager(QObject *parent = nullptr);
+    ~ActionManager() override;
     static void saveSettings();
     static void setContext(const Context &context);
 

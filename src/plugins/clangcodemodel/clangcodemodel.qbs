@@ -10,8 +10,10 @@ QtcPlugin {
     Depends { name: "ProjectExplorer" }
     Depends { name: "TextEditor" }
     Depends { name: "Utils" }
-    Depends { name: "ClangBackEndIpc" }
+    Depends { name: "ClangSupport" }
+
     Depends { name: "libclang"; required: false }
+    Depends { name: "clang_defines" }
 
     pluginTestDepends: [
         "CppEditor",
@@ -20,30 +22,23 @@ QtcPlugin {
 
     condition: libclang.present
 
-    cpp.defines: {
-        var defines = base;
-        // The following defines are used to determine the clang include path for intrinsics.
-        defines.push('CLANG_VERSION="' + libclang.llvmVersion + '"');
-        var resourceDir = FileInfo.joinPaths(libclang.llvmLibDir, "clang", libclang.llvmVersion,
-                                             "include");
-        defines.push('CLANG_RESOURCE_DIR="' + resourceDir + '"');
-        return defines;
-    }
-
     files: [
         "clangactivationsequencecontextprocessor.cpp",
         "clangactivationsequencecontextprocessor.h",
         "clangactivationsequenceprocessor.cpp",
         "clangactivationsequenceprocessor.h",
-        "clangassistproposal.cpp",
-        "clangassistproposal.h",
         "clangassistproposalitem.cpp",
         "clangassistproposalitem.h",
         "clangassistproposalmodel.cpp",
         "clangassistproposalmodel.h",
-        "clangbackendipcintegration.cpp",
-        "clangbackendipcintegration.h",
-        "clangcodemodel.qrc",
+        "clangbackendcommunicator.cpp",
+        "clangbackendcommunicator.h",
+        "clangbackendlogging.cpp",
+        "clangbackendlogging.h",
+        "clangbackendreceiver.cpp",
+        "clangbackendreceiver.h",
+        "clangbackendsender.cpp",
+        "clangbackendsender.h",
         "clangcodemodelplugin.cpp",
         "clangcodemodelplugin.h",
         "clangcompletionassistinterface.cpp",
@@ -57,6 +52,8 @@ QtcPlugin {
         "clangcompletioncontextanalyzer.cpp",
         "clangcompletioncontextanalyzer.h",
         "clangconstants.h",
+        "clangcurrentdocumentfilter.cpp",
+        "clangcurrentdocumentfilter.h",
         "clangdiagnosticfilter.cpp",
         "clangdiagnosticfilter.h",
         "clangdiagnosticmanager.cpp",
@@ -71,13 +68,19 @@ QtcPlugin {
         "clangfixitoperation.h",
         "clangfixitoperationsextractor.cpp",
         "clangfixitoperationsextractor.h",
+        "clangfollowsymbol.cpp",
+        "clangfollowsymbol.h",
         "clangfunctionhintmodel.cpp",
         "clangfunctionhintmodel.h",
-        "clanghighlightingmarksreporter.cpp",
-        "clanghighlightingmarksreporter.h",
+        "clanghighlightingresultreporter.cpp",
+        "clanghighlightingresultreporter.h",
+        "clanghoverhandler.cpp",
+        "clanghoverhandler.h",
         "clangisdiagnosticrelatedtolocation.h",
         "clangmodelmanagersupport.cpp",
         "clangmodelmanagersupport.h",
+        "clangoverviewmodel.cpp",
+        "clangoverviewmodel.h",
         "clangpreprocessorassistproposalitem.cpp",
         "clangpreprocessorassistproposalitem.h",
         "clangprojectsettings.cpp",
@@ -85,6 +88,8 @@ QtcPlugin {
         "clangprojectsettingswidget.cpp",
         "clangprojectsettingswidget.h",
         "clangprojectsettingswidget.ui",
+        "clangrefactoringengine.cpp",
+        "clangrefactoringengine.h",
         "clangtextmark.cpp",
         "clangtextmark.h",
         "clanguiheaderondiskmanager.cpp",
@@ -121,7 +126,7 @@ QtcPlugin {
         fileTags: []
         files: [
             "README",
-            project.ide_source_tree + "/doc/src/editors/creator-clang-codemodel.qdoc",
+            project.ide_source_tree + "/doc/qtcreator/src/editors/creator-only/creator-clang-codemodel.qdoc",
         ]
     }
 }

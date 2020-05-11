@@ -30,10 +30,9 @@
 #include <utils/qtcassert.h>
 #include <utils/qtcprocess.h>
 
-#include <QFile>
 #include <QDir>
-#include <QFileInfoList>
-#include <QMutexLocker>
+#include <QFile>
+#include <QFileInfo>
 
 using namespace AutotoolsProjectManager::Internal;
 
@@ -49,14 +48,14 @@ bool MakefileParser::parse()
 {
     m_mutex.lock();
     m_cancel = false;
-    m_mutex.unlock(),
+    m_mutex.unlock();
 
     m_success = true;
     m_executable.clear();
     m_sources.clear();
     m_makefiles.clear();
 
-    QFile *file = new QFile(m_makefile);
+    auto file = new QFile(m_makefile);
     if (!file->open(QIODevice::ReadOnly | QIODevice::Text)) {
         qWarning("%s: %s", qPrintable(m_makefile), qPrintable(file->errorString()));
         delete file;
@@ -108,9 +107,9 @@ QStringList MakefileParser::includePaths() const
     return m_includePaths;
 }
 
-QByteArray MakefileParser::defines() const
+ProjectExplorer::Macros MakefileParser::macros() const
 {
-    return m_defines;
+    return m_macros;
 }
 
 QStringList MakefileParser::cflags() const
@@ -291,11 +290,26 @@ void MakefileParser::parseSubDirs()
         foreach (const QString& source, parser.sources())
             m_sources.append(subDir + slash + source);
 
-        // Duplicates might be possible in combination with several
-        // "..._SUBDIRS" targets
-        m_makefiles.removeDuplicates();
-        m_sources.removeDuplicates();
+        // Append the include paths of the sub directory
+        m_includePaths.append(parser.includePaths());
+
+        // Append the flags of the sub directory
+        m_cflags.append(parser.cflags());
+        m_cxxflags.append(parser.cxxflags());
+
+        // Append the macros of the sub directory
+        foreach (const auto& m, parser.macros())
+        {
+            if (!m_macros.contains(m))
+                m_macros.append(m);
+        }
+
     }
+
+    // Duplicates might be possible in combination with several
+    // "..._SUBDIRS" targets
+    m_makefiles.removeDuplicates();
+    m_sources.removeDuplicates();
 
     if (subDirs.isEmpty())
         m_success = false;
@@ -343,7 +357,7 @@ QStringList MakefileParser::directorySources(const QString &directory,
 QStringList MakefileParser::targetValues(bool *hasVariables)
 {
     QStringList values;
-    if (hasVariables != 0)
+    if (hasVariables)
         *hasVariables = false;
 
     const int index = m_line.indexOf(QLatin1Char('='));
@@ -366,7 +380,7 @@ QStringList MakefileParser::targetValues(bool *hasVariables)
         while (it != lineValues.end()) {
             if ((*it).startsWith(QLatin1String("$("))) {
                 it = lineValues.erase(it);
-                if (hasVariables != 0)
+                if (hasVariables)
                     *hasVariables = true;
             } else {
                 ++it;
@@ -400,9 +414,9 @@ QStringList MakefileParser::targetValues(bool *hasVariables)
 
 void MakefileParser::appendHeader(QStringList &list,  const QDir &dir, const QString &fileName)
 {
-    const char *const headerExtensions[] = {".h", ".hh", ".hg", ".hxx", ".hpp", 0};
+    const char *const headerExtensions[] = {".h", ".hh", ".hg", ".hxx", ".hpp", nullptr};
     int i = 0;
-    while (headerExtensions[i] != 0) {
+    while (headerExtensions[i]) {
         const QString headerFile = fileName + QLatin1String(headerExtensions[i]);
         QFileInfo fileInfo(dir, headerFile);
         if (fileInfo.exists())
@@ -449,11 +463,7 @@ bool MakefileParser::maybeParseDefine(const QString &term)
 {
     if (term.startsWith(QLatin1String("-D"))) {
         QString def = term.mid(2); // remove the "-D"
-        QByteArray data = def.toUtf8();
-        int pos = data.indexOf('=');
-        if (pos >= 0)
-            data[pos] = ' ';
-        m_defines += (QByteArray("#define ") + data + '\n');
+        m_macros += ProjectExplorer::Macro::fromKeyValue(def);
         return true;
     }
     return false;

@@ -30,18 +30,11 @@
 #include <utils/treemodel.h>
 
 #include <QWidget>
-#include <QSet>
-#include <QHash>
-
-QT_BEGIN_NAMESPACE
-class QSortFilterProxyModel;
-QT_END_NAMESPACE
 
 namespace Utils { class TreeView; }
 
 namespace ExtensionSystem {
 
-class PluginManager;
 class PluginSpec;
 
 namespace Internal {
@@ -55,8 +48,8 @@ class EXTENSIONSYSTEM_EXPORT PluginView : public QWidget
     Q_OBJECT
 
 public:
-    explicit PluginView(QWidget *parent = 0);
-    ~PluginView();
+    explicit PluginView(QWidget *parent = nullptr);
+    ~PluginView() override;
 
     PluginSpec *currentPlugin() const;
     void setFilter(const QString &filter);

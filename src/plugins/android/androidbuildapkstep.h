@@ -27,7 +27,10 @@
 #pragma once
 
 #include "android_global.h"
+
 #include <projectexplorer/abstractprocessstep.h>
+
+#include <utils/fileutils.h>
 
 QT_BEGIN_NAMESPACE
 class QAbstractItemModel;
@@ -38,24 +41,16 @@ namespace Android {
 class ANDROID_EXPORT AndroidBuildApkStep : public ProjectExplorer::AbstractProcessStep
 {
     Q_OBJECT
-public:
-    AndroidBuildApkStep(ProjectExplorer::BuildStepList *bc, const Core::Id id);
 
-    enum AndroidDeployAction
-    {
-        MinistroDeployment, // use ministro
-        DebugDeployment,
-        BundleLibrariesDeployment
-    };
+public:
+    AndroidBuildApkStep(ProjectExplorer::BuildStepList *bc, Core::Id id);
 
     bool fromMap(const QVariantMap &map) override;
     QVariantMap toMap() const override;
 
-    AndroidDeployAction deployAction() const;
-
     // signing
-    Utils::FileName keystorePath();
-    void setKeystorePath(const Utils::FileName &path);
+    Utils::FilePath keystorePath();
+    void setKeystorePath(const Utils::FilePath &path);
     void setKeystorePassword(const QString &pwd);
     void setCertificateAlias(const QString &alias);
     void setCertificatePassword(const QString &pwd);
@@ -64,14 +59,17 @@ public:
     bool signPackage() const;
     void setSignPackage(bool b);
 
+    bool buildAAB() const;
+    void setBuildAAB(bool aab);
+
     bool openPackageLocation() const;
     void setOpenPackageLocation(bool open);
 
     bool verboseOutput() const;
     void setVerboseOutput(bool verbose);
 
-    bool useGradle() const;
-    void setUseGradle(bool b);
+    bool useMinistro() const;
+    void setUseMinistro(bool b);
 
     bool addDebugger() const;
     void setAddDebugger(bool debug);
@@ -79,40 +77,48 @@ public:
     QString buildTargetSdk() const;
     void setBuildTargetSdk(const QString &sdk);
 
-    virtual Utils::FileName androidPackageSourceDir() const = 0;
-    void setDeployAction(AndroidDeployAction deploy);
+    QVariant data(Core::Id id) const override;
+private:
+    void showInGraphicalShell();
 
-signals:
-    void useGradleChanged();
-
-protected:
-    Q_INVOKABLE void showInGraphicalShell();
-
-    AndroidBuildApkStep(ProjectExplorer::BuildStepList *bc,
-        AndroidBuildApkStep *other);
-
-    bool init(QList<const BuildStep *> &earlierSteps) override;
+    bool init() override;
+    void setupOutputFormatter(Utils::OutputFormatter *formatter) override;
     ProjectExplorer::BuildStepConfigWidget *createConfigWidget() override;
-    bool immutable() const override { return true; }
+    void processStarted() override;
     void processFinished(int exitCode, QProcess::ExitStatus status) override;
     bool verifyKeystorePassword();
     bool verifyCertificatePassword();
 
-protected:
-    AndroidDeployAction m_deployAction = BundleLibrariesDeployment;
+    void doRun() override;
+
+    bool m_buildAAB = false;
     bool m_signPackage = false;
     bool m_verbose = false;
-    bool m_useGradle = true; // Ant builds are deprecated.
+    bool m_useMinistro = false;
     bool m_openPackageLocation = false;
     bool m_openPackageLocationForRun = false;
     bool m_addDebugger = true;
     QString m_buildTargetSdk;
 
-    Utils::FileName m_keystorePath;
+    Utils::FilePath m_keystorePath;
     QString m_keystorePasswd;
     QString m_certificateAlias;
     QString m_certificatePasswd;
-    QString m_apkPath;
+    QString m_packagePath;
+
+    QString m_command;
+    QString m_argumentsPasswordConcealed;
+    bool m_skipBuilding = false;
+    QString m_inputFile;
 };
 
+namespace Internal {
+
+class AndroidBuildApkStepFactory : public ProjectExplorer::BuildStepFactory
+{
+public:
+    AndroidBuildApkStepFactory();
+};
+
+} // namespace Internal
 } // namespace Android

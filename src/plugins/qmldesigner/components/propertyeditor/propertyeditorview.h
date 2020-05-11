@@ -44,14 +44,15 @@ class CollapseButton;
 class PropertyEditorWidget;
 class PropertyEditorView;
 class PropertyEditorQmlBackend;
+class ModelNode;
 
 class PropertyEditorView: public AbstractView
 {
     Q_OBJECT
 
 public:
-    PropertyEditorView(QWidget *parent = 0);
-    ~PropertyEditorView();
+    PropertyEditorView(QWidget *parent = nullptr);
+    ~PropertyEditorView() override;
 
     bool hasWidget() const override;
     WidgetInfo widgetInfo() override;
@@ -66,10 +67,9 @@ public:
 
     void modelAboutToBeDetached(Model *model) override;
 
-    ModelState modelState() const;
-
     void variantPropertiesChanged(const QList<VariantProperty>& propertyList, PropertyChangeFlags propertyChange) override;
     void bindingPropertiesChanged(const QList<BindingProperty>& propertyList, PropertyChangeFlags propertyChange) override;
+    void auxiliaryDataChanged(const ModelNode &node, const PropertyName &name, const QVariant &data) override;
 
     void instanceInformationsChanged(const QMultiHash<ModelNode, InformationName> &informationChangedHash) override;
 
@@ -92,6 +92,10 @@ public:
     void exportPopertyAsAlias(const QString &name);
     void removeAliasExport(const QString &name);
 
+    bool locked() const;
+
+    void nodeCreated(const ModelNode &createdNode) override;
+
 protected:
     void timerEvent(QTimerEvent *event) override;
     void setupPane(const TypeName &typeName);
@@ -102,10 +106,17 @@ private: //functions
     void updateSize();
     void setupPanes();
 
-    void select(const ModelNode& node);
+    void select();
+    void setSelelectedModelNode();
 
     void delayedResetView();
     void setupQmlBackend();
+
+    void commitVariantValueToModel(const PropertyName &propertyName, const QVariant &value);
+    void commitAuxValueToModel(const PropertyName &propertyName, const QVariant &value);
+    void removePropertyFromModel(const PropertyName &propertyName);
+
+    bool noValidSelection() const;
 
 private: //variables
     ModelNode m_selectedNode;

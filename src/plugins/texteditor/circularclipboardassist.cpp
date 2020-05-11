@@ -59,7 +59,7 @@ public:
         setText(text);
     }
 
-    ~ClipboardProposalItem() Q_DECL_NOEXCEPT {}
+    ~ClipboardProposalItem() noexcept override = default;
 
     void apply(TextDocumentManipulatorInterface &manipulator, int /*basePosition*/) const override
     {
@@ -88,7 +88,7 @@ public:
     IAssistProposal *perform(const AssistInterface *interface) override
     {
         if (!interface)
-            return 0;
+            return nullptr;
         const QScopedPointer<const AssistInterface> AssistInterface(interface);
 
         QIcon icon = QIcon::fromTheme(QLatin1String("edit-paste"), Utils::Icons::PASTE.icon()).pixmap(16);
@@ -111,11 +111,6 @@ public:
 IAssistProvider::RunType ClipboardAssistProvider::runType() const
 {
     return Synchronous;
-}
-
-bool ClipboardAssistProvider::supportsEditor(Core::Id /*editorId*/) const
-{
-    return true;
 }
 
 IAssistProcessor *ClipboardAssistProvider::createProcessor() const

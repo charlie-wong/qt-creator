@@ -168,9 +168,6 @@ void ScxmlTag::initId()
         case History:
             setAttribute("id", m_document->nextUniqueId("History"));
             break;
-        case Transition:
-            setAttribute("event", m_document->nextUniqueId("Transition"));
-            break;
         case Final:
             setAttribute("id", m_document->nextUniqueId("Final"));
             break;
@@ -272,7 +269,7 @@ void ScxmlTag::setContent(const QString &content)
 
 bool ScxmlTag::hasData() const
 {
-    if (m_attributeNames.count() > 0 || !m_content.isEmpty())
+    if (!m_attributeNames.isEmpty() || !m_content.isEmpty())
         return true;
 
     foreach (ScxmlTag *tag, m_childTags) {
@@ -555,11 +552,8 @@ void ScxmlTag::writeXml(QXmlStreamWriter &xml)
     // Write editorinfo if necessary
     if (!m_editorInfo.isEmpty()) {
         xml.writeStartElement("qt:editorinfo");
-        QHashIterator<QString, QString> i(m_editorInfo);
-        while (i.hasNext()) {
-            i.next();
+        for (auto i = m_editorInfo.cbegin(), end = m_editorInfo.cend(); i != end; ++i)
             xml.writeAttribute(i.key(), i.value());
-        }
         xml.writeEndElement();
     }
 

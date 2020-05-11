@@ -25,55 +25,118 @@
 
 #pragma once
 
-#include "sqlitedatabaseconnectionproxy.h"
+#include "sqlitedatabasebackend.h"
+#include "sqlitedatabaseinterface.h"
 #include "sqliteglobal.h"
+#include "sqlitetable.h"
+#include "sqlitetransaction.h"
 
-#include <QString>
-#include <QVector>
+#include <utils/smallstring.h>
 
-class SqliteTable;
+#include <chrono>
+#include <mutex>
+#include <vector>
 
-class SQLITE_EXPORT SqliteDatabase : public QObject
+namespace Sqlite {
+
+using namespace std::chrono_literals;
+
+class ReadStatement;
+class WriteStatement;
+
+class SQLITE_EXPORT Database final : public TransactionInterface, public DatabaseInterface
 {
-    Q_OBJECT
+    template <typename Database>
+    friend class Statement;
+    friend class Backend;
 
 public:
-    SqliteDatabase();
-    ~SqliteDatabase();
+    using MutexType = std::mutex;
+    using ReadStatement = Sqlite::ReadStatement;
+    using WriteStatement = Sqlite::WriteStatement;
+
+    Database();
+    Database(Utils::PathString &&databaseFilePath,
+             JournalMode journalMode);
+    Database(Utils::PathString &&databaseFilePath,
+             std::chrono::milliseconds busyTimeout = 1000ms,
+             JournalMode journalMode=JournalMode::Wal);
+    ~Database();
+
+    Database(const Database &) = delete;
+    Database &operator=(const Database &) = delete;
 
     void open();
+    void open(Utils::PathString &&databaseFilePath);
     void close();
+
+    bool isInitialized() const;
+    void setIsInitialized(bool isInitialized);
 
     bool isOpen() const;
 
-    void addTable(SqliteTable *newSqliteTable);
-    const QVector<SqliteTable *> &tables() const;
+    Table &addTable();
+    const std::vector<Table> &tables() const;
 
-    void setDatabaseFilePath(const QString &databaseFilePath);
-    const QString &databaseFilePath() const;
+    void setDatabaseFilePath(Utils::PathString &&databaseFilePath);
+    const Utils::PathString &databaseFilePath() const;
 
     void setJournalMode(JournalMode journalMode);
     JournalMode journalMode() const;
 
-    QThread *writeWorkerThread() const;
-    QThread *readWorkerThread() const;
+    void setOpenMode(OpenMode openMode);
+    OpenMode openMode() const;
 
-signals:
-    void databaseIsOpened();
-    void databaseIsClosed();
+    void execute(Utils::SmallStringView sqlStatement);
+
+    DatabaseBackend &backend();
+
+    int64_t lastInsertedRowId() const
+    {
+        return m_databaseBackend.lastInsertedRowId();
+    }
+
+    void setLastInsertedRowId(int64_t rowId)
+    {
+        m_databaseBackend.setLastInsertedRowId(rowId);
+    }
+
+    int changesCount()
+    {
+        return m_databaseBackend.changesCount();
+    }
+
+    int totalChangesCount() { return m_databaseBackend.totalChangesCount(); }
+
+    void walCheckpointFull() override { m_databaseBackend.walCheckpointFull(); }
 
 private:
-    void handleReadDatabaseConnectionIsOpened();
-    void handleWriteDatabaseConnectionIsOpened();
-    void handleReadDatabaseConnectionIsClosed();
-    void handleWriteDatabaseConnectionIsClosed();
+    void deferredBegin() override;
+    void immediateBegin() override;
+    void exclusiveBegin() override;
+    void commit() override;
+    void rollback() override;
+    void lock() override;
+    void unlock() override;
+
     void initializeTables();
-    void shutdownTables();
+    void registerTransactionStatements();
+    void deleteTransactionStatements();
+    std::mutex &databaseMutex() { return m_databaseMutex; }
+
+    class Statements;
 
 private:
-    SqliteDatabaseConnectionProxy readDatabaseConnection;
-    SqliteDatabaseConnectionProxy writeDatabaseConnection;
-    QVector<SqliteTable*> sqliteTables;
-    QString databaseFilePath_;
-    JournalMode journalMode_;
+    Utils::PathString m_databaseFilePath;
+    DatabaseBackend m_databaseBackend;
+    std::vector<Table> m_sqliteTables;
+    std::mutex m_databaseMutex;
+    std::unique_ptr<Statements> m_statements;
+    std::chrono::milliseconds m_busyTimeout;
+    JournalMode m_journalMode = JournalMode::Wal;
+    OpenMode m_openMode = OpenMode::ReadWrite;
+    bool m_isOpen = false;
+    bool m_isInitialized = false;
 };
+
+} // namespace Sqlite

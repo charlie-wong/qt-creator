@@ -27,26 +27,24 @@
 
 #include <extensionsystem/pluginmanager.h>
 
-#include <qplugin.h>
-#include <QObject>
-
 using namespace Plugin1;
 
-MyPlugin1::MyPlugin1()
-    : initializeCalled(false)
+MyPlugin1::~MyPlugin1()
 {
+    ExtensionSystem::PluginManager::removeObject(object1);
+    ExtensionSystem::PluginManager::removeObject(object2);
 }
 
 bool MyPlugin1::initialize(const QStringList & /*arguments*/, QString *errorString)
 {
     initializeCalled = true;
-    QObject *obj = new QObject;
-    obj->setObjectName(QLatin1String("MyPlugin1"));
-    addAutoReleasedObject(obj);
+    object1 = new QObject(this);
+    object1->setObjectName(QLatin1String("MyPlugin1"));
+    ExtensionSystem::PluginManager::addObject(object1);
 
     bool found2 = false;
     bool found3 = false;
-    foreach (QObject *object, ExtensionSystem::PluginManager::allObjects()) {
+    for (QObject *object : ExtensionSystem::PluginManager::allObjects()) {
         if (object->objectName() == QLatin1String("MyPlugin2"))
             found2 = true;
         else if (object->objectName() == QLatin1String("MyPlugin3"))
@@ -70,8 +68,8 @@ void MyPlugin1::extensionsInitialized()
     if (!initializeCalled)
         return;
     // don't do this at home, it's just done here for the test
-    QObject *obj = new QObject;
-    obj->setObjectName(QLatin1String("MyPlugin1_running"));
-    addAutoReleasedObject(obj);
+    object2 = new QObject(this);
+    object2->setObjectName(QLatin1String("MyPlugin1_running"));
+    ExtensionSystem::PluginManager::addObject(object2);
 }
 

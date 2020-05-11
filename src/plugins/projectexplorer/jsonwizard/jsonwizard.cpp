@@ -30,21 +30,123 @@
 
 #include "../project.h"
 #include "../projectexplorer.h"
-
+#include "../projectexplorerconstants.h"
+#include "../projecttree.h"
 #include <coreplugin/editormanager/editormanager.h>
+#include <coreplugin/editormanager/ieditor.h>
 #include <coreplugin/messagemanager.h>
 
 #include <utils/algorithm.h>
+#include <utils/itemviews.h>
 #include <utils/qtcassert.h>
+#include <utils/treemodel.h>
 #include <utils/wizardpage.h>
 
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDir>
 #include <QFileInfo>
+#include <QJSEngine>
+#include <QLabel>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <QVariant>
+
+#ifdef WITH_TESTS
+#include "jsonwizard_test.cpp"
+#endif
 
 namespace ProjectExplorer {
 
-JsonWizard::JsonWizard(QWidget *parent) : Utils::Wizard(parent)
+namespace Internal {
+
+class ProjectFileTreeItem : public Utils::TreeItem
+{
+public:
+    ProjectFileTreeItem(JsonWizard::GeneratorFile *candidate) : m_candidate(candidate)
+    {
+        toggleProjectFileStatus(false);
+    }
+
+    void toggleProjectFileStatus(bool on)
+    {
+        m_candidate->file.setAttributes(m_candidate->file.attributes()
+                                        .setFlag(Core::GeneratedFile::OpenProjectAttribute, on));
+    }
+
+private:
+    QVariant data(int column, int role) const override
+    {
+        if (column != 0 || role != Qt::DisplayRole)
+            return QVariant();
+        return QDir::toNativeSeparators(m_candidate->file.path());
+    }
+
+    JsonWizard::GeneratorFile * const m_candidate;
+};
+
+class ProjectFilesModel : public Utils::TreeModel<Utils::TreeItem, ProjectFileTreeItem>
+{
+public:
+    ProjectFilesModel(const QList<JsonWizard::GeneratorFile *> &candidates, QObject *parent)
+        : TreeModel(parent)
+    {
+        setHeader({QCoreApplication::translate("ProjectExplorer::JsonWizard", "Project File")});
+        for (JsonWizard::GeneratorFile * const candidate : candidates)
+            rootItem()->appendChild(new ProjectFileTreeItem(candidate));
+    }
+};
+
+class ProjectFileChooser : public QDialog
+{
+public:
+    ProjectFileChooser(const QList<JsonWizard::GeneratorFile *> &candidates, QWidget *parent)
+        : QDialog(parent), m_view(new Utils::TreeView(this))
+    {
+        setWindowTitle(QCoreApplication::translate("ProjectExplorer::JsonWizard",
+                                                   "Choose Project File"));
+        const auto model = new ProjectFilesModel(candidates, this);
+        m_view->setSelectionMode(Utils::TreeView::ExtendedSelection);
+        m_view->setSelectionBehavior(Utils::TreeView::SelectRows);
+        m_view->setModel(model);
+        const auto buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok);
+        const auto updateOkButton = [buttonBox, this] {
+            buttonBox->button(QDialogButtonBox::Ok)
+                    ->setEnabled(m_view->selectionModel()->hasSelection());
+        };
+        connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged,
+                this, updateOkButton);
+        updateOkButton();
+        connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        const auto layout = new QVBoxLayout(this);
+        layout->addWidget(new QLabel(QCoreApplication::translate("ProjectExplorer::JsonWizard",
+            "The project contains more than one project file. "
+            "Select the one you would like to use.")));
+        layout->addWidget(m_view);
+        layout->addWidget(buttonBox);
+    }
+
+private:
+    void accept() override
+    {
+        const QModelIndexList selected = m_view->selectionModel()->selectedRows();
+        const auto * const model = static_cast<ProjectFilesModel *>(m_view->model());
+        for (const QModelIndex &index : selected) {
+            const auto item = static_cast<ProjectFileTreeItem *>(model->itemForIndex(index));
+            QTC_ASSERT(item, continue);
+            item->toggleProjectFileStatus(true);
+        }
+        QDialog::accept();
+    }
+
+    Utils::TreeView * const m_view;
+};
+
+} // namespace Internal
+
+JsonWizard::JsonWizard(QWidget *parent)
+    : Utils::Wizard(parent)
 {
     setMinimumSize(800, 500);
     m_expander.registerExtraResolver([this](const QString &name, QString *ret) -> bool {
@@ -58,7 +160,10 @@ JsonWizard::JsonWizard(QWidget *parent) : Utils::Wizard(parent)
         const QString key = QString::fromLatin1("%{") + value + QLatin1Char('}');
         return m_expander.expand(key) == key ? QString() : QLatin1String("true");
     });
-
+    // override default JS macro by custom one that adds Wizard specific features
+    m_jsExpander.registerObject("Wizard", new Internal::JsonWizardJsExtension(this));
+    m_jsExpander.engine().evaluate("var value = Wizard.value");
+    m_jsExpander.registerForExpander(&m_expander);
 }
 
 JsonWizard::~JsonWizard()
@@ -107,6 +212,14 @@ JsonWizard::GeneratorFiles JsonWizard::generateFileList()
         reject();
         return GeneratorFiles();
     }
+
+    QList<GeneratorFile *> projectFiles;
+    for (JsonWizard::GeneratorFile &f : list) {
+        if (f.file.attributes().testFlag(Core::GeneratedFile::OpenProjectAttribute))
+            projectFiles << &f;
+    }
+    if (projectFiles.count() > 1)
+        Internal::ProjectFileChooser(projectFiles, this).exec();
 
     return list;
 }
@@ -176,7 +289,7 @@ QVariant JsonWizard::value(const QString &n) const
     if (v.isValid())
         return v;
     if (hasField(n))
-        return field(n); // Can not contain macros!
+        return field(n); // Cannot contain macros!
     return QVariant();
 }
 
@@ -284,6 +397,10 @@ void JsonWizard::accept()
     emit allDone(m_files);
 
     openFiles(m_files);
+
+    auto node = static_cast<ProjectExplorer::Node*>(value(ProjectExplorer::Constants::PREFERRED_PROJECT_NODE).value<void*>());
+    if (node && ProjectTree::hasNode(node)) // PREFERRED_PROJECT_NODE is not set for newly created projects
+        openProjectForNode(node);
 }
 
 void JsonWizard::reject()
@@ -345,14 +462,18 @@ void JsonWizard::openFiles(const JsonWizard::GeneratorFiles &files)
                 }
                 break;
             }
+            result.project()->setNeedsInitialExpansion(true);
             openedSomething = true;
         }
         if (file.attributes() & Core::GeneratedFile::OpenEditorAttribute) {
-            if (!Core::EditorManager::openEditor(file.path(), file.editorId())) {
+            Core::IEditor *editor = Core::EditorManager::openEditor(file.path(), file.editorId());
+            if (!editor) {
                 errorMessage = QCoreApplication::translate("ProjectExplorer::JsonWizard",
                                                            "Failed to open an editor for \"%1\".")
                         .arg(QDir::toNativeSeparators(file.path()));
                 break;
+            } else if (file.attributes() & Core::GeneratedFile::TemporaryFile) {
+                editor->document()->setTemporary(true);
             }
             openedSomething = true;
         }
@@ -378,6 +499,29 @@ void JsonWizard::openFiles(const JsonWizard::GeneratorFiles &files)
     }
 }
 
+void JsonWizard::openProjectForNode(Node *node)
+{
+    using namespace Utils;
+
+    const ProjectNode *projNode = node->asProjectNode();
+    if (!projNode) {
+        if (ContainerNode * const cn = node->asContainerNode())
+            projNode = cn->rootProjectNode();
+        else
+            projNode = node->parentProjectNode();
+    }
+    QTC_ASSERT(projNode, return);
+
+    Utils::optional<FilePath> projFilePath = projNode->visibleAfterAddFileAction();
+
+    if (projFilePath && !Core::EditorManager::openEditor(projFilePath.value().toString())) {
+            auto errorMessage = QCoreApplication::translate("ProjectExplorer::JsonWizard",
+                                                       "Failed to open an editor for \"%1\".")
+                    .arg(QDir::toNativeSeparators(projFilePath.value().toString()));
+            QMessageBox::warning(nullptr, tr("Cannot Open Project"), errorMessage);
+    }
+}
+
 QString JsonWizard::OptionDefinition::value(Utils::MacroExpander &expander) const
 {
     if (JsonWizard::boolFromVariant(m_evaluate, &expander))
@@ -390,4 +534,17 @@ bool JsonWizard::OptionDefinition::condition(Utils::MacroExpander &expander) con
     return JsonWizard::boolFromVariant(m_condition, &expander);
 }
 
+namespace Internal {
+
+JsonWizardJsExtension::JsonWizardJsExtension(JsonWizard *wizard)
+    : m_wizard(wizard)
+{}
+
+QVariant JsonWizardJsExtension::value(const QString &name) const
+{
+    const QVariant value = m_wizard->value(name);
+    return m_wizard->expander()->expandVariant(m_wizard->value(name));
+}
+
+} // namespace Internal
 } // namespace ProjectExplorer

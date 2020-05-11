@@ -25,20 +25,9 @@
 
 #include "plugin2.h"
 
-#include <qplugin.h>
-
 using namespace Plugin2;
-
-MyPlugin2::MyPlugin2()
-{
-}
 
 bool MyPlugin2::initialize(const QStringList &, QString *)
 {
     return true;
 }
-
-void MyPlugin2::extensionsInitialized()
-{
-}
-

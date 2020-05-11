@@ -43,16 +43,16 @@ class QMLDEBUG_EXPORT QPacketProtocol : public QObject
     Q_OBJECT
     Q_DECLARE_PRIVATE(QPacketProtocol)
 public:
-    explicit QPacketProtocol(QIODevice *dev, QObject *parent = 0);
+    explicit QPacketProtocol(QIODevice *dev, QObject *parent = nullptr);
 
     void send(const QByteArray &data);
     qint64 packetsAvailable() const;
     QByteArray read();
     bool waitForReadyRead(int msecs = 3000);
 
-Q_SIGNALS:
+signals:
     void readyRead();
-    void invalidPacket();
+    void protocolError();
 
 private:
     QPacketProtocolPrivate *d;
@@ -66,7 +66,6 @@ public:
     QByteArray data() const;
 
 private:
-    void init(QIODevice::OpenMode mode);
     QBuffer buf;
 };
 

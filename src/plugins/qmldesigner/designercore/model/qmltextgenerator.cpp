@@ -41,12 +41,10 @@ using namespace QmlDesigner::Internal;
 
 inline static QString properColorName(const QColor &color)
 {
-    QString s;
     if (color.alpha() == 255)
-        s.sprintf("#%02x%02x%02x", color.red(), color.green(), color.blue());
+        return QString::asprintf("#%02x%02x%02x", color.red(), color.green(), color.blue());
     else
-        s.sprintf("#%02x%02x%02x%02x", color.alpha(), color.red(), color.green(), color.blue());
-    return s;
+        return QString::asprintf("#%02x%02x%02x%02x", color.alpha(), color.red(), color.green(), color.blue());
 }
 
 inline static QString doubleToString(double d)
@@ -132,7 +130,7 @@ QString QmlTextGenerator::toQml(const AbstractProperty &property, int indentDept
 
             switch (value.userType()) {
             case QMetaType::Bool:
-                if (value.value<bool>())
+                if (value.toBool())
                     return QStringLiteral("true");
                 else
                     return QStringLiteral("false");
@@ -167,8 +165,8 @@ QString QmlTextGenerator::toQml(const ModelNode &node, int indentDepth) const
     QString url;
     if (type.contains('.')) {
         QStringList nameComponents = type.split('.');
-        url = nameComponents.first();
-        type = nameComponents.last();
+        url = nameComponents.constFirst();
+        type = nameComponents.constLast();
     }
 
     QString alias;

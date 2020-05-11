@@ -43,7 +43,7 @@ class QMLJSEDITOR_EXPORT QmlJSEditorDocument : public TextEditor::TextDocument
 {
     Q_OBJECT
 public:
-    QmlJSEditorDocument();
+    QmlJSEditorDocument(Core::Id id);
     ~QmlJSEditorDocument() override;
 
     const QmlJSTools::SemanticInfo &semanticInfo() const;
@@ -52,7 +52,10 @@ public:
     void setDiagnosticRanges(const QVector<QTextLayout::FormatRange> &ranges);
     Internal::QmlOutlineModel *outlineModel() const;
 
-    TextEditor::QuickFixAssistProvider *quickFixAssistProvider() const override;
+    TextEditor::IAssistProvider *quickFixAssistProvider() const override;
+
+    void setIsDesignModePreferred(bool value);
+    bool isDesignModePreferred() const;
 
 signals:
     void updateCodeWarnings(QmlJS::Document::Ptr doc);

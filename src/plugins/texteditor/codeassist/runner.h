@@ -43,22 +43,22 @@ class ProcessorRunner : public QThread
 
 public:
     ProcessorRunner();
-    virtual ~ProcessorRunner();
+    ~ProcessorRunner() override;
 
     void setProcessor(IAssistProcessor *processor); // Takes ownership of the processor.
     void setAssistInterface(AssistInterface *interface);
     void setDiscardProposal(bool discard);
 
-    virtual void run();
+    void run() override;
 
     IAssistProposal *proposal() const;
 
 private:
-    IAssistProcessor *m_processor;
-    AssistInterface *m_interface;
-    bool m_discardProposal;
-    IAssistProposal *m_proposal;
-    AssistReason m_reason;
+    IAssistProcessor *m_processor = nullptr;
+    AssistInterface *m_interface = nullptr;
+    bool m_discardProposal = false;
+    IAssistProposal *m_proposal = nullptr;
+    AssistReason m_reason = IdleEditor;
 };
 
 } // Internal

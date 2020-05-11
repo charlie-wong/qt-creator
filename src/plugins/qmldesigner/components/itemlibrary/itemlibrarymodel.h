@@ -28,7 +28,7 @@
 #include <QMap>
 #include <QIcon>
 #include <QAbstractListModel>
-#include <QtQuick>
+#include <QtQml/qqml.h>
 
 QT_FORWARD_DECLARE_CLASS(QMimeData)
 
@@ -45,12 +45,12 @@ class ItemLibraryModel: public QAbstractListModel {
     Q_PROPERTY(QString searchText READ searchText WRITE setSearchText NOTIFY searchTextChanged)
 
 public:
-    explicit ItemLibraryModel(QObject *parent = 0);
-    ~ItemLibraryModel();
+    explicit ItemLibraryModel(QObject *parent = nullptr);
+    ~ItemLibraryModel() override;
 
-    int rowCount(const QModelIndex &parent = QModelIndex()) const;
-    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const;
-    QHash<int, QByteArray> roleNames() const;
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+    QHash<int, QByteArray> roleNames() const override;
 
     QString searchText() const;
 
@@ -58,36 +58,32 @@ public:
 
     QMimeData *getMimeData(const ItemLibraryEntry &itemLibraryEntry);
 
-    QList<ItemLibrarySection*> sections() const;
-
-    void clearSections();
-
     static void registerQmlTypes();
-
-    int visibleSectionCount() const;
-    QList<ItemLibrarySection*> visibleSections() const;
-
-    ItemLibrarySection *sectionByName(const QString &sectionName);
 
     void setSearchText(const QString &searchText);
 
     void setExpanded(bool, const QString &section);
+
+    void setFlowMode(bool);
 
 signals:
     void qmlModelChanged();
     void searchTextChanged();
 
 private: // functions
+    ItemLibrarySection *sectionByName(const QString &sectionName);
     void updateVisibility(bool *changed);
     void addRoleNames();
     void sortSections();
+    void clearSections();
 
 
 private: // variables
-    QList<ItemLibrarySection*> m_sections;
+    QList<QPointer<ItemLibrarySection>> m_sections;
     QHash<int, QByteArray> m_roleNames;
 
     QString m_searchText;
+    bool m_flowMode = false;
 };
 
 } // namespace QmlDesigner

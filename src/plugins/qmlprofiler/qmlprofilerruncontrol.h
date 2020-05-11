@@ -27,8 +27,7 @@
 
 #include "qmlprofilerstatemanager.h"
 
-#include <projectexplorer/runconfiguration.h>
-#include <projectexplorer/runnables.h>
+#include <projectexplorer/runcontrol.h>
 
 #include <utils/outputformat.h>
 #include <utils/port.h>
@@ -36,6 +35,7 @@
 #include <qmldebug/qmloutputparser.h>
 
 namespace QmlProfiler {
+namespace Internal {
 
 class QmlProfilerRunner : public ProjectExplorer::RunWorker
 {
@@ -45,39 +45,33 @@ public:
     QmlProfilerRunner(ProjectExplorer::RunControl *runControl);
     ~QmlProfilerRunner() override;
 
-    struct Configuration {
-        Utils::Port port;
-        QString socket;
-    };
-    void setLocalConfiguration(const Configuration &conf);
+    void setServerUrl(const QUrl &serverUrl);
+    QUrl serverUrl() const;
 
     void registerProfilerStateManager( QmlProfilerStateManager *profilerState );
 
-    void notifyRemoteSetupDone(Utils::Port port);
-    void notifyRemoteSetupFailed(const QString &errorMessage);
     void cancelProcess();
     void notifyRemoteFinished();
-
-    static Utils::Port findFreePort(QString &host);
-    static QString findFreeSocket();
-
-signals:
-    void localRunnerStarted();
-    void localRunnerStopped();
 
 private:
     void start() override;
     void stop() override;
 
-    void wrongSetupMessageBoxFinished(int);
     void profilerStateChanged();
-
-    void spontaneousStop(int exitCode, QProcess::ExitStatus status);
-    void startLocalRunner();
-    void stopLocalRunner();
 
     class QmlProfilerRunnerPrivate;
     QmlProfilerRunnerPrivate *d;
 };
 
+class LocalQmlProfilerSupport : public ProjectExplorer::SimpleTargetRunner
+{
+    Q_OBJECT
+
+public:
+    LocalQmlProfilerSupport(ProjectExplorer::RunControl *runControl);
+    LocalQmlProfilerSupport(ProjectExplorer::RunControl *runControl,
+                            const QUrl &serverUrl);
+};
+
+} // namespace Internal
 } // namespace QmlProfiler

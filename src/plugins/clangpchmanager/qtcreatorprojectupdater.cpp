@@ -26,42 +26,43 @@
 #include "qtcreatorprojectupdater.h"
 
 #include <cpptools/abstracteditorsupport.h>
-#include <cpptools/cppmodelmanager.h>
 
 #include <projectexplorer/project.h>
 
+#include <filepathcachinginterface.h>
+
 namespace ClangPchManager {
 
-static CppTools::CppModelManager *cppModelManager()
+namespace Internal {
+
+CppTools::CppModelManager *cppModelManager()
 {
     return CppTools::CppModelManager::instance();
 }
 
-QtCreatorProjectUpdater::QtCreatorProjectUpdater(ClangBackEnd::PchManagerServerInterface &server,
-                                                 PchManagerClient &client)
-    : ProjectUpdater(server, client)
-{
-    connectToCppModelManager();
-}
-
-namespace {
-
-std::vector<ClangBackEnd::V2::FileContainer> createGeneratedFiles()
+std::vector<ClangBackEnd::V2::FileContainer> createGeneratedFiles(
+    ClangBackEnd::FilePathCachingInterface &filePathCache)
 {
     auto abstractEditors = CppTools::CppModelManager::instance()->abstractEditorSupports();
     std::vector<ClangBackEnd::V2::FileContainer> generatedFiles;
     generatedFiles.reserve(std::size_t(abstractEditors.size()));
 
-    auto toFileContainer = [] (const CppTools::AbstractEditorSupport *abstractEditor) {
-        return  ClangBackEnd::V2::FileContainer(ClangBackEnd::FilePath(abstractEditor->fileName()),
-                                                Utils::SmallString::fromQByteArray(abstractEditor->contents()),
-                                                {});
+    auto toFileContainer = [&](const CppTools::AbstractEditorSupport *abstractEditor) {
+        ClangBackEnd::FilePath filePath(abstractEditor->fileName());
+        ClangBackEnd::FilePathId filePathId = filePathCache.filePathId(filePath);
+        return ClangBackEnd::V2::FileContainer(std::move(filePath),
+                                               filePathId,
+                                               Utils::SmallString::fromQByteArray(
+                                                   abstractEditor->contents()),
+                                               {});
     };
 
     std::transform(abstractEditors.begin(),
                    abstractEditors.end(),
                    std::back_inserter(generatedFiles),
                    toFileContainer);
+
+    std::sort(generatedFiles.begin(), generatedFiles.end());
 
     return generatedFiles;
 }
@@ -85,30 +86,7 @@ std::vector<CppTools::ProjectPart*> createProjectParts(ProjectExplorer::Project 
                    convertToRawPointer);
 
     return projectParts;
-}
 
 }
-
-void QtCreatorProjectUpdater::projectPartsUpdated(ProjectExplorer::Project *project)
-{
-    updateProjectParts(createProjectParts(project), createGeneratedFiles());
-}
-
-void QtCreatorProjectUpdater::projectPartsRemoved(const QStringList &projectPartIds)
-{
-    removeProjectParts(projectPartIds);
-}
-
-void QtCreatorProjectUpdater::connectToCppModelManager()
-{
-    connect(cppModelManager(),
-            &CppTools::CppModelManager::projectPartsUpdated,
-            this,
-            &QtCreatorProjectUpdater::projectPartsUpdated);
-    connect(cppModelManager(),
-            &CppTools::CppModelManager::projectPartsRemoved,
-            this,
-            &QtCreatorProjectUpdater::projectPartsRemoved);
-}
-
+} // namespace Internal
 } // namespace ClangPchManager

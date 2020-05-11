@@ -29,6 +29,7 @@
 
 #include "propertycontainer.h"
 #include <QPointer>
+#include <memory>
 
 namespace QmlDesigner {
 
@@ -54,7 +55,7 @@ class QMLDESIGNERCORE_EXPORT ItemLibraryEntry
 
 public:
     ItemLibraryEntry();
-    ~ItemLibraryEntry();
+    ~ItemLibraryEntry() = default;
 
     QString name() const;
     TypeName typeName() const;
@@ -68,10 +69,7 @@ public:
     QString qmlSource() const;
     QString requiredImport() const;
 
-    ItemLibraryEntry(const ItemLibraryEntry &other);
-    ItemLibraryEntry& operator=(const ItemLibraryEntry &other);
-
-    typedef QmlDesigner::PropertyContainer Property;
+    using Property = QmlDesigner::PropertyContainer;
 
     QList<Property> properties() const;
     QHash<QString, QString> hints() const;
@@ -88,7 +86,7 @@ public:
     void addHints(const QHash<QString, QString> &hints);
 
 private:
-    QExplicitlySharedDataPointer<Internal::ItemLibraryEntryData> m_data;
+    std::shared_ptr<Internal::ItemLibraryEntryData> m_data;
 };
 
 class QMLDESIGNERCORE_EXPORT ItemLibraryInfo : public QObject
@@ -106,16 +104,26 @@ public:
     bool containsEntry(const ItemLibraryEntry &entry);
     void clearEntries();
 
+    QStringList blacklistImports() const;
+    QStringList showTagsForImports() const;
+
+    void addBlacklistImports(const QStringList &list);
+    void addShowTagsForImports(const QStringList &list);
+
 signals:
     void entriesChanged();
+    void importTagsChanged();
 
 private: // functions
-    ItemLibraryInfo(QObject *parent = 0);
+    ItemLibraryInfo(QObject *parent = nullptr);
     void setBaseInfo(ItemLibraryInfo *m_baseInfo);
 
 private: // variables
     QHash<QString, ItemLibraryEntry> m_nameToEntryHash;
     QPointer<ItemLibraryInfo> m_baseInfo;
+
+    QStringList m_blacklistImports;
+    QStringList m_showTagsForImports;
 };
 
 } // namespace QmlDesigner

@@ -58,12 +58,12 @@ public:
 
     static void extensionsInitialized();
 
-    static QList<IVersionControl *> versionControls();
+    static const QList<IVersionControl *> versionControls();
     static IVersionControl *versionControl(Id id);
 
     static void resetVersionControlForDirectory(const QString &inputDirectory);
     static IVersionControl *findVersionControlForDirectory(const QString &directory,
-                                                           QString *topLevelDirectory = 0);
+                                                           QString *topLevelDirectory = nullptr);
     static QString findTopLevelForDirectory(const QString &directory);
 
     static QStringList repositories(const IVersionControl *);
@@ -92,20 +92,21 @@ public:
      */
     static QStringList additionalToolsPath();
 
+    static void clearVersionControlCache();
+
 signals:
     void repositoryChanged(const QString &repository);
     void configurationChanged(const IVersionControl *vcs);
 
-public slots:
-    static void clearVersionControlCache();
-
 private:
-    explicit VcsManager(QObject *parent = 0);
-    ~VcsManager();
+    explicit VcsManager(QObject *parent = nullptr);
+    ~VcsManager() override;
 
     void handleConfigurationChanges();
+    static void addVersionControl(IVersionControl *vc);
 
     friend class Core::Internal::MainWindow;
+    friend class Core::IVersionControl;
 };
 
 } // namespace Core

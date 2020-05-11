@@ -48,8 +48,8 @@ class QTCREATOR_UTILS_EXPORT Theme : public QObject
     Q_ENUMS(WidgetStyle)
 
 public:
-    Theme(const QString &id, QObject *parent = 0);
-    ~Theme();
+    Theme(const QString &id, QObject *parent = nullptr);
+    ~Theme() override;
 
     enum Color {
         BackgroundColorAlternate,
@@ -80,6 +80,7 @@ public:
         EditorPlaceholderColor,
         FancyToolBarSeparatorColor,
         FancyTabBarBackgroundColor,
+        FancyTabBarSelectedBackgroundColor,
         FancyTabWidgetDisabledSelectedTextColor,
         FancyTabWidgetDisabledUnselectedTextColor,
         FancyTabWidgetEnabledSelectedTextColor,
@@ -95,15 +96,15 @@ public:
         MenuBarItemTextColorNormal,
         MenuItemTextColorDisabled,
         MenuItemTextColorNormal,
-        MiniProjectTargetSelectorBackgroundColor,
+        MiniProjectTargetSelectorBackgroundColor, // TODO: Deprecate. -> Utils::StyleHelper().baseColor()
         MiniProjectTargetSelectorBorderColor,
-        MiniProjectTargetSelectorSummaryBackgroundColor,
+        MiniProjectTargetSelectorSummaryBackgroundColor, // TODO: Deprecate. -> Utils::StyleHelper().baseColor()
         MiniProjectTargetSelectorTextColor,
         OutputPaneButtonFlashColor,
         OutputPaneToggleButtonTextColorChecked,
         OutputPaneToggleButtonTextColorUnchecked,
         PanelStatusBarBackgroundColor,
-        PanelsWidgetSeparatorLineColor,
+        PanelsWidgetSeparatorLineColor, // TODO: Deprecate. Unused.
         PanelTextColorDark,
         PanelTextColorMid,
         PanelTextColorLight,
@@ -212,6 +213,11 @@ public:
         IconsCodeModelOverlayBackgroundColor,
         IconsCodeModelOverlayForegroundColor,
 
+        /* Code model text marks */
+
+        CodeModel_Error_TextMarkColor,
+        CodeModel_Warning_TextMarkColor,
+
         /* Output panes */
 
         OutputPanes_DebugTextColor,
@@ -252,6 +258,7 @@ public:
         Welcome_DividerColor,
         Welcome_LinkColor,
         Welcome_HoverColor,
+        Welcome_DisabledLinkColor,
 
         /* Timeline Library */
         Timeline_TextColor,
@@ -286,15 +293,56 @@ public:
         ProjectExplorer_TaskError_TextMarkColor,
         ProjectExplorer_TaskWarn_TextMarkColor,
 
-        /* ClangCodeModel Plugin */
-        ClangCodeModel_Error_TextMarkColor,
-        ClangCodeModel_Warning_TextMarkColor,
-
-        /* QmlDesigner */
+        /* QmlDesigner Plugin */
         QmlDesigner_BackgroundColor,
         QmlDesigner_HighlightColor,
         QmlDesigner_FormEditorSelectionColor,
-        QmlDesigner_FormEditorForegroundColor
+        QmlDesigner_FormEditorForegroundColor,
+        QmlDesigner_BackgroundColorDarker,
+        QmlDesigner_BackgroundColorDarkAlternate,
+        QmlDesigner_TabLight,
+        QmlDesigner_TabDark,
+        QmlDesigner_ButtonColor,
+        QmlDesigner_BorderColor,
+        QmlDesigner_FormeditorBackgroundColor,
+        QmlDesigner_AlternateBackgroundColor,
+        QmlDesigner_ScrollBarHandleColor,
+
+        /* Palette for DS Controls */
+
+        DScontrolBackground,
+        DScontrolOutline,
+        DStextColor,
+        DSdisabledTextColor,
+        DSpanelBackground,
+        DShoverHighlight,
+        DScolumnBackground,
+        DSfocusEdit,
+        DSfocusDrag,
+        DScontrolBackgroundPressed,
+        DScontrolBackgroundChecked,
+        DSinteraction,
+        DSsliderActiveTrack,
+        DSsliderInactiveTrack,
+        DSsliderHandle,
+        DSsliderActiveTrackHover,
+        DSsliderInactiveTrackHover,
+        DSsliderHandleHover,
+        DSsliderActiveTrackFocus,
+        DSsliderInactiveTrackFocus,
+        DSsliderHandleFocus,
+        DSerrorColor,
+        DScontrolBackgroundDisabled,
+        DScontrolOutlineDisabled,
+        DStextColorDisabled,
+        DStextSelectionColor,
+        DStextSelectedTextColor,
+        DSscrollBarTrack,
+        DSscrollBarHandle,
+        DScontrolBackgroundInteraction,
+        DStranslationIndicatorBorder,
+        DSsectionHeadBackground,
+        DSchangedStateText
     };
 
     enum Gradient {
@@ -326,7 +374,8 @@ public:
         FlatProjectsMode,
         FlatMenuBar,
         ToolBarIconShadow,
-        WindowColorAsBase
+        WindowColorAsBase,
+        DarkUserInterface
     };
 
     Q_INVOKABLE bool flag(Flag f) const;

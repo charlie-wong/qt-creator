@@ -25,82 +25,188 @@
 
 #include "androidplugin.h"
 
-#include "androidconstants.h"
 #include "androidconfigurations.h"
+#include "androidconstants.h"
+#include "androiddebugsupport.h"
 #include "androiddeployqtstep.h"
 #include "androiddevice.h"
-#include "androiddevicefactory.h"
 #include "androidmanager.h"
-#include "androidrunfactories.h"
-#include "androidsettingspage.h"
-#include "androidtoolchain.h"
-#include "androidqtversionfactory.h"
-#include "androiddeployconfiguration.h"
-#include "androidgdbserverkitinformation.h"
 #include "androidmanifesteditorfactory.h"
+#include "androidpackageinstallationstep.h"
 #include "androidpotentialkit.h"
-#include "javacompletionassistprovider.h"
+#include "androidqmltoolingsupport.h"
+#include "androidqtversion.h"
+#include "androidrunconfiguration.h"
+#include "androidruncontrol.h"
+#include "androidsettingswidget.h"
+#include "androidtoolchain.h"
 #include "javaeditor.h"
+
 #ifdef HAVE_QBS
 #  include "androidqbspropertyprovider.h"
 #endif
 
 #include <coreplugin/icore.h>
+#include <coreplugin/infobar.h>
+#include <utils/checkablemessagebox.h>
 
 #include <projectexplorer/devicesupport/devicemanager.h>
+#include <projectexplorer/buildconfiguration.h>
+#include <projectexplorer/deployconfiguration.h>
+#include <projectexplorer/kitinformation.h>
 #include <projectexplorer/kitmanager.h>
+#include <projectexplorer/project.h>
+#include <projectexplorer/session.h>
+#include <projectexplorer/target.h>
 
 #include <qtsupport/qtversionmanager.h>
 
-#include <QtPlugin>
-
 using namespace ProjectExplorer;
+using namespace ProjectExplorer::Constants;
+
+const char kSetupAndroidSetting[] = "ConfigureAndroid";
 
 namespace Android {
+namespace Internal {
 
-AndroidPlugin::AndroidPlugin()
-{ }
+class AndroidDeployConfigurationFactory : public DeployConfigurationFactory
+{
+public:
+    AndroidDeployConfigurationFactory()
+    {
+        setConfigBaseId("Qt4ProjectManager.AndroidDeployConfiguration2");
+        addSupportedTargetDeviceType(Constants::ANDROID_DEVICE_TYPE);
+        setDefaultDisplayName(QCoreApplication::translate("Android::Internal",
+                                                          "Deploy to Android device"));
+        addInitialStep(AndroidDeployQtStep::stepId());
+    }
+};
+
+class AndroidRunConfigurationFactory : public RunConfigurationFactory
+{
+public:
+    AndroidRunConfigurationFactory()
+    {
+        registerRunConfiguration<Android::AndroidRunConfiguration>
+                ("Qt4ProjectManager.AndroidRunConfiguration:");
+        addSupportedTargetDeviceType(Android::Constants::ANDROID_DEVICE_TYPE);
+    }
+};
+
+class AndroidQmlPreviewWorker : public AndroidQmlToolingSupport
+{
+public:
+    AndroidQmlPreviewWorker(RunControl *runControl)
+        : AndroidQmlToolingSupport(runControl, runControl->runnable().executable.toString())
+    {}
+};
+
+class AndroidPluginPrivate : public QObject
+{
+public:
+    AndroidConfigurations androidConfiguration;
+    AndroidSettingsPage settingsPage;
+    AndroidDeployQtStepFactory deployQtStepFactory;
+    AndroidQtVersionFactory qtVersionFactory;
+    AndroidToolChainFactory toolChainFactory;
+    AndroidDeployConfigurationFactory deployConfigurationFactory;
+    AndroidDeviceFactory deviceFactory;
+    AndroidPotentialKit potentialKit;
+    JavaEditorFactory javaEditorFactory;
+    AndroidPackageInstallationFactory packackeInstallationFactory;
+    AndroidManifestEditorFactory manifestEditorFactory;
+    AndroidRunConfigurationFactory runConfigFactory;
+
+    RunWorkerFactory runWorkerFactory{
+        RunWorkerFactory::make<AndroidRunSupport>(),
+        {NORMAL_RUN_MODE},
+        {runConfigFactory.id()}
+    };
+    RunWorkerFactory debugWorkerFactory{
+        RunWorkerFactory::make<AndroidDebugSupport>(),
+        {DEBUG_RUN_MODE},
+        {runConfigFactory.id()}
+    };
+    RunWorkerFactory profilerWorkerFactory{
+        RunWorkerFactory::make<AndroidQmlToolingSupport>(),
+        {QML_PROFILER_RUN_MODE},
+        {runConfigFactory.id()}
+    };
+    RunWorkerFactory qmlPreviewWorkerFactory{
+        RunWorkerFactory::make<AndroidQmlToolingSupport>(),
+        {QML_PREVIEW_RUN_MODE},
+        {runConfigFactory.id()}
+    };
+    RunWorkerFactory qmlPreviewWorkerFactory2{
+        RunWorkerFactory::make<AndroidQmlPreviewWorker>(),
+        {QML_PREVIEW_RUN_MODE},
+        {"QmlProjectManager.QmlRunConfiguration"},
+        {Android::Constants::ANDROID_DEVICE_TYPE}
+    };
+
+    AndroidBuildApkStepFactory buildApkStepFactory;
+};
+
+AndroidPlugin::~AndroidPlugin()
+{
+    delete d;
+}
 
 bool AndroidPlugin::initialize(const QStringList &arguments, QString *errorMessage)
 {
-    Q_UNUSED(arguments);
-    Q_UNUSED(errorMessage);
+    Q_UNUSED(arguments)
+    Q_UNUSED(errorMessage)
 
-    new AndroidConfigurations(this);
-
-    addAutoReleasedObject(new Internal::AndroidRunControlFactory);
-    addAutoReleasedObject(new Internal::AndroidDeployQtStepFactory);
-    addAutoReleasedObject(new Internal::AndroidSettingsPage);
-    addAutoReleasedObject(new Internal::AndroidQtVersionFactory);
-    addAutoReleasedObject(new Internal::AndroidToolChainFactory);
-    addAutoReleasedObject(new Internal::AndroidDeployConfigurationFactory);
-    addAutoReleasedObject(new Internal::AndroidDeviceFactory);
-    addAutoReleasedObject(new Internal::AndroidPotentialKit);
-    addAutoReleasedObject(new Internal::JavaEditorFactory);
-    KitManager::registerKitInformation(new Internal::AndroidGdbServerKitInformation);
-
-    addAutoReleasedObject(new Internal::AndroidManifestEditorFactory);
+    d = new AndroidPluginPrivate;
 
     connect(KitManager::instance(), &KitManager::kitsLoaded,
             this, &AndroidPlugin::kitsRestored);
 
-    connect(DeviceManager::instance(), &DeviceManager::devicesLoaded,
-            this, &AndroidPlugin::updateDevice);
     return true;
 }
 
 void AndroidPlugin::kitsRestored()
 {
+    const bool qtForAndroidInstalled
+        = !QtSupport::QtVersionManager::versions([](const QtSupport::BaseQtVersion *v) {
+               return v->targetDeviceTypes().contains(Android::Constants::ANDROID_DEVICE_TYPE);
+           }).isEmpty();
+
+    if (!AndroidConfigurations::currentConfig().sdkFullyConfigured() && qtForAndroidInstalled) {
+        connect(Core::ICore::instance(), &Core::ICore::coreOpened, this,
+                &AndroidPlugin::askUserAboutAndroidSetup, Qt::QueuedConnection);
+    }
+
+    AndroidConfigurations::registerNewToolChains();
     AndroidConfigurations::updateAutomaticKitList();
     connect(QtSupport::QtVersionManager::instance(), &QtSupport::QtVersionManager::qtVersionsChanged,
-            AndroidConfigurations::instance(), &AndroidConfigurations::updateAutomaticKitList);
-    disconnect(KitManager::instance(), &KitManager::kitsChanged,
+            AndroidConfigurations::instance(), []() {
+        AndroidConfigurations::registerNewToolChains();
+        AndroidConfigurations::updateAutomaticKitList();
+    });
+    disconnect(KitManager::instance(), &KitManager::kitsLoaded,
                this, &AndroidPlugin::kitsRestored);
 }
 
-void AndroidPlugin::updateDevice()
+void AndroidPlugin::askUserAboutAndroidSetup()
 {
-    AndroidConfigurations::updateAndroidDevice();
+    if (!Utils::CheckableMessageBox::shouldAskAgain(Core::ICore::settings(), kSetupAndroidSetting)
+        || !Core::ICore::infoBar()->canInfoBeAdded(kSetupAndroidSetting))
+        return;
+
+    Core::InfoBarEntry info(
+        kSetupAndroidSetting,
+        tr("Would you like to configure Android options? This will ensure "
+           "Android kits can be usable and all essential packages are installed. "
+           "To do it later, select Options > Devices > Android."),
+        Core::InfoBarEntry::GlobalSuppression::Enabled);
+    info.setCustomButtonInfo(tr("Configure Android"), [this] {
+        Core::ICore::infoBar()->removeInfo(kSetupAndroidSetting);
+        Core::ICore::infoBar()->globallySuppressInfo(kSetupAndroidSetting);
+        QTimer::singleShot(0, this, [this]() { d->potentialKit.executeFromMenu(); });
+    });
+    Core::ICore::infoBar()->addInfo(info);
 }
 
+} // namespace Internal
 } // namespace Android

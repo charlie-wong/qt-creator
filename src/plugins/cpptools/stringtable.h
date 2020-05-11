@@ -25,45 +25,22 @@
 
 #pragma once
 
-#include <QAtomicInt>
-#include <QMutex>
-#include <QObject>
-#include <QRunnable>
-#include <QSet>
-#include <QTimer>
+#include <QString>
 
 namespace CppTools {
 namespace Internal {
 
-class StringTable: public QObject
+class StringTable
 {
-    Q_OBJECT
-
 public:
+    static QString insert(const QString &string);
+    static void scheduleGC();
+
+private:
+    friend class CppToolsPluginPrivate;
     StringTable();
-
-    QString insert(const QString &string);
-    void scheduleGC();
-
-private:
-    void startGC();
-    void GC();
-
-    class GCRunner: public QRunnable {
-        StringTable &m_stringTable;
-
-    public:
-        GCRunner(StringTable &stringTable): m_stringTable(stringTable) {}
-        virtual void run() { m_stringTable.GC(); }
-    } m_gcRunner;
-    friend class GCRunner;
-
-private:
-    mutable QMutex m_lock;
-    QAtomicInt m_stopGCRequested;
-    QSet<QString> m_strings;
-    QTimer m_gcCountDown;
+    ~StringTable();
 };
 
-} // Internal namespace
-} // CppTools namespace
+} // Internal
+} // CppTools

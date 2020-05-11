@@ -57,7 +57,7 @@ static int findFirstBigger(const QVector<int> &v, int tolerance)
     if (v.isEmpty())
         return 0;
 
-    int last = v.first();
+    int last = v.constFirst();
     for (int i = 0; i < v.length(); ++i) {
         if (v.value(i) > last + tolerance)
             return i;
@@ -119,7 +119,7 @@ static void setUpperLeftPostionToNode(const ModelNode &layoutNode, const QList<M
 {
     QPointF upperLeftPosition = getUpperLeftPosition(modelNodeList);
     layoutNode.variantProperty("x").setValue(qRound(upperLeftPosition.x()));
-    layoutNode.variantProperty("y") .setValue(qRound(upperLeftPosition.y()));
+    layoutNode.variantProperty("y").setValue(qRound(upperLeftPosition.y()));
 }
 
 void LayoutInGridLayout::reparentToNodeAndRemovePositionForModelNodes(const ModelNode &parentModelNode,
@@ -179,23 +179,24 @@ void LayoutInGridLayout::doIt()
     initializeCells();
     markUsedCells();
 
+    QTC_ASSERT(m_parentNode.isValid(), return);
+
     if (QmlItemNode::isValidQmlItemNode(m_selectionContext.firstSelectedModelNode())) {
         const QmlItemNode qmlItemNode = QmlItemNode(m_selectionContext.firstSelectedModelNode());
 
         if (qmlItemNode.hasInstanceParentItem()) {
 
             ModelNode layoutNode;
-            {
-                RewriterTransaction transaction(m_selectionContext.view(), QByteArrayLiteral("LayoutInGridLayout1"));
+
+            m_selectionContext.view()->executeInTransaction("LayoutInGridLayout1",[this, &layoutNode, layoutType](){
                 QTC_ASSERT(m_selectionContext.view()->model()->hasNodeMetaInfo(layoutType), return);
 
                 NodeMetaInfo metaInfo = m_selectionContext.view()->model()->metaInfo(layoutType);
                 layoutNode = m_selectionContext.view()->createModelNode(layoutType, metaInfo.majorVersion(), metaInfo.minorVersion());
                 reparentTo(layoutNode, m_parentNode);
-            }
+            });
 
-            {
-                RewriterTransaction transaction(m_selectionContext.view(), QByteArrayLiteral("LayoutInGridLayout2"));
+            m_selectionContext.view()->executeInTransaction("LayoutInGridLayout2", [this, layoutNode](){
 
                 fillEmptyCells();
 
@@ -208,7 +209,7 @@ void LayoutInGridLayout::doIt()
                 reparentToNodeAndRemovePositionForModelNodes(layoutNode, sortedSelectedNodes);
                 setSizeAsPreferredSize(sortedSelectedNodes);
                 setSpanning(layoutNode);
-            }
+            });
         }
     }
 }
@@ -257,7 +258,11 @@ void LayoutInGridLayout::collectItemNodes()
                 m_qmlItemNodes.append(itemNode);
         }
     }
-    m_parentNode = m_qmlItemNodes.first().instanceParentItem();
+
+    if (m_qmlItemNodes.isEmpty())
+        return;
+
+    m_parentNode = m_qmlItemNodes.constFirst().instanceParentItem();
 }
 
 void LayoutInGridLayout::collectOffsets()
@@ -287,10 +292,10 @@ void LayoutInGridLayout::sortOffsets()
 void LayoutInGridLayout::calculateGridOffsets()
 {
     if (!m_xTopOffsets.isEmpty())
-        m_startX = m_xTopOffsets.first();
+        m_startX = m_xTopOffsets.constFirst();
 
     if (!m_yTopOffsets.isEmpty())
-        m_startY = m_yTopOffsets.first();
+        m_startY = m_yTopOffsets.constFirst();
 
     const int defaultWidthTolerance = 64;
     const int defaultHeightTolerance = 64;

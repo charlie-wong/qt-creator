@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <qglobal.h>
 #include "reaper_p.h"
 
 #include <extensionsystem/iplugin.h>
@@ -35,13 +36,9 @@ QT_END_NAMESPACE
 
 namespace Utils {
 class PathChooser;
-class Theme;
 }
 
 namespace Core {
-
-class DesignMode;
-
 namespace Internal {
 
 class EditMode;
@@ -55,15 +52,17 @@ class CorePlugin : public ExtensionSystem::IPlugin
 
 public:
     CorePlugin();
-    ~CorePlugin();
+    ~CorePlugin() override;
 
-    bool initialize(const QStringList &arguments, QString *errorMessage = 0);
-    void extensionsInitialized();
-    bool delayedInitialize();
-    ShutdownFlag aboutToShutdown();
+    static CorePlugin *instance();
+
+    bool initialize(const QStringList &arguments, QString *errorMessage = nullptr) override;
+    void extensionsInitialized() override;
+    bool delayedInitialize() override;
+    ShutdownFlag aboutToShutdown() override;
     QObject *remoteCommand(const QStringList & /* options */,
                            const QString &workingDirectory,
-                           const QStringList &args);
+                           const QStringList &args) override;
 
 public slots:
     void fileOpenRequest(const QString&);
@@ -77,15 +76,17 @@ private slots:
     // Locator:
     void test_basefilefilter();
     void test_basefilefilter_data();
+
+    void testOutputFormatter();
 #endif
 
 private:
     static void addToPathChooserContextMenu(Utils::PathChooser *pathChooser, QMenu *menu);
+    void checkSettings();
 
-    MainWindow *m_mainWindow;
-    EditMode *m_editMode;
-    DesignMode *m_designMode;
-    Locator *m_locator;
+    MainWindow *m_mainWindow = nullptr;
+    EditMode *m_editMode = nullptr;
+    Locator *m_locator = nullptr;
     ReaperPrivate m_reaper;
 };
 

@@ -50,14 +50,12 @@ namespace Internal {
 class CodeStylePoolPrivate
 {
 public:
-    CodeStylePoolPrivate()
-        : m_factory(0)
-    {}
+    CodeStylePoolPrivate() = default;
     ~CodeStylePoolPrivate();
 
     QByteArray generateUniqueId(const QByteArray &id) const;
 
-    ICodeStylePreferencesFactory *m_factory;
+    ICodeStylePreferencesFactory *m_factory = nullptr;
     QList<ICodeStylePreferences *> m_pool;
     QList<ICodeStylePreferences *> m_builtInPool;
     QList<ICodeStylePreferences *> m_customPool;
@@ -119,11 +117,9 @@ QString CodeStylePool::settingsDir() const
     return customCodeStylesPath().append(suffix);
 }
 
-Utils::FileName CodeStylePool::settingsPath(const QByteArray &id) const
+Utils::FilePath CodeStylePool::settingsPath(const QByteArray &id) const
 {
-    Utils::FileName path = Utils::FileName::fromString(settingsDir());
-    path.appendPath(QString::fromUtf8(id + ".xml"));
-    return path;
+    return Utils::FilePath::fromString(settingsDir()).pathAppended(QString::fromUtf8(id + ".xml"));
 }
 
 QList<ICodeStylePreferences *> CodeStylePool::codeStyles() const
@@ -151,7 +147,7 @@ ICodeStylePreferences *CodeStylePool::createCodeStyle(const QByteArray &id, cons
                   const QVariant &codeStyleData, const QString &displayName)
 {
     if (!d->m_factory)
-        return 0;
+        return nullptr;
 
     ICodeStylePreferences *codeStyle = d->m_factory->createCodeStyle();
     codeStyle->setId(id);
@@ -222,11 +218,11 @@ void CodeStylePool::loadCustomCodeStyles()
         const QString codeStyleFile = codeStyleFiles.at(i);
         // filter out styles which id is the same as one of built-in styles
         if (!d->m_idToCodeStyle.contains(QFileInfo(codeStyleFile).completeBaseName().toUtf8()))
-            loadCodeStyle(Utils::FileName::fromString(dir.absoluteFilePath(codeStyleFile)));
+            loadCodeStyle(Utils::FilePath::fromString(dir.absoluteFilePath(codeStyleFile)));
     }
 }
 
-ICodeStylePreferences *CodeStylePool::importCodeStyle(const Utils::FileName &fileName)
+ICodeStylePreferences *CodeStylePool::importCodeStyle(const Utils::FilePath &fileName)
 {
     ICodeStylePreferences *codeStyle = loadCodeStyle(fileName);
     if (codeStyle)
@@ -234,9 +230,9 @@ ICodeStylePreferences *CodeStylePool::importCodeStyle(const Utils::FileName &fil
     return codeStyle;
 }
 
-ICodeStylePreferences *CodeStylePool::loadCodeStyle(const Utils::FileName &fileName)
+ICodeStylePreferences *CodeStylePool::loadCodeStyle(const Utils::FilePath &fileName)
 {
-    ICodeStylePreferences *codeStyle = 0;
+    ICodeStylePreferences *codeStyle = nullptr;
     Utils::PersistentSettingsReader reader;
     reader.load(fileName);
     QVariantMap m = reader.restoreValues();
@@ -258,7 +254,7 @@ ICodeStylePreferences *CodeStylePool::loadCodeStyle(const Utils::FileName &fileN
 
 void CodeStylePool::slotSaveCodeStyle()
 {
-    ICodeStylePreferences *codeStyle = qobject_cast<ICodeStylePreferences *>(sender());
+    auto codeStyle = qobject_cast<ICodeStylePreferences *>(sender());
     if (!codeStyle)
         return;
 
@@ -284,7 +280,7 @@ void CodeStylePool::saveCodeStyle(ICodeStylePreferences *codeStyle) const
     exportCodeStyle(settingsPath(codeStyle->id()), codeStyle);
 }
 
-void CodeStylePool::exportCodeStyle(const Utils::FileName &fileName, ICodeStylePreferences *codeStyle) const
+void CodeStylePool::exportCodeStyle(const Utils::FilePath &fileName, ICodeStylePreferences *codeStyle) const
 {
     QVariantMap map;
     codeStyle->toMap(QString(), &map);

@@ -34,6 +34,7 @@
 
 QT_BEGIN_NAMESPACE
 class QEvent;
+class QKeySequence;
 QT_END_NAMESPACE
 
 namespace Utils {
@@ -45,12 +46,9 @@ class QTCREATOR_UTILS_EXPORT IconButton: public QAbstractButton
     Q_OBJECT
     Q_PROPERTY(float iconOpacity READ iconOpacity WRITE setIconOpacity)
     Q_PROPERTY(bool autoHide READ hasAutoHide WRITE setAutoHide)
-    Q_PROPERTY(QPixmap pixmap READ pixmap WRITE setPixmap)
 public:
-    explicit IconButton(QWidget *parent = 0);
-    void paintEvent(QPaintEvent *event);
-    void setPixmap(const QPixmap &pixmap) { m_pixmap = pixmap; update(); }
-    QPixmap pixmap() const { return m_pixmap; }
+    explicit IconButton(QWidget *parent = nullptr);
+    void paintEvent(QPaintEvent *event) override;
     float iconOpacity() { return m_iconOpacity; }
     void setIconOpacity(float value) { m_iconOpacity = value; update(); }
     void animateShow(bool visible);
@@ -58,16 +56,16 @@ public:
     void setAutoHide(bool hide) { m_autoHide = hide; }
     bool hasAutoHide() const { return m_autoHide; }
 
-    QSize sizeHint() const;
+    QSize sizeHint() const override;
 
 protected:
-    void keyPressEvent(QKeyEvent *ke);
-    void keyReleaseEvent(QKeyEvent *ke);
+    void keyPressEvent(QKeyEvent *ke) override;
+    void keyReleaseEvent(QKeyEvent *ke) override;
 
 private:
     float m_iconOpacity;
     bool m_autoHide;
-    QPixmap m_pixmap;
+    QIcon m_icon;
 };
 
 class QTCREATOR_UTILS_EXPORT FancyLineEdit : public CompletingLineEdit
@@ -75,19 +73,16 @@ class QTCREATOR_UTILS_EXPORT FancyLineEdit : public CompletingLineEdit
     Q_OBJECT
     Q_ENUMS(Side)
 
-    // Validation.
-    Q_PROPERTY(QString initialText READ initialText WRITE setInitialText DESIGNABLE true)
-    Q_PROPERTY(QColor errorColor READ errorColor WRITE setErrorColor DESIGNABLE true)
-    Q_PROPERTY(QColor okColor READ okColor WRITE setOkColor DESIGNABLE true)
-
 public:
     enum Side {Left = 0, Right = 1};
 
-    explicit FancyLineEdit(QWidget *parent = 0);
-    ~FancyLineEdit();
+    explicit FancyLineEdit(QWidget *parent = nullptr);
+    ~FancyLineEdit() override;
 
-    QPixmap buttonPixmap(Side side) const;
-    void setButtonPixmap(Side side, const QPixmap &pixmap);
+    void setTextKeepingActiveCursor(const QString &text);
+
+    QIcon buttonIcon(Side side) const;
+    void setButtonIcon(Side side, const QIcon &icon);
 
     QMenu *buttonMenu(Side side) const;
     void setButtonMenu(Side side, QMenu *menu);
@@ -125,30 +120,25 @@ public:
     //  Validation
 
     // line edit, (out)errorMessage -> valid?
-    typedef std::function<bool(FancyLineEdit *, QString *)> ValidationFunction;
-    enum State { Invalid, DisplayingInitialText, Valid };
+    using ValidationFunction = std::function<bool(FancyLineEdit *, QString *)>;
+    enum State { Invalid, DisplayingPlaceholderText, Valid };
 
     State state() const;
     bool isValid() const;
     QString errorMessage() const;
-
-    QString initialText() const;
-    void setInitialText(const QString &);
-
-    QColor errorColor() const;
-    void setErrorColor(const  QColor &c);
-
-    QColor okColor() const;
-    void setOkColor(const  QColor &c);
 
     void setValidationFunction(const ValidationFunction &fn);
     static ValidationFunction defaultValidationFunction();
     void validate();
     void onEditingFinished();
 
+    static void setCamelCaseNavigationEnabled(bool enabled);
+    static void setCompletionShortcut(const QKeySequence &shortcut);
+
 protected:
     // Custom behaviour can be added here.
     virtual void handleChanged(const QString &) {}
+    void keyPressEvent(QKeyEvent *event) override;
 
 signals:
     void buttonClicked(Utils::FancyLineEdit::Side side);
@@ -161,7 +151,7 @@ signals:
     void validReturnPressed();
 
 protected:
-    void resizeEvent(QResizeEvent *e);
+    void resizeEvent(QResizeEvent *e) override;
 
     virtual QString fixInputString(const QString &string);
 
@@ -175,6 +165,8 @@ private:
 
     void updateMargins();
     void updateButtonPositions();
+    bool camelCaseBackward(bool mark);
+    bool camelCaseForward(bool mark);
     friend class FancyLineEditPrivate;
 
     FancyLineEditPrivate *d;

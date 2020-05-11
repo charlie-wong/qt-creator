@@ -60,11 +60,9 @@ namespace Internal {
 class ScxmlTextEditorWidget : public TextEditor::TextEditorWidget
 {
 public:
-    ScxmlTextEditorWidget()
-    {
-    }
+    ScxmlTextEditorWidget() = default;
 
-    void finalizeInitialization()
+    void finalizeInitialization() override
     {
         setReadOnly(true);
     }
@@ -89,8 +87,7 @@ public:
     }
 };
 
-ScxmlEditorData::ScxmlEditorData(QObject *parent)
-    : QObject(parent)
+ScxmlEditorData::ScxmlEditorData()
 {
     m_contexts.add(ScxmlEditor::Constants::C_SCXMLEDITOR);
 
@@ -118,7 +115,7 @@ ScxmlEditorData::~ScxmlEditorData()
         ICore::removeContextObject(m_context);
 
     if (m_modeWidget) {
-        m_designMode->unregisterDesignWidget(m_modeWidget);
+        DesignMode::unregisterDesignWidget(m_modeWidget);
         delete m_modeWidget;
         m_modeWidget = nullptr;
     }
@@ -132,7 +129,6 @@ void ScxmlEditorData::fullInit()
     m_widgetStack = new ScxmlEditorStack;
     m_widgetToolBar = new QToolBar;
     m_mainToolBar = createMainToolBar();
-    m_designMode = DesignMode::instance();
     m_modeWidget = createModeWidget();
 
     // Create undo/redo group/actions
@@ -153,7 +149,7 @@ void ScxmlEditorData::fullInit()
     m_context = new ScxmlContext(scxmlContexts, m_modeWidget, this);
     ICore::addContextObject(m_context);
 
-    m_designMode->registerDesignWidget(m_modeWidget, QStringList(QLatin1String(ProjectExplorer::Constants::SCXML_MIMETYPE)), m_contexts);
+    DesignMode::registerDesignWidget(m_modeWidget, QStringList(QLatin1String(ProjectExplorer::Constants::SCXML_MIMETYPE)), m_contexts);
 }
 
 IEditor *ScxmlEditorData::createEditor()
@@ -225,14 +221,14 @@ QWidget *ScxmlEditorData::createModeWidget()
 
     widget->setObjectName("ScxmlEditorDesignModeWidget");
     auto layout = new QVBoxLayout;
-    layout->setMargin(0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(m_mainToolBar);
     // Avoid mode switch to 'Edit' mode when the application started by
     // 'Run' in 'Design' mode emits output.
     auto splitter = new MiniSplitter(Qt::Vertical);
     splitter->addWidget(m_widgetStack);
-    auto outputPane = new OutputPanePlaceHolder(m_designMode->id(), splitter);
+    auto outputPane = new OutputPanePlaceHolder(Core::Constants::MODE_DESIGN, splitter);
     outputPane->setObjectName("DesignerOutputPanePlaceHolder");
     splitter->addWidget(outputPane);
     layout->addWidget(splitter);

@@ -25,19 +25,14 @@
 
 #include "qnxanalyzesupport.h"
 
-#include "qnxdevice.h"
-#include "qnxrunconfiguration.h"
 #include "slog2inforunner.h"
 
 #include <projectexplorer/devicesupport/deviceusedportsgatherer.h>
-#include <projectexplorer/kitinformation.h>
-#include <projectexplorer/runnables.h>
-#include <projectexplorer/target.h>
 
 #include <utils/qtcassert.h>
 #include <utils/qtcprocess.h>
+
 #include <qmldebug/qmldebugcommandlinearguments.h>
-#include <qmldebug/qmloutputparser.h>
 
 using namespace ProjectExplorer;
 using namespace Utils;
@@ -45,64 +40,33 @@ using namespace Utils;
 namespace Qnx {
 namespace Internal {
 
-class QnxAnalyzeeRunner : public ProjectExplorer::SimpleTargetRunner
+QnxQmlProfilerSupport::QnxQmlProfilerSupport(RunControl *runControl)
+    : SimpleTargetRunner(runControl)
 {
-public:
-    QnxAnalyzeeRunner(ProjectExplorer::RunControl *runControl)
-        : SimpleTargetRunner(runControl)
-    {
-        setDisplayName("QnxAnalyzeeRunner");
-    }
-
-private:
-    void start() override
-    {
-        auto portsGatherer = runControl()->worker<PortsGatherer>();
-        Utils::Port port = portsGatherer->findPort();
-
-        auto r = runnable().as<StandardRunnable>();
-        if (!r.commandLineArguments.isEmpty())
-            r.commandLineArguments += ' ';
-        r.commandLineArguments +=
-                QmlDebug::qmlDebugTcpArguments(QmlDebug::QmlProfilerServices, port);
-
-        runControl()->setRunnable(r);
-
-        SimpleTargetRunner::start();
-    }
-};
-
-
-// QnxDebugSupport
-
-QnxAnalyzeSupport::QnxAnalyzeSupport(RunControl *runControl)
-    : RunWorker(runControl)
-{
-    setDisplayName("QnxAnalyzeSupport");
+    setId("QnxQmlProfilerSupport");
     appendMessage(tr("Preparing remote side..."), Utils::LogMessageFormat);
 
     auto portsGatherer = new PortsGatherer(runControl);
-
-    auto debuggeeRunner = new QnxAnalyzeeRunner(runControl);
-    debuggeeRunner->addDependency(portsGatherer);
+    addStartDependency(portsGatherer);
 
     auto slog2InfoRunner = new Slog2InfoRunner(runControl);
-    slog2InfoRunner->addDependency(debuggeeRunner);
+    addStartDependency(slog2InfoRunner);
 
-    addDependency(slog2InfoRunner);
+    auto profiler = runControl->createWorker(ProjectExplorer::Constants::QML_PROFILER_RUNNER);
+    profiler->addStartDependency(this);
+    addStopDependency(profiler);
 
-    // QmlDebug::QmlOutputParser m_outputParser;
-    // FIXME: m_outputParser needs to be fed with application output
-    //    connect(&m_outputParser, &QmlDebug::QmlOutputParser::waitingForConnectionOnPort,
-    //            this, &QnxAnalyzeSupport::remoteIsRunning);
+    setStarter([this, runControl, portsGatherer, profiler] {
+        const QUrl serverUrl = portsGatherer->findEndPoint();
+        profiler->recordData("QmlServerUrl", serverUrl);
 
-    //    m_outputParser.processOutput(msg);
-}
+        Runnable r = runControl->runnable();
+        QtcProcess::addArg(&r.commandLineArguments,
+                           QmlDebug::qmlDebugTcpArguments(QmlDebug::QmlProfilerServices, serverUrl),
+                           Utils::OsTypeOtherUnix);
 
-void QnxAnalyzeSupport::start()
-{
-    // runControl()->notifyRemoteSetupDone(m_qmlPort);
-    reportStarted();
+        doStart(r, runControl->device());
+    });
 }
 
 } // namespace Internal

@@ -24,7 +24,11 @@
 ****************************************************************************/
 
 #include "baseannotationhighlighter.h"
+
 #include <texteditor/fontsettings.h>
+#include <texteditor/texteditorsettings.h>
+
+#include <utils/algorithm.h>
 
 #include <QDebug>
 #include <QColor>
@@ -63,9 +67,11 @@ public:
 
 void BaseAnnotationHighlighterPrivate::updateOtherFormats()
 {
-    m_background = q->formatForCategory(TextEditor::C_TEXT)
-            .brushProperty(QTextFormat::BackgroundBrush).color();
-    q->setChangeNumbers(m_changeNumberMap.keys().toSet());
+    m_background = q->fontSettings()
+                       .toTextCharFormat(TextEditor::C_TEXT)
+                       .brushProperty(QTextFormat::BackgroundBrush)
+                       .color();
+    q->setChangeNumbers(Utils::toSet(m_changeNumberMap.keys()));
 }
 
 BaseAnnotationHighlighter::BaseAnnotationHighlighter(const ChangeNumbers &changeNumbers,

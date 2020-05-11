@@ -29,10 +29,12 @@
 
 #include <QFutureInterface>
 #include <QIcon>
-#include <QObject>
 #include <QStringList>
 
+#include <coreplugin/id.h>
+
 #include <utils/fileutils.h>
+#include <utils/optional.h>
 
 #include <functional>
 
@@ -40,15 +42,8 @@ namespace Utils { class MimeType; }
 
 namespace ProjectExplorer {
 
+class BuildSystem;
 class Project;
-class RunConfiguration;
-
-enum class NodeType : quint16 {
-    File = 1,
-    Folder,
-    VirtualFolder,
-    Project
-};
 
 // File types common for qt projects
 enum class FileType : quint16 {
@@ -63,10 +58,13 @@ enum class FileType : quint16 {
     FileTypeSize
 };
 
+enum class ProductType { App, Lib, Other, None };
+
 enum ProjectAction {
     // Special value to indicate that the actions are handled by the parent
     InheritedFromParent,
     AddSubProject,
+    AddExistingProject,
     RemoveSubProject,
     // Let's the user select to which project file
     // the file is added
@@ -83,13 +81,13 @@ enum ProjectAction {
     // DeleteFile is a define on windows...
     EraseFile,
     Rename,
-    DuplicateFile,
     // hides actions that use the path(): Open containing folder, open terminal here and Find in Directory
     HidePathActions,
     HideFileActions,
     HideFolderActions,
-    HasSubProjectRunConfigurations
 };
+
+enum class RemovedFilesFromProject { Ok, Wildcard, Error };
 
 class FileNode;
 class FolderNode;
@@ -97,9 +95,8 @@ class ProjectNode;
 class ContainerNode;
 
 // Documentation inside.
-class PROJECTEXPLORER_EXPORT Node : public QObject
+class PROJECTEXPLORER_EXPORT Node
 {
-    Q_OBJECT
 public:
     enum PriorityLevel {
         DefaultPriority = 0,
@@ -111,7 +108,11 @@ public:
     };
 
     virtual ~Node();
-    NodeType nodeType() const;
+
+    virtual bool isFolderNodeType() const { return false; }
+    virtual bool isProjectNodeType() const { return false; }
+    virtual bool isVirtualFolderType() const { return false; }
+
     int priority() const;
 
     ProjectNode *parentProjectNode() const; // parent project, will be nullptr for the top-level project
@@ -124,7 +125,9 @@ public:
                                      // or node->parentProjectNode() for all other cases.
     const ProjectNode *managingProject() const; // see above.
 
-    const Utils::FileName &filePath() const;  // file system path
+    Project *getProject() const;
+
+    const Utils::FilePath &filePath() const;  // file system path
     int line() const;
     virtual QString displayName() const;
     virtual QString tooltip() const;
@@ -132,10 +135,10 @@ public:
     bool listInProject() const;
     bool isGenerated() const;
 
-    virtual bool supportsAction(ProjectAction action, Node *node) const;
+    virtual bool supportsAction(ProjectAction action, const Node *node) const;
 
     void setEnabled(bool enabled);
-    void setAbsoluteFilePathAndLine(const Utils::FileName &filePath, int line);
+    void setAbsoluteFilePathAndLine(const Utils::FilePath &filePath, int line);
 
     virtual FileNode *asFileNode() { return nullptr; }
     virtual const FileNode *asFileNode() const { return nullptr; }
@@ -146,40 +149,50 @@ public:
     virtual ContainerNode *asContainerNode() { return nullptr; }
     virtual const ContainerNode *asContainerNode() const { return nullptr; }
 
+    virtual QString buildKey() const { return QString(); }
+
     static bool sortByPath(const Node *a, const Node *b);
     void setParentFolderNode(FolderNode *parentFolder);
 
     void setListInProject(bool l);
+    void setIsGenerated(bool g);
+    void setPriority(int priority);
+    void setLine(int line);
 
     static FileType fileTypeForMimeType(const Utils::MimeType &mt);
-    static FileType fileTypeForFileName(const Utils::FileName &file);
+    static FileType fileTypeForFileName(const Utils::FilePath &file);
+
+    QString path() const { return pathOrDirectory(false); }
+    QString directory() const { return pathOrDirectory(true); }
 
 protected:
-    Node(NodeType nodeType, const Utils::FileName &filePath, int line = -1);
+    Node();
+    Node(const Node &other) = delete;
+    bool operator=(const Node &other) = delete;
 
-    void setPriority(int priority);
-    void setIsGenerated(bool g);
+    void setFilePath(const Utils::FilePath &filePath);
 
 private:
+    QString pathOrDirectory(bool dir) const;
+
     FolderNode *m_parentFolderNode = nullptr;
-    Utils::FileName m_filePath;
+    Utils::FilePath m_filePath;
     int m_line = -1;
     int m_priority = DefaultPriority;
-    const NodeType m_nodeType;
+
     enum NodeFlag : quint16 {
         FlagNone = 0,
         FlagIsEnabled = 1 << 0,
         FlagIsGenerated = 1 << 1,
         FlagListInProject = 1 << 2,
     };
-    using NodeFlags = QFlags<NodeFlag>;
-    NodeFlags m_flags = FlagIsEnabled;
+    NodeFlag m_flags = FlagIsEnabled;
 };
 
 class PROJECTEXPLORER_EXPORT FileNode : public Node
 {
 public:
-    FileNode(const Utils::FileName &filePath, const FileType fileType, bool generated, int line = -1);
+    FileNode(const Utils::FilePath &filePath, const FileType fileType);
 
     FileNode *clone() const;
 
@@ -188,10 +201,12 @@ public:
     FileNode *asFileNode() final { return this; }
     const FileNode *asFileNode() const final { return this; }
 
-    static QList<FileNode *> scanForFiles(const Utils::FileName &directory,
-                                          const std::function<FileNode *(const Utils::FileName &fileName)> factory,
-                                          QFutureInterface<QList<FileNode *>> *future = nullptr);
-    bool supportsAction(ProjectAction action, Node *node) const override;
+    static QList<FileNode *>
+    scanForFiles(const Utils::FilePath &directory,
+                 const std::function<FileNode *(const Utils::FilePath &fileName)> factory,
+                 QFutureInterface<QList<FileNode *>> *future = nullptr);
+    bool supportsAction(ProjectAction action, const Node *node) const override;
+    QString displayName() const override;
 
 private:
     FileType m_fileType;
@@ -201,12 +216,12 @@ private:
 class PROJECTEXPLORER_EXPORT FolderNode : public Node
 {
 public:
-    explicit FolderNode(const Utils::FileName &folderPath, NodeType nodeType = NodeType::Folder,
-                        const QString &displayName = QString());
-    ~FolderNode() override;
+    explicit FolderNode(const Utils::FilePath &folderPath);
 
     QString displayName() const override;
     QIcon icon() const;
+
+    bool isFolderNodeType() const override { return true; }
 
     Node *findNode(const std::function<bool(Node *)> &filter);
     QList<Node *> findNodes(const std::function<bool(Node *)> &filter);
@@ -215,35 +230,66 @@ public:
                      const std::function<void(FolderNode *)> &folderTask = {},
                      const std::function<bool(const FolderNode *)> &folderFilterTask = {}) const;
     void forEachGenericNode(const std::function<void(Node *)> &genericTask) const;
-    const QList<Node *> nodes() const { return m_nodes; }
+    void forEachProjectNode(const std::function<void(const ProjectNode *)> &genericTask) const;
+    ProjectNode *findProjectNode(const std::function<bool(const ProjectNode *)> &predicate);
+    const QList<Node *> nodes() const;
     QList<FileNode *> fileNodes() const;
-    FileNode *fileNode(const Utils::FileName &file) const;
+    FileNode *fileNode(const Utils::FilePath &file) const;
     QList<FolderNode *> folderNodes() const;
-    using FolderNodeFactory = std::function<FolderNode *(const Utils::FileName &)>;
-    void addNestedNodes(const QList<FileNode *> &files, const Utils::FileName &overrideBaseDir = Utils::FileName(),
-                        const FolderNodeFactory &factory = [](const Utils::FileName &fn) { return new FolderNode(fn); });
-    void addNestedNode(FileNode *fileNode, const Utils::FileName &overrideBaseDir = Utils::FileName(),
-                       const FolderNodeFactory &factory = [](const Utils::FileName &fn) { return new FolderNode(fn); });
-    void compress();
+    FolderNode *folderNode(const Utils::FilePath &directory) const;
 
-    bool isAncesterOf(Node *n);
+    using FolderNodeFactory = std::function<std::unique_ptr<FolderNode>(const Utils::FilePath &)>;
+    void addNestedNodes(std::vector<std::unique_ptr<FileNode>> &&files,
+                        const Utils::FilePath &overrideBaseDir = Utils::FilePath(),
+                        const FolderNodeFactory &factory
+                        = [](const Utils::FilePath &fn) { return std::make_unique<FolderNode>(fn); });
+    void addNestedNode(std::unique_ptr<FileNode> &&fileNode,
+                       const Utils::FilePath &overrideBaseDir = Utils::FilePath(),
+                       const FolderNodeFactory &factory
+                       = [](const Utils::FilePath &fn) { return std::make_unique<FolderNode>(fn); });
+    void compress();
 
     // takes ownership of newNode.
     // Will delete newNode if oldNode is not a child of this node.
-    bool replaceSubtree(Node *oldNode, Node *newNode);
+    bool replaceSubtree(Node *oldNode, std::unique_ptr<Node> &&newNode);
 
     void setDisplayName(const QString &name);
     void setIcon(const QIcon &icon);
 
-    virtual QString addFileFilter() const;
+    class LocationInfo
+    {
+    public:
+        LocationInfo() = default;
+        LocationInfo(const QString &dn,
+                     const Utils::FilePath &p,
+                     const int l = 0,
+                     const unsigned int prio = 0)
+            : path(p)
+            , line(l)
+            , priority(prio)
+            , displayName(dn)
+        {}
 
-    bool supportsAction(ProjectAction action, Node *node) const override;
+        Utils::FilePath path;
+        int line = -1;
+        unsigned int priority = 0;
+        QString displayName;
+    };
+    void setLocationInfo(const QVector<LocationInfo> &info);
+    const QVector<LocationInfo> locationInfo() const;
 
-    virtual bool addFiles(const QStringList &filePaths, QStringList *notAdded = 0);
-    virtual bool removeFiles(const QStringList &filePaths, QStringList *notRemoved = 0);
+    QString addFileFilter() const;
+    void setAddFileFilter(const QString &filter) { m_addFileFilter = filter; }
+
+    bool supportsAction(ProjectAction action, const Node *node) const override;
+
+    virtual bool addFiles(const QStringList &filePaths, QStringList *notAdded = nullptr);
+    virtual RemovedFilesFromProject removeFiles(const QStringList &filePaths,
+                                                QStringList *notRemoved = nullptr);
     virtual bool deleteFiles(const QStringList &filePaths);
     virtual bool canRenameFile(const QString &filePath, const QString &newFilePath);
     virtual bool renameFile(const QString &filePath, const QString &newFilePath);
+    virtual bool addDependencies(const QStringList &dependencies);
 
     class AddNewInformation
     {
@@ -261,8 +307,11 @@ public:
     // determines if node will be shown in the flat view, by default folder and projects aren't shown
     virtual bool showInSimpleTree() const;
 
-    void addNode(Node *node);
-    void removeNode(Node *node);
+    // determines if node will always be shown when hiding empty directories
+    bool showWhenEmpty() const;
+    void setShowWhenEmpty(bool showWhenEmpty);
+
+    void addNode(std::unique_ptr<Node> &&node);
 
     bool isEmpty() const;
 
@@ -270,52 +319,93 @@ public:
     const FolderNode *asFolderNode() const override { return this; }
 
 protected:
-    QList<Node *> m_nodes;
+    virtual void handleSubTreeChanged(FolderNode *node);
+
+    std::vector<std::unique_ptr<Node>> m_nodes;
+    QVector<LocationInfo> m_locations;
 
 private:
+    std::unique_ptr<Node> takeNode(Node *node);
+
     QString m_displayName;
+    QString m_addFileFilter;
     mutable QIcon m_icon;
+    bool m_showWhenEmpty = false;
 };
 
 class PROJECTEXPLORER_EXPORT VirtualFolderNode : public FolderNode
 {
 public:
-    explicit VirtualFolderNode(const Utils::FileName &folderPath, int priority);
+    explicit VirtualFolderNode(const Utils::FilePath &folderPath);
 
-    void setAddFileFilter(const QString &filter) { m_addFileFilter = filter; }
-    QString addFileFilter() const override;
-
-private:
-    QString m_addFileFilter;
+    bool isFolderNodeType() const override { return false; }
+    bool isVirtualFolderType() const override { return true; }
 };
 
 // Documentation inside.
 class PROJECTEXPLORER_EXPORT ProjectNode : public FolderNode
 {
 public:
+    explicit ProjectNode(const Utils::FilePath &projectFilePath);
+
     virtual bool canAddSubProject(const QString &proFilePath) const;
     virtual bool addSubProject(const QString &proFile);
+    virtual QStringList subProjectFileNamePatterns() const;
     virtual bool removeSubProject(const QString &proFilePath);
+    virtual Utils::optional<Utils::FilePath> visibleAfterAddFileAction() const {
+        return Utils::nullopt;
+    }
 
-    bool addFiles(const QStringList &filePaths, QStringList *notAdded = 0) override;
-    bool removeFiles(const QStringList &filePaths, QStringList *notRemoved = 0) override;
-    bool deleteFiles(const QStringList &filePaths) override;
-    bool canRenameFile(const QString &filePath, const QString &newFilePath) override;
-    bool renameFile(const QString &filePath, const QString &newFilePath) override;
-    bool supportsAction(ProjectAction action, Node *node) const override;
+    bool isFolderNodeType() const override { return false; }
+    bool isProjectNodeType() const override { return true; }
+    bool showInSimpleTree() const override { return true; }
+
+    bool addFiles(const QStringList &filePaths, QStringList *notAdded = nullptr) final;
+    RemovedFilesFromProject removeFiles(const QStringList &filePaths,
+                                        QStringList *notRemoved = nullptr) final;
+    bool deleteFiles(const QStringList &filePaths) final;
+    bool canRenameFile(const QString &filePath, const QString &newFilePath) final;
+    bool renameFile(const QString &filePath, const QString &newFilePath) final;
+    bool addDependencies(const QStringList &dependencies) final;
+    bool supportsAction(ProjectAction action, const Node *node) const final;
 
     // by default returns false
     virtual bool deploysFolder(const QString &folder) const;
 
-    virtual QList<RunConfiguration *> runConfigurations() const;
-
-    ProjectNode *projectNode(const Utils::FileName &file) const;
+    ProjectNode *projectNode(const Utils::FilePath &file) const;
 
     ProjectNode *asProjectNode() final { return this; }
     const ProjectNode *asProjectNode() const final { return this; }
 
+    virtual QStringList targetApplications() const { return {}; }
+    virtual bool parseInProgress() const { return false; }
+
+    virtual bool validParse() const { return false; }
+    virtual QVariant data(Core::Id role) const;
+    virtual bool setData(Core::Id role, const QVariant &value) const;
+
+    bool isProduct() const { return m_productType != ProductType::None; }
+    ProductType productType() const { return m_productType; }
+
+    // TODO: Currently used only for "Build for current run config" functionality, but we should
+    //       probably use it to centralize the node-specific "Build" functionality that
+    //       currently each project manager plugin adds to the context menu by itself.
+    //       The function should then move up to the Node class, so it can also serve the
+    //       "build single file" case.
+    virtual void build() {}
+
+    void setFallbackData(Core::Id key, const QVariant &value);
+
 protected:
-    explicit ProjectNode(const Utils::FileName &projectFilePath);
+    void setProductType(ProductType type) { m_productType = type; }
+
+    QString m_target;
+
+private:
+    BuildSystem *buildSystem() const;
+
+    QHash<Core::Id, QVariant> m_fallbackData; // Used in data(), unless overridden.
+    ProductType m_productType = ProductType::None;
 };
 
 class PROJECTEXPLORER_EXPORT ContainerNode : public FolderNode
@@ -324,7 +414,10 @@ public:
     ContainerNode(Project *project);
 
     QString displayName() const final;
-    bool supportsAction(ProjectAction action, Node *node) const final;
+    bool supportsAction(ProjectAction action, const Node *node) const final;
+
+    bool isFolderNodeType() const override { return false; }
+    bool isProjectNodeType() const override { return true; }
 
     ContainerNode *asContainerNode() final { return this; }
     const ContainerNode *asContainerNode() const final { return this; }
@@ -332,9 +425,12 @@ public:
     ProjectNode *rootProjectNode() const;
     Project *project() const { return m_project; }
 
+    void removeAllChildren();
+
 private:
+    void handleSubTreeChanged(FolderNode *node) final;
+
     Project *m_project;
-    QList<Node *> m_nodes;
 };
 
 } // namespace ProjectExplorer

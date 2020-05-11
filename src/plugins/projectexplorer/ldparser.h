@@ -26,23 +26,27 @@
 #pragma once
 
 #include "ioutputparser.h"
+#include "task.h"
 
 #include <QRegularExpression>
 
 namespace ProjectExplorer {
 
-class LdParser : public ProjectExplorer::IOutputParser
+class LdParser : public ProjectExplorer::OutputTaskParser
 {
     Q_OBJECT
 
 public:
     LdParser();
-    void stdError(const QString &line) override;
-
 private:
+    Result handleLine(const QString &line, Utils::OutputFormat type) override;
+    void flush() override;
+
     QRegularExpression m_ranlib;
     QRegularExpression m_regExpLinker;
     QRegularExpression m_regExpGccNames;
+
+    Task m_incompleteTask;
 };
 
 } // namespace ProjectExplorer

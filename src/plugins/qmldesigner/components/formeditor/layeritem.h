@@ -25,6 +25,7 @@
 #pragma once
 
 #include <QGraphicsObject>
+#include <QTransform>
 
 namespace QmlDesigner {
 
@@ -38,12 +39,14 @@ public:
         Type = 0xEAAA
     };
     LayerItem(FormEditorScene* scene);
-    ~LayerItem();
-    void paint ( QPainter * painter, const QStyleOptionGraphicsItem * option, QWidget * widget = 0 );
-    QRectF boundingRect() const;
-    int type() const;
+    ~LayerItem() override;
+    void paint ( QPainter * painter, const QStyleOptionGraphicsItem * option, QWidget * widget = nullptr ) override;
+    QRectF boundingRect() const override;
+    int type() const override;
 
     QList<QGraphicsItem*> findAllChildItems() const;
+
+    QTransform viewportTransform() const;
 
 protected:
     QList<QGraphicsItem*> findAllChildItems(const QGraphicsItem *item) const;

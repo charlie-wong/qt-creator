@@ -43,9 +43,7 @@ bool compareBindingProperties(const QmlDesigner::BindingProperty &bindingPropert
     return true;
 }
 
-BindingProperty::BindingProperty()
-{
-}
+BindingProperty::BindingProperty() = default;
 
 BindingProperty::BindingProperty(const BindingProperty &property, AbstractView *view)
     : AbstractProperty(property.name(), property.internalNode(), property.model(), view)
@@ -84,9 +82,9 @@ void BindingProperty::setExpression(const QString &expression)
     }
 
     if (internalNode()->hasProperty(name()) && !internalNode()->property(name())->isBindingProperty())
-        model()->d->removeProperty(internalNode()->property(name()));
+        privateModel()->removeProperty(internalNode()->property(name()));
 
-    model()->d->setBindingProperty(internalNode(), name(), expression);
+    privateModel()->setBindingProperty(internalNode(), name(), expression);
 }
 
 QString BindingProperty::expression() const
@@ -161,7 +159,7 @@ AbstractProperty BindingProperty::resolveToProperty() const
     ModelNode node = parentModelNode();
     QString element;
     if (binding.contains(QLatin1Char('.'))) {
-        element = binding.split(QLatin1Char('.')).last();
+        element = binding.split(QLatin1Char('.')).constLast();
         QString nodeBinding = binding;
         nodeBinding.chop(element.length());
         node = resolveBinding(nodeBinding, parentModelNode(), view());
@@ -199,6 +197,84 @@ QList<ModelNode> BindingProperty::resolveToModelNodeList() const
         }
     }
     return returnList;
+}
+
+void BindingProperty::addModelNodeToArray(const ModelNode &modelNode)
+{
+    if (!isValid())
+        throw InvalidModelNodeException(__LINE__, __FUNCTION__, __FILE__);
+
+    if (isBindingProperty()) {
+        QStringList simplifiedList;
+        if (isList()) {
+            QString string = expression();
+            string.chop(1);
+            string.remove(0, 1);
+            simplifiedList = commaSeparatedSimplifiedStringList(string);
+        } else {
+            ModelNode currentNode = resolveToModelNode();
+            if (currentNode.isValid())
+                simplifiedList.append(currentNode.validId());
+        }
+        ModelNode node = modelNode;
+        simplifiedList.append(node.validId());
+        setExpression('[' + simplifiedList.join(',') + ']');
+    } else if (exists()) {
+        throw InvalidArgumentException(__LINE__, __FUNCTION__, __FILE__, name());
+    } else {
+        ModelNode node = modelNode;
+        setExpression('[' + node.validId() + ']');
+    }
+
+}
+
+void BindingProperty::removeModelNodeFromArray(const ModelNode &modelNode)
+{
+    if (!isValid())
+        throw InvalidModelNodeException(__LINE__, __FUNCTION__, __FILE__);
+
+     if (!isBindingProperty())
+         throw InvalidArgumentException(__LINE__, __FUNCTION__, __FILE__, name());
+
+     if (isList() && modelNode.hasId()) {
+         QString string = expression();
+         string.chop(1);
+         string.remove(0, 1);
+         QStringList simplifiedList = commaSeparatedSimplifiedStringList(string);
+         if (simplifiedList.contains(modelNode.id())) {
+             simplifiedList.removeAll(modelNode.id());
+             if (simplifiedList.isEmpty())
+                 parentModelNode().removeProperty(name());
+             else
+                 setExpression('[' + simplifiedList.join(',') + ']');
+         }
+     }
+}
+
+QList<BindingProperty> BindingProperty::findAllReferencesTo(const ModelNode &modelNode)
+{
+    if (!modelNode.isValid())
+        throw InvalidModelNodeException(__LINE__, __FUNCTION__, __FILE__);
+
+    QList<BindingProperty> list;
+    for (const ModelNode &bindingNode : modelNode.view()->allModelNodes()) {
+        for (const BindingProperty &bindingProperty : bindingNode.bindingProperties())
+            if (bindingProperty.resolveToModelNode() == modelNode)
+                list.append(bindingProperty);
+            else if (bindingProperty.resolveToModelNodeList().contains(modelNode))
+                list.append(bindingProperty);
+    }
+    return list;
+}
+
+void BindingProperty::deleteAllReferencesTo(const ModelNode &modelNode)
+{
+    for (BindingProperty &bindingProperty : findAllReferencesTo(modelNode)) {
+        if (bindingProperty.isList())
+            bindingProperty.removeModelNodeFromArray(modelNode);
+        else
+            bindingProperty.parentModelNode().removeProperty(bindingProperty.name());
+    }
 }
 
 bool BindingProperty::isAliasExport() const
@@ -239,9 +315,9 @@ void BindingProperty::setDynamicTypeNameAndExpression(const TypeName &typeName, 
     }
 
     if (internalNode()->hasProperty(name()) && !internalNode()->property(name())->isBindingProperty())
-        model()->d->removeProperty(internalNode()->property(name()));
+        privateModel()->removeProperty(internalNode()->property(name()));
 
-     model()->d->setDynamicBindingProperty(internalNode(), name(), typeName, expression);
+     privateModel()->setDynamicBindingProperty(internalNode(), name(), typeName, expression);
 }
 
 QDebug operator<<(QDebug debug, const BindingProperty &property)

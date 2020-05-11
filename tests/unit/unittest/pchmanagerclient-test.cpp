@@ -27,32 +27,50 @@
 
 #include "mockpchmanagernotifier.h"
 #include "mockpchmanagerserver.h"
+#include "mockprecompiledheaderstorage.h"
+#include "mockprogressmanager.h"
+#include "mockprojectpartsstorage.h"
 
 #include <pchmanagerclient.h>
-#include <projectupdater.h>
+#include <pchmanagerprojectupdater.h>
 
+#include <clangindexingsettingsmanager.h>
+#include <filepathcaching.h>
 #include <precompiledheadersupdatedmessage.h>
-#include <removepchprojectpartsmessage.h>
-#include <updatepchprojectpartsmessage.h>
+#include <progressmessage.h>
+#include <refactoringdatabaseinitializer.h>
+#include <removegeneratedfilesmessage.h>
+#include <removeprojectpartsmessage.h>
+#include <updategeneratedfilesmessage.h>
+#include <updateprojectpartsmessage.h>
 
 namespace {
 
 using ClangBackEnd::PrecompiledHeadersUpdatedMessage;
 
-using testing::_;
-using testing::Contains;
-using testing::Not;
-
 class PchManagerClient : public ::testing::Test
 {
 protected:
-    MockPchManagerServer mockPchManagerServer;
-    ClangPchManager::PchManagerClient client;
-    MockPchManagerNotifier mockPchManagerNotifier{client};
-    ClangPchManager::ProjectUpdater projectUpdater{mockPchManagerServer, client};
-    Utils::SmallString projectPartId{"projectPartId"};
-    Utils::SmallString pchFilePath{"/path/to/pch"};
-    PrecompiledHeadersUpdatedMessage message{{{projectPartId.clone(), pchFilePath.clone()}}};
+    NiceMock<MockProgressManager> mockPchCreationProgressManager;
+    NiceMock<MockProgressManager> mockDependencyCreationProgressManager;
+    ClangPchManager::PchManagerClient client{mockPchCreationProgressManager,
+                                             mockDependencyCreationProgressManager};
+    NiceMock<MockPchManagerServer> mockPchManagerServer;
+    NiceMock<MockProjectPartsStorage> mockProjectPartsStorage;
+    NiceMock<MockPchManagerNotifier> mockPchManagerNotifier{client};
+    Sqlite::Database database{":memory:", Sqlite::JournalMode::Memory};
+    ClangBackEnd::RefactoringDatabaseInitializer<Sqlite::Database> initializer{database};
+    ClangBackEnd::FilePathCaching filePathCache{database};
+    ClangPchManager::ClangIndexingSettingsManager settingsManager;
+    ClangPchManager::PchManagerProjectUpdater projectUpdater{mockPchManagerServer,
+                                                             client,
+                                                             filePathCache,
+                                                             mockProjectPartsStorage,
+                                                             settingsManager};
+    ClangBackEnd::ProjectPartId projectPartId{1};
+    PrecompiledHeadersUpdatedMessage message{projectPartId};
+    ClangBackEnd::ProjectPartId projectPartId2{2};
+    PrecompiledHeadersUpdatedMessage message2{projectPartId2};
 };
 
 TEST_F(PchManagerClient, NotifierAttached)
@@ -76,17 +94,29 @@ TEST_F(PchManagerClient, NotifierDetached)
 
 TEST_F(PchManagerClient, Update)
 {
-    EXPECT_CALL(mockPchManagerNotifier, precompiledHeaderUpdated(projectPartId.toQString(), pchFilePath.toQString()));
+    EXPECT_CALL(mockPchManagerNotifier, precompiledHeaderUpdated(projectPartId));
 
     client.precompiledHeadersUpdated(message.clone());
 }
 
 TEST_F(PchManagerClient, Remove)
 {
-    EXPECT_CALL(mockPchManagerNotifier, precompiledHeaderRemoved(projectPartId.toQString()))
-        .Times(2);
+    EXPECT_CALL(mockPchManagerNotifier, precompiledHeaderRemoved(projectPartId)).Times(2);
 
-    projectUpdater.removeProjectParts({projectPartId.clone(), projectPartId.clone()});
+    projectUpdater.removeProjectParts({projectPartId, projectPartId});
 }
 
+TEST_F(PchManagerClient, SetPchCreationProgress)
+{
+    EXPECT_CALL(mockPchCreationProgressManager, setProgress(10, 20));
+
+    client.progress({ClangBackEnd::ProgressType::PrecompiledHeader, 10, 20});
 }
+
+TEST_F(PchManagerClient, SetDependencyCreationProgress)
+{
+    EXPECT_CALL(mockDependencyCreationProgressManager, setProgress(30, 40));
+
+    client.progress({ClangBackEnd::ProgressType::DependencyCreation, 30, 40});
+}
+} // namespace

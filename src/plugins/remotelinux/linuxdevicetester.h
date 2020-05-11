@@ -29,10 +29,6 @@
 
 #include <projectexplorer/devicesupport/idevice.h>
 
-namespace ProjectExplorer { class DeviceUsedPortsGatherer; }
-namespace QSsh { class SshConnection; }
-namespace ProjectExplorer { class DeviceUsedPortsGatherer; }
-
 namespace RemoteLinux {
 
 namespace Internal { class GenericLinuxDeviceTesterPrivate; }
@@ -42,21 +38,22 @@ class REMOTELINUX_EXPORT GenericLinuxDeviceTester : public ProjectExplorer::Devi
     Q_OBJECT
 
 public:
-    explicit GenericLinuxDeviceTester(QObject *parent = 0);
-    ~GenericLinuxDeviceTester();
+    explicit GenericLinuxDeviceTester(QObject *parent = nullptr);
+    ~GenericLinuxDeviceTester() override;
 
-    void testDevice(const ProjectExplorer::IDevice::ConstPtr &deviceConfiguration);
-    void stopTest();
-
-    ProjectExplorer::DeviceUsedPortsGatherer *usedPortsGatherer() const;
+    void testDevice(const ProjectExplorer::IDevice::Ptr &deviceConfiguration) override;
+    void stopTest() override;
 
 private:
     void handleConnected();
     void handleConnectionFailure();
-    void handleProcessFinished(int exitStatus);
+    void handleProcessFinished(const QString &error);
     void handlePortsGatheringError(const QString &message);
     void handlePortListReady();
-
+    void handleSftpStarted();
+    void handleSftpFinished(const QString &error);
+    void testRsync();
+    void handleRsyncFinished();
     void setFinished(ProjectExplorer::DeviceTester::TestResult result);
 
     Internal::GenericLinuxDeviceTesterPrivate * const d;

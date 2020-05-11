@@ -47,8 +47,8 @@ class TEXTEDITOR_EXPORT ICodeStylePreferences : public QObject
     Q_PROPERTY(bool readOnly READ isReadOnly WRITE setReadOnly)
 public:
     // pool is a pool which will be used by this preferences for setting delegates
-    explicit ICodeStylePreferences(QObject *parentObject = 0);
-    virtual ~ICodeStylePreferences();
+    explicit ICodeStylePreferences(QObject *parentObject = nullptr);
+    ~ICodeStylePreferences() override;
 
     QByteArray id() const;
     void setId(const QByteArray &name);
@@ -79,6 +79,7 @@ public:
     QByteArray currentDelegateId() const;
     void setCurrentDelegate(const QByteArray &id);
 
+    void setSettingsSuffix(const QString &suffix);
     void toSettings(const QString &category, QSettings *s) const;
     void fromSettings(const QString &category, const QSettings *s);
 
@@ -94,9 +95,6 @@ signals:
     void currentDelegateChanged(TextEditor::ICodeStylePreferences *currentDelegate);
     void currentPreferencesChanged(TextEditor::ICodeStylePreferences *currentPreferences);
     void displayNameChanged(const QString &newName);
-
-protected:
-    virtual QString settingsSuffix() const = 0;
 
 private:
     void codeStyleRemoved(ICodeStylePreferences *preferences);

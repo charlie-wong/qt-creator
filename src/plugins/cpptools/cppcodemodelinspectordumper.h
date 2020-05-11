@@ -42,21 +42,24 @@ namespace CppCodeModelInspector {
 struct CPPTOOLS_EXPORT Utils
 {
     static QString toString(bool value);
+    static QString toString(int value);
     static QString toString(unsigned value);
     static QString toString(const QDateTime &dateTime);
     static QString toString(CPlusPlus::Document::CheckMode checkMode);
     static QString toString(CPlusPlus::Document::DiagnosticMessage::Level level);
-    static QString toString(ProjectPartHeaderPath::Type type);
-    static QString toString(CppTools::ProjectPart::LanguageVersion languageVersion);
-    static QString toString(CppTools::ProjectPart::LanguageExtensions languageExtension);
-    static QString toString(CppTools::ProjectPart::QtVersion qtVersion);
+    static QString toString(ProjectExplorer::HeaderPathType type);
+    static QString toString(::Utils::LanguageVersion languageVersion);
+    static QString toString(::Utils::LanguageExtensions languageExtension);
+    static QString toString(::Utils::QtVersion qtVersion);
+    static QString toString(ProjectExplorer::BuildTargetType buildTargetType);
     static QString toString(const QVector<CppTools::ProjectFile> &projectFiles);
     static QString toString(CppTools::ProjectFile::Kind kind);
     static QString toString(CPlusPlus::Kind kind);
+    static QString toString(ProjectPart::ToolChainWordWidth width);
     static QString partsForFile(const QString &fileName);
     static QString unresolvedFileNameWithDelimiters(const CPlusPlus::Document::Include &include);
     static QString pathListToString(const QStringList &pathList);
-    static QString pathListToString(const ProjectPartHeaderPaths &pathList);
+    static QString pathListToString(const ProjectExplorer::HeaderPaths &pathList);
     static QList<CPlusPlus::Document::Ptr> snapshotToList(const CPlusPlus::Snapshot &snapshot);
 };
 
@@ -72,7 +75,7 @@ public:
                       const QString &title,
                       bool isGlobalSnapshot = false);
     void dumpWorkingCopy(const CppTools::WorkingCopy &workingCopy);
-    void dumpMergedEntities(const ProjectPartHeaderPaths &mergedHeaderPaths,
+    void dumpMergedEntities(const ProjectExplorer::HeaderPaths &mergedHeaderPaths,
                             const QByteArray &mergedMacros);
 
 private:

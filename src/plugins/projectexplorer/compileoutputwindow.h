@@ -26,26 +26,24 @@
 #pragma once
 
 #include "buildstep.h"
+#include "projectexplorersettings.h"
+#include <coreplugin/dialogs/ioptionspage.h>
 #include <coreplugin/ioutputpane.h>
 
 #include <QHash>
 #include <QPair>
 
 QT_BEGIN_NAMESPACE
-class QPlainTextEdit;
-class QTextCharFormat;
 class QToolButton;
 QT_END_NAMESPACE
 
-namespace Utils { class AnsiEscapeCodeHandler; }
+namespace Core { class OutputWindow; }
+namespace Utils { class OutputFormatter; }
 
 namespace ProjectExplorer {
-
-class BuildManager;
 class Task;
 
 namespace Internal {
-
 class ShowOutputTaskHandler;
 class CompileOutputTextEdit;
 
@@ -75,23 +73,37 @@ public:
 
     void appendText(const QString &text, BuildStep::OutputFormat format);
 
-    void registerPositionOf(const Task &task, int linkedOutputLines, int skipLines);
+    void registerPositionOf(const Task &task, int linkedOutputLines, int skipLines, int offset = 0);
     bool knowsPositionOf(const Task &task);
     void showPositionOf(const Task &task);
 
     void flush();
+    void reset();
+
+    const CompileOutputSettings &settings() const { return m_settings; }
+    void setSettings(const CompileOutputSettings &settings);
+
+    Utils::OutputFormatter *outputFormatter() const;
 
 private:
-    void updateWordWrapMode();
-    void updateZoomEnabled();
+    void updateFilter() override;
 
-    CompileOutputTextEdit *m_outputWindow;
+    void loadSettings();
+    void storeSettings() const;
+    void updateFromSettings();
+
+    Core::OutputWindow *m_outputWindow;
     QHash<unsigned int, QPair<int, int>> m_taskPositions;
     ShowOutputTaskHandler *m_handler;
     QToolButton *m_cancelBuildButton;
-    QToolButton *m_zoomInButton;
-    QToolButton *m_zoomOutButton;
-    Utils::AnsiEscapeCodeHandler *m_escapeCodeHandler;
+    QToolButton * const m_settingsButton;
+    CompileOutputSettings m_settings;
+};
+
+class CompileOutputSettingsPage final : public Core::IOptionsPage
+{
+public:
+    CompileOutputSettingsPage();
 };
 
 } // namespace Internal

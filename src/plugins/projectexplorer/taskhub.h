@@ -42,9 +42,7 @@ public:
 
     // Convenience overload
     static void addTask(Task::TaskType type, const QString &description,
-                        Core::Id category,
-                        const Utils::FileName &file = Utils::FileName(),
-                        int line = -1);
+                        Core::Id category);
 
 public slots:
     static void addTask(ProjectExplorer::Task task);
@@ -79,7 +77,7 @@ private:
 
     static QVector<Core::Id> m_registeredCategories;
 
-    friend class ProjectExplorerPlugin;
+    friend class ProjectExplorerPluginPrivate;
 };
 
 } // namespace ProjectExplorer

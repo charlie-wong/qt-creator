@@ -28,43 +28,10 @@
 #include <projectexplorer/abi.h>
 #include <projectexplorer/kitinformation.h>
 #include <projectexplorer/projectexplorerconstants.h>
+#include <projectexplorer/rawprojectpart.h>
+#include <projectexplorer/toolchain.h>
 
 namespace CppTools {
-
-ToolChainInfo::ToolChainInfo(const ProjectExplorer::ToolChain *toolChain,
-                             const ProjectExplorer::Kit *kit)
-{
-    if (toolChain) {
-        // Keep the following cheap/non-blocking for the ui thread...
-        type = toolChain->typeId();
-        isMsvc2015ToolChain
-                = toolChain->targetAbi().osFlavor() == ProjectExplorer::Abi::WindowsMsvc2015Flavor;
-        wordWidth = toolChain->targetAbi().wordWidth();
-        targetTriple = type == ProjectExplorer::Constants::MSVC_TOOLCHAIN_TYPEID
-            ? QLatin1String("i686-pc-windows-msvc")
-            : toolChain->originalTargetTriple(); // OK, compiler run is already cached.
-
-        // ...and save the potentially expensive operations for later so that
-        // they can be run from a worker thread.
-        sysRoothPath = ProjectExplorer::SysRootKitInformation::sysRoot(kit).toString();
-        headerPathsRunner = toolChain->createSystemHeaderPathsRunner();
-        predefinedMacrosRunner = toolChain->createPredefinedMacrosRunner();
-    }
-}
-
-ProjectUpdateInfo::ProjectUpdateInfo(ProjectExplorer::Project *project,
-                                     const ProjectExplorer::ToolChain *cToolChain,
-                                     const ProjectExplorer::ToolChain *cxxToolChain,
-                                     const ProjectExplorer::Kit *kit,
-                                     const RawProjectParts &rawProjectParts)
-    : project(project)
-    , rawProjectParts(rawProjectParts)
-    , cToolChain(cToolChain)
-    , cxxToolChain(cxxToolChain)
-    , cToolChainInfo(ToolChainInfo(cToolChain, kit))
-    , cxxToolChainInfo(ToolChainInfo(cxxToolChain, kit))
-{
-}
 
 ProjectInfo::ProjectInfo(QPointer<ProjectExplorer::Project> project)
     : m_project(project)
@@ -91,28 +58,10 @@ const QSet<QString> ProjectInfo::sourceFiles() const
     return m_sourceFiles;
 }
 
-void ProjectInfo::setCompilerCallData(const CompilerCallData &data)
-{
-    m_compilerCallData = data;
-}
-
-ProjectInfo::CompilerCallData ProjectInfo::compilerCallData() const
-{
-    return m_compilerCallData;
-}
-
-static bool operator==(const ProjectInfo::CompilerCallGroup &first,
-                       const ProjectInfo::CompilerCallGroup &second)
-{
-    return first.groupId == second.groupId
-        && first.callsPerSourceFile == second.callsPerSourceFile;
-}
-
 bool ProjectInfo::operator ==(const ProjectInfo &other) const
 {
     return m_project == other.m_project
         && m_projectParts == other.m_projectParts
-        && m_compilerCallData == other.m_compilerCallData
         && m_headerPaths == other.m_headerPaths
         && m_sourceFiles == other.m_sourceFiles
         && m_defines == other.m_defines;
@@ -146,11 +95,11 @@ void ProjectInfo::appendProjectPart(const ProjectPart::Ptr &projectPart)
 
 void ProjectInfo::finish()
 {
-    QSet<ProjectPartHeaderPath> uniqueHeaderPaths;
+    QSet<ProjectExplorer::HeaderPath> uniqueHeaderPaths;
 
     foreach (const ProjectPart::Ptr &part, m_projectParts) {
         // Update header paths
-        foreach (const ProjectPartHeaderPath &headerPath, part->headerPaths) {
+        foreach (const ProjectExplorer::HeaderPath &headerPath, part->headerPaths) {
             const int count = uniqueHeaderPaths.count();
             uniqueHeaderPaths.insert(headerPath);
             if (count < uniqueHeaderPaths.count())
@@ -162,13 +111,10 @@ void ProjectInfo::finish()
             m_sourceFiles.insert(file.path);
 
         // Update defines
-        m_defines.append(part->toolchainDefines);
-        m_defines.append(part->projectDefines);
-        if (!part->projectConfigFile.isEmpty()) {
-            m_defines.append('\n');
-            m_defines += ProjectPart::readProjectConfigFile(part);
-            m_defines.append('\n');
-        }
+        m_defines.append(part->toolChainMacros);
+        m_defines.append(part->projectMacros);
+        if (!part->projectConfigFile.isEmpty())
+            m_defines += ProjectExplorer::Macro::toMacros(ProjectPart::readProjectConfigFile(part));
     }
 }
 

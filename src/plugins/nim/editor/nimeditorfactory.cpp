@@ -26,9 +26,11 @@
 #include "nimeditorfactory.h"
 #include "nimindenter.h"
 #include "nimhighlighter.h"
+#include "nimcompletionassistprovider.h"
 
 #include "../nimconstants.h"
 #include "../nimplugin.h"
+#include "nimtexteditorwidget.h"
 
 #include <texteditor/texteditoractionhandler.h>
 #include <texteditor/texteditorconstants.h>
@@ -43,44 +45,36 @@ namespace Nim {
 NimEditorFactory::NimEditorFactory()
 {
     setId(Constants::C_NIMEDITOR_ID);
-    setDisplayName(tr(Nim::Constants::C_EDITOR_DISPLAY_NAME));
+    setDisplayName(QCoreApplication::translate("OpenWith::Editors", "Nim Editor"));
     addMimeType(QLatin1String(Nim::Constants::C_NIM_MIMETYPE));
     addMimeType(QLatin1String(Nim::Constants::C_NIM_SCRIPT_MIMETYPE));
 
     setEditorActionHandlers(TextEditorActionHandler::Format
                             | TextEditorActionHandler::UnCommentSelection
-                            | TextEditorActionHandler::UnCollapseAll);
-
+                            | TextEditorActionHandler::UnCollapseAll
+                            | TextEditorActionHandler::FollowSymbolUnderCursor);
     setEditorWidgetCreator([]{
-        auto result = new TextEditorWidget();
-        result->setLanguageSettingsId(Nim::Constants::C_NIMLANGUAGE_ID);
-        return result;
+        return new NimTextEditorWidget();
     });
     setDocumentCreator([]() {
         return new TextDocument(Constants::C_NIMEDITOR_ID);
     });
-    setIndenterCreator([]() {
-        return new NimIndenter;
+    setIndenterCreator([](QTextDocument *doc) {
+        return new NimIndenter(doc);
     });
     setSyntaxHighlighterCreator([]() {
         return new NimHighlighter;
     });
+    setCompletionAssistProvider(new NimCompletionAssistProvider());
     setCommentDefinition(CommentDefinition::HashStyle);
     setParenthesesMatchingEnabled(true);
-    setMarksVisible(false);
     setCodeFoldingSupported(true);
-    setMarksVisible(true);
-}
-
-Core::IEditor *NimEditorFactory::createEditor()
-{
-    return TextEditorFactory::createEditor();
 }
 
 void NimEditorFactory::decorateEditor(TextEditorWidget *editor)
 {
     editor->textDocument()->setSyntaxHighlighter(new NimHighlighter());
-    editor->textDocument()->setIndenter(new NimIndenter());
+    editor->textDocument()->setIndenter(new NimIndenter(editor->textDocument()->document()));
 }
 
 }

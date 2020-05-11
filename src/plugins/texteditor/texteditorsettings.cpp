@@ -25,32 +25,34 @@
 
 #include "texteditorsettings.h"
 
-#include "fontsettings.h"
-#include "texteditor.h"
 #include "behaviorsettings.h"
 #include "behaviorsettingspage.h"
 #include "completionsettings.h"
-#include "marginsettings.h"
+#include "completionsettingspage.h"
 #include "displaysettings.h"
 #include "displaysettingspage.h"
-#include "fontsettingspage.h"
-#include "typingsettings.h"
-#include "storagesettings.h"
-#include "tabsettings.h"
 #include "extraencodingsettings.h"
+#include "fontsettings.h"
+#include "fontsettingspage.h"
+#include "highlightersettingspage.h"
 #include "icodestylepreferences.h"
 #include "icodestylepreferencesfactory.h"
-#include "completionsettingspage.h"
-#include <texteditor/generichighlighter/highlightersettingspage.h>
+#include "marginsettings.h"
+#include "storagesettings.h"
+#include "tabsettings.h"
+#include "texteditor.h"
+#include "typingsettings.h"
+
 #include <texteditor/snippets/snippetssettingspage.h>
 
 #include <extensionsystem/pluginmanager.h>
 #include <coreplugin/icore.h>
+#include <coreplugin/messagemanager.h>
+#include <utils/fancylineedit.h>
 #include <utils/qtcassert.h>
 
 #include <QApplication>
 
-using namespace TextEditor;
 using namespace TextEditor::Constants;
 using namespace TextEditor::Internal;
 
@@ -59,43 +61,36 @@ namespace Internal {
 
 class TextEditorSettingsPrivate
 {
+    Q_DECLARE_TR_FUNCTIONS(TextEditor::TextEditorSettings)
+
 public:
-    FontSettingsPage *m_fontSettingsPage;
-    BehaviorSettingsPage *m_behaviorSettingsPage;
-    DisplaySettingsPage *m_displaySettingsPage;
-    HighlighterSettingsPage *m_highlighterSettingsPage;
-    SnippetsSettingsPage *m_snippetsSettingsPage;
-    CompletionSettingsPage *m_completionSettingsPage;
+    FontSettings m_fontSettings;
+    FontSettingsPage m_fontSettingsPage{&m_fontSettings, initialFormats()};
+    BehaviorSettingsPage m_behaviorSettingsPage;
+    DisplaySettingsPage m_displaySettingsPage;
+    HighlighterSettingsPage m_highlighterSettingsPage;
+    SnippetsSettingsPage m_snippetsSettingsPage;
+    CompletionSettingsPage m_completionSettingsPage;
 
     QMap<Core::Id, ICodeStylePreferencesFactory *> m_languageToFactory;
 
     QMap<Core::Id, ICodeStylePreferences *> m_languageToCodeStyle;
     QMap<Core::Id, CodeStylePool *> m_languageToCodeStylePool;
     QMap<QString, Core::Id> m_mimeTypeToLanguage;
+
+private:
+    static std::vector<FormatDescription> initialFormats();
 };
 
-} // namespace Internal
-} // namespace TextEditor
-
-
-static TextEditorSettingsPrivate *d = 0;
-static TextEditorSettings *m_instance = 0;
-
-TextEditorSettings::TextEditorSettings(QObject *parent)
-    : QObject(parent)
+FormatDescriptions TextEditorSettingsPrivate::initialFormats()
 {
-    QTC_ASSERT(!m_instance, return);
-    m_instance = this;
-    d = new Internal::TextEditorSettingsPrivate;
-
-    // Note: default background colors are coming from FormatDescription::background()
-
     // Add font preference page
     FormatDescriptions formatDescr;
     formatDescr.reserve(C_LAST_STYLE_SENTINEL);
-    formatDescr.emplace_back(C_TEXT, tr("Text"), tr("Generic text.\nApplied to "
-                                                    "text, if no other "
-                                                    "rules matching."));
+    formatDescr.emplace_back(C_TEXT, tr("Text"),
+                             tr("Generic text and punctuation tokens.\n"
+                                                    "Applied to text that matched no other rule."),
+                             Format{QColor{}, Qt::white});
 
     // Special categories
     const QPalette p = QApplication::palette();
@@ -105,7 +100,7 @@ TextEditorSettings::TextEditorSettings(QObject *parent)
                              p.color(QPalette::HighlightedText));
     formatDescr.emplace_back(C_LINE_NUMBER, tr("Line Number"),
                              tr("Line numbers located on the left side of the editor."),
-                             FormatDescription::AllControlsExceptUnderline);
+                             FormatDescription::ShowAllAbsoluteControlsExceptUnderline);
     formatDescr.emplace_back(C_SEARCH_RESULT, tr("Search Result"),
                              tr("Highlighted search results inside the editor."),
                              FormatDescription::ShowBackgroundControl);
@@ -130,7 +125,7 @@ TextEditorSettings::TextEditorSettings(QObject *parent)
                                         tr("Line number located on the left side of the "
                                            "editor where the cursor is placed in."),
                                         Qt::darkGray,
-                                        FormatDescription::AllControlsExceptUnderline);
+                                        FormatDescription::ShowAllAbsoluteControlsExceptUnderline);
     currentLineNumber.format().setBold(true);
     formatDescr.push_back(std::move(currentLineNumber));
 
@@ -157,20 +152,35 @@ TextEditorSettings::TextEditorSettings(QObject *parent)
                              tr("Name of a primitive data type."), Qt::darkYellow);
     formatDescr.emplace_back(C_TYPE, tr("Type"), tr("Name of a type."),
                              Qt::darkMagenta);
-    formatDescr.emplace_back(C_LOCAL, tr("Local"), tr("Local variables."));
+    formatDescr.emplace_back(C_LOCAL, tr("Local"),
+                             tr("Local variables."), QColor(9, 46, 100));
     formatDescr.emplace_back(C_FIELD, tr("Field"),
                              tr("Class' data members."), Qt::darkRed);
-    formatDescr.emplace_back(C_GLOBAL, tr("Global"), tr("Global variables."));
+    formatDescr.emplace_back(C_GLOBAL, tr("Global"),
+                             tr("Global variables."), QColor(206, 92, 0));
     formatDescr.emplace_back(C_ENUMERATION, tr("Enumeration"),
                              tr("Applied to enumeration items."), Qt::darkMagenta);
 
     Format functionFormat;
+    functionFormat.setForeground(QColor(0, 103, 124));
     formatDescr.emplace_back(C_FUNCTION, tr("Function"), tr("Name of a function."),
                              functionFormat);
-    functionFormat.setItalic(true);
+    Format declarationFormat;
+    declarationFormat.setBold(true);
+    formatDescr.emplace_back(C_DECLARATION,
+                             tr("Function Declaration"),
+                             tr("Style adjustments to (function) declarations."),
+                             declarationFormat,
+                             FormatDescription::ShowAllControls);
+    formatDescr.emplace_back(C_FUNCTION_DEFINITION,
+                             tr("Function Definition"),
+                             tr("Name of function at its definition."),
+                             FormatDescription::ShowAllControls);
+    Format virtualFunctionFormat(functionFormat);
+    virtualFunctionFormat.setItalic(true);
     formatDescr.emplace_back(C_VIRTUAL_METHOD, tr("Virtual Function"),
                              tr("Name of function declared as virtual."),
-                             functionFormat);
+                             virtualFunctionFormat);
 
     formatDescr.emplace_back(C_BINDING, tr("QML Binding"),
                              tr("QML item property, that allows a "
@@ -223,8 +233,17 @@ TextEditorSettings::TextEditorSettings(QObject *parent)
     formatDescr.emplace_back(C_KEYWORD, tr("Keyword"),
                              tr("Reserved keywords of the programming language except "
                                 "keywords denoting primitive types."), Qt::darkYellow);
+    formatDescr.emplace_back(C_PUNCTUATION, tr("Punctuation"),
+                             tr("Punctuation excluding operators."));
     formatDescr.emplace_back(C_OPERATOR, tr("Operator"),
-                             tr("Operators (for example operator++ or operator-=)."));
+                             tr("Non user-defined language operators.\n"
+                                "To style user-defined operators, use Overloaded Operator."),
+                             FormatDescription::ShowAllControls);
+    formatDescr.emplace_back(C_OVERLOADED_OPERATOR,
+                             tr("Overloaded Operators"),
+                             tr("Calls and declarations of overloaded (user-defined) operators."),
+                             functionFormat,
+                             FormatDescription::ShowAllControls);
     formatDescr.emplace_back(C_PREPROCESSOR, tr("Preprocessor"),
                              tr("Preprocessor directives."), Qt::darkBlue);
     formatDescr.emplace_back(C_LABEL, tr("Label"), tr("Labels for goto statements."),
@@ -285,102 +304,84 @@ TextEditorSettings::TextEditorSettings(QObject *parent)
                              tr("Applied to lines describing changes in VCS log."),
                              Format(QColor(192, 0, 0), QColor()));
 
+
+    // Mixin categories
     formatDescr.emplace_back(C_ERROR,
                              tr("Error"),
                              tr("Underline color of error diagnostics."),
                              QColor(255,0, 0),
                              QTextCharFormat::SingleUnderline,
-                             FormatDescription::ShowUnderlineControl);
+                             FormatDescription::ShowAllControls);
     formatDescr.emplace_back(C_ERROR_CONTEXT,
                              tr("Error Context"),
                              tr("Underline color of the contexts of error diagnostics."),
                              QColor(255,0, 0),
                              QTextCharFormat::DotLine,
-                             FormatDescription::ShowUnderlineControl);
+                             FormatDescription::ShowAllControls);
     formatDescr.emplace_back(C_WARNING,
                              tr("Warning"),
                              tr("Underline color of warning diagnostics."),
                              QColor(255, 190, 0),
                              QTextCharFormat::SingleUnderline,
-                             FormatDescription::ShowUnderlineControl);
+                             FormatDescription::ShowAllControls);
     formatDescr.emplace_back(C_WARNING_CONTEXT,
                              tr("Warning Context"),
                              tr("Underline color of the contexts of warning diagnostics."),
                              QColor(255, 190, 0),
                              QTextCharFormat::DotLine,
-                             FormatDescription::ShowUnderlineControl);
-    formatDescr.emplace_back(C_DECLARATION,
-                             tr("Declaration"),
-                             tr("Declaration of a function, variable, and so on."),
-                             FormatDescription::ShowFontUnderlineAndRelativeControls);
+                             FormatDescription::ShowAllControls);
+    Format outputArgumentFormat;
+    outputArgumentFormat.setItalic(true);
     formatDescr.emplace_back(C_OUTPUT_ARGUMENT,
                              tr("Output Argument"),
                              tr("Writable arguments of a function call."),
-                             FormatDescription::ShowFontUnderlineAndRelativeControls);
+                             outputArgumentFormat,
+                             FormatDescription::ShowAllControls);
 
-    d->m_fontSettingsPage = new FontSettingsPage(formatDescr,
-                                                   Constants::TEXT_EDITOR_FONT_SETTINGS,
-                                                   this);
-    ExtensionSystem::PluginManager::addObject(d->m_fontSettingsPage);
+    return formatDescr;
+}
 
-    // Add the GUI used to configure the tab, storage and interaction settings
-    BehaviorSettingsPageParameters behaviorSettingsPageParameters;
-    behaviorSettingsPageParameters.id = Constants::TEXT_EDITOR_BEHAVIOR_SETTINGS;
-    behaviorSettingsPageParameters.displayName = tr("Behavior");
-    behaviorSettingsPageParameters.settingsPrefix = QLatin1String("text");
-    d->m_behaviorSettingsPage = new BehaviorSettingsPage(behaviorSettingsPageParameters, this);
-    ExtensionSystem::PluginManager::addObject(d->m_behaviorSettingsPage);
+} // namespace Internal
 
-    DisplaySettingsPageParameters displaySettingsPageParameters;
-    displaySettingsPageParameters.id = Constants::TEXT_EDITOR_DISPLAY_SETTINGS;
-    displaySettingsPageParameters.displayName = tr("Display");
-    displaySettingsPageParameters.settingsPrefix = QLatin1String("text");
-    d->m_displaySettingsPage = new DisplaySettingsPage(displaySettingsPageParameters, this);
-    ExtensionSystem::PluginManager::addObject(d->m_displaySettingsPage);
 
-    d->m_highlighterSettingsPage =
-        new HighlighterSettingsPage(Constants::TEXT_EDITOR_HIGHLIGHTER_SETTINGS, this);
-    ExtensionSystem::PluginManager::addObject(d->m_highlighterSettingsPage);
+static TextEditorSettingsPrivate *d = nullptr;
+static TextEditorSettings *m_instance = nullptr;
 
-    d->m_snippetsSettingsPage =
-        new SnippetsSettingsPage(Constants::TEXT_EDITOR_SNIPPETS_SETTINGS, this);
-    ExtensionSystem::PluginManager::addObject(d->m_snippetsSettingsPage);
+TextEditorSettings::TextEditorSettings()
+{
+    QTC_ASSERT(!m_instance, return);
+    m_instance = this;
+    d = new Internal::TextEditorSettingsPrivate;
 
-    d->m_completionSettingsPage = new CompletionSettingsPage(this);
-    ExtensionSystem::PluginManager::addObject(d->m_completionSettingsPage);
+    // Note: default background colors are coming from FormatDescription::background()
 
-    connect(d->m_fontSettingsPage, &FontSettingsPage::changed,
-            this, &TextEditorSettings::fontSettingsChanged);
-    connect(d->m_behaviorSettingsPage, &BehaviorSettingsPage::typingSettingsChanged,
-            this, &TextEditorSettings::typingSettingsChanged);
-    connect(d->m_behaviorSettingsPage, &BehaviorSettingsPage::storageSettingsChanged,
-            this, &TextEditorSettings::storageSettingsChanged);
-    connect(d->m_behaviorSettingsPage, &BehaviorSettingsPage::behaviorSettingsChanged,
-            this, &TextEditorSettings::behaviorSettingsChanged);
-    connect(d->m_behaviorSettingsPage, &BehaviorSettingsPage::extraEncodingSettingsChanged,
-            this, &TextEditorSettings::extraEncodingSettingsChanged);
-    connect(d->m_displaySettingsPage, &DisplaySettingsPage::marginSettingsChanged,
-            this, &TextEditorSettings::marginSettingsChanged);
-    connect(d->m_displaySettingsPage, &DisplaySettingsPage::displaySettingsChanged,
-            this, &TextEditorSettings::displaySettingsChanged);
-    connect(d->m_completionSettingsPage, &CompletionSettingsPage::completionSettingsChanged,
-            this, &TextEditorSettings::completionSettingsChanged);
-    connect(d->m_completionSettingsPage, &CompletionSettingsPage::commentsSettingsChanged,
-            this, &TextEditorSettings::commentsSettingsChanged);
+    auto updateGeneralMessagesFontSettings = []() {
+        Core::MessageManager::setFont(d->m_fontSettings.font());
+    };
+    connect(this, &TextEditorSettings::fontSettingsChanged,
+            this, updateGeneralMessagesFontSettings);
+    updateGeneralMessagesFontSettings();
+    auto updateGeneralMessagesBehaviorSettings = []() {
+        bool wheelZoom = d->m_behaviorSettingsPage.behaviorSettings().m_scrollWheelZooming;
+        Core::MessageManager::setWheelZoomEnabled(wheelZoom);
+    };
+    connect(this, &TextEditorSettings::behaviorSettingsChanged,
+            this, updateGeneralMessagesBehaviorSettings);
+    updateGeneralMessagesBehaviorSettings();
+
+    auto updateCamelCaseNavigation = [] {
+        Utils::FancyLineEdit::setCamelCaseNavigationEnabled(behaviorSettings().m_camelCaseNavigation);
+    };
+    connect(this, &TextEditorSettings::behaviorSettingsChanged,
+            this, updateCamelCaseNavigation);
+    updateCamelCaseNavigation();
 }
 
 TextEditorSettings::~TextEditorSettings()
 {
-    ExtensionSystem::PluginManager::removeObject(d->m_fontSettingsPage);
-    ExtensionSystem::PluginManager::removeObject(d->m_behaviorSettingsPage);
-    ExtensionSystem::PluginManager::removeObject(d->m_displaySettingsPage);
-    ExtensionSystem::PluginManager::removeObject(d->m_highlighterSettingsPage);
-    ExtensionSystem::PluginManager::removeObject(d->m_snippetsSettingsPage);
-    ExtensionSystem::PluginManager::removeObject(d->m_completionSettingsPage);
-
     delete d;
 
-    m_instance = 0;
+    m_instance = nullptr;
 }
 
 TextEditorSettings *TextEditorSettings::instance()
@@ -390,52 +391,52 @@ TextEditorSettings *TextEditorSettings::instance()
 
 const FontSettings &TextEditorSettings::fontSettings()
 {
-    return d->m_fontSettingsPage->fontSettings();
+    return d->m_fontSettings;
 }
 
 const TypingSettings &TextEditorSettings::typingSettings()
 {
-    return d->m_behaviorSettingsPage->typingSettings();
+    return d->m_behaviorSettingsPage.typingSettings();
 }
 
 const StorageSettings &TextEditorSettings::storageSettings()
 {
-    return d->m_behaviorSettingsPage->storageSettings();
+    return d->m_behaviorSettingsPage.storageSettings();
 }
 
 const BehaviorSettings &TextEditorSettings::behaviorSettings()
 {
-    return d->m_behaviorSettingsPage->behaviorSettings();
+    return d->m_behaviorSettingsPage.behaviorSettings();
 }
 
 const MarginSettings &TextEditorSettings::marginSettings()
 {
-    return d->m_displaySettingsPage->marginSettings();
+    return d->m_displaySettingsPage.marginSettings();
 }
 
 const DisplaySettings &TextEditorSettings::displaySettings()
 {
-    return d->m_displaySettingsPage->displaySettings();
+    return d->m_displaySettingsPage.displaySettings();
 }
 
 const CompletionSettings &TextEditorSettings::completionSettings()
 {
-    return d->m_completionSettingsPage->completionSettings();
+    return d->m_completionSettingsPage.completionSettings();
 }
 
 const HighlighterSettings &TextEditorSettings::highlighterSettings()
 {
-    return d->m_highlighterSettingsPage->highlighterSettings();
+    return d->m_highlighterSettingsPage.highlighterSettings();
 }
 
 const ExtraEncodingSettings &TextEditorSettings::extraEncodingSettings()
 {
-    return d->m_behaviorSettingsPage->extraEncodingSettings();
+    return d->m_behaviorSettingsPage.extraEncodingSettings();
 }
 
 const CommentsSettings &TextEditorSettings::commentsSettings()
 {
-    return d->m_completionSettingsPage->commentsSettings();
+    return d->m_completionSettingsPage.commentsSettings();
 }
 
 void TextEditorSettings::registerCodeStyleFactory(ICodeStylePreferencesFactory *factory)
@@ -448,7 +449,7 @@ void TextEditorSettings::unregisterCodeStyleFactory(Core::Id languageId)
     d->m_languageToFactory.remove(languageId);
 }
 
-QMap<Core::Id, ICodeStylePreferencesFactory *> TextEditorSettings::codeStyleFactories()
+const QMap<Core::Id, ICodeStylePreferencesFactory *> &TextEditorSettings::codeStyleFactories()
 {
     return d->m_languageToFactory;
 }
@@ -460,7 +461,7 @@ ICodeStylePreferencesFactory *TextEditorSettings::codeStyleFactory(Core::Id lang
 
 ICodeStylePreferences *TextEditorSettings::codeStyle()
 {
-    return d->m_behaviorSettingsPage->codeStyle();
+    return d->m_behaviorSettingsPage.codeStyle();
 }
 
 ICodeStylePreferences *TextEditorSettings::codeStyle(Core::Id languageId)
@@ -485,7 +486,7 @@ void TextEditorSettings::unregisterCodeStyle(Core::Id languageId)
 
 CodeStylePool *TextEditorSettings::codeStylePool()
 {
-    return d->m_behaviorSettingsPage->codeStylePool();
+    return d->m_behaviorSettingsPage.codeStylePool();
 }
 
 CodeStylePool *TextEditorSettings::codeStylePool(Core::Id languageId)
@@ -513,21 +514,26 @@ Core::Id TextEditorSettings::languageId(const QString &mimeType)
     return d->m_mimeTypeToLanguage.value(mimeType);
 }
 
+static void setFontZoom(int zoom)
+{
+    d->m_fontSettingsPage.setFontZoom(zoom);
+    d->m_fontSettings.setFontZoom(zoom);
+    d->m_fontSettings.toSettings(Core::ICore::settings());
+    emit m_instance->fontSettingsChanged(d->m_fontSettings);
+}
+
 int TextEditorSettings::increaseFontZoom(int step)
 {
-    FontSettings &fs = const_cast<FontSettings&>(d->m_fontSettingsPage->fontSettings());
-    const int previousZoom = fs.fontZoom();
+    const int previousZoom = d->m_fontSettings.fontZoom();
     const int newZoom = qMax(10, previousZoom + step);
-    if (newZoom != previousZoom) {
-        fs.setFontZoom(newZoom);
-        d->m_fontSettingsPage->saveSettings();
-    }
+    if (newZoom != previousZoom)
+        setFontZoom(newZoom);
     return newZoom;
 }
 
 void TextEditorSettings::resetFontZoom()
 {
-    FontSettings &fs = const_cast<FontSettings&>(d->m_fontSettingsPage->fontSettings());
-    fs.setFontZoom(100);
-    d->m_fontSettingsPage->saveSettings();
+    setFontZoom(100);
 }
+
+} // TextEditor

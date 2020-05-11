@@ -24,14 +24,14 @@
 ****************************************************************************/
 
 #include "plaintexteditorfactory.h"
-#include "texteditor.h"
+#include "basehoverhandler.h"
 #include "textdocument.h"
-#include "normalindenter.h"
+#include "texteditor.h"
 #include "texteditoractionhandler.h"
 #include "texteditorconstants.h"
 #include "texteditorplugin.h"
 #include "texteditorsettings.h"
-#include "basehoverhandler.h"
+#include "textindenter.h"
 
 #include <coreplugin/coreconstants.h>
 #include <coreplugin/infobar.h>
@@ -41,12 +41,12 @@
 
 namespace TextEditor {
 
-static PlainTextEditorFactory *m_instance = 0;
+static PlainTextEditorFactory *m_instance = nullptr;
 
 class PlainTextEditorWidget : public TextEditorWidget
 {
 public:
-    PlainTextEditorWidget() {}
+    PlainTextEditorWidget() = default;
     void finalizeInitialization() override
     {
         textDocument()->setMimeType(QLatin1String(Constants::C_TEXTEDITOR_MIMETYPE_TEXT));
@@ -65,12 +65,12 @@ PlainTextEditorFactory::PlainTextEditorFactory()
 
     setDocumentCreator([]() { return new TextDocument(Core::Constants::K_DEFAULT_TEXT_EDITOR_ID); });
     setEditorWidgetCreator([]() { return new PlainTextEditorWidget; });
-    setIndenterCreator([]() { return new NormalIndenter; });
     setUseGenericHighlighter(true);
 
     setEditorActionHandlers(TextEditorActionHandler::Format |
-        TextEditorActionHandler::UnCommentSelection |
-        TextEditorActionHandler::UnCollapseAll);
+                            TextEditorActionHandler::UnCommentSelection |
+                            TextEditorActionHandler::UnCollapseAll |
+                            TextEditorActionHandler::FollowSymbolUnderCursor);
 }
 
 PlainTextEditorFactory *PlainTextEditorFactory::instance()

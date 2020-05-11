@@ -25,6 +25,8 @@
 
 #pragma once
 
+#include "cmakeconfigitem.h"
+
 #include <projectexplorer/projectnodes.h>
 
 namespace CMakeProjectManager {
@@ -33,42 +35,49 @@ namespace Internal {
 class CMakeInputsNode : public ProjectExplorer::ProjectNode
 {
 public:
-    CMakeInputsNode(const Utils::FileName &cmakeLists);
-
-    static Utils::FileName inputsPathFromCMakeListsPath(const Utils::FileName &cmakeLists);
-
-    bool showInSimpleTree() const final;
+    CMakeInputsNode(const Utils::FilePath &cmakeLists);
 };
 
 class CMakeListsNode : public ProjectExplorer::ProjectNode
 {
 public:
-    CMakeListsNode(const Utils::FileName &cmakeListPath);
+    CMakeListsNode(const Utils::FilePath &cmakeListPath);
 
     bool showInSimpleTree() const final;
+    Utils::optional<Utils::FilePath> visibleAfterAddFileAction() const override;
 };
 
 class CMakeProjectNode : public ProjectExplorer::ProjectNode
 {
 public:
-    CMakeProjectNode(const Utils::FileName &directory);
+    CMakeProjectNode(const Utils::FilePath &directory);
 
-    bool showInSimpleTree() const final;
     QString tooltip() const final;
 };
 
 class CMakeTargetNode : public ProjectExplorer::ProjectNode
 {
 public:
-    CMakeTargetNode(const Utils::FileName &directory);
+    CMakeTargetNode(const Utils::FilePath &directory, const QString &target);
 
-    void setTargetInformation(const QList<Utils::FileName> &artifacts, const QString &type);
+    void setTargetInformation(const QList<Utils::FilePath> &artifacts, const QString &type);
 
-    bool showInSimpleTree() const final;
     QString tooltip() const final;
+    QString buildKey() const final;
+    Utils::FilePath buildDirectory() const;
+    void setBuildDirectory(const Utils::FilePath &directory);
+
+    Utils::optional<Utils::FilePath> visibleAfterAddFileAction() const override;
+
+    void build() override;
+
+    QVariant data(Core::Id role) const override;
+    void setConfig(const CMakeConfig &config);
 
 private:
     QString m_tooltip;
+    Utils::FilePath m_buildDirectory;
+    CMakeConfig m_config;
 };
 
 } // namespace Internal

@@ -25,9 +25,8 @@
 
 #pragma once
 
-#include <vcsbase/vcsbaseoptionspage.h>
+#include <coreplugin/dialogs/ioptionspage.h>
 
-#include <QWidget>
 #include <QSharedPointer>
 #include <QPointer>
 
@@ -61,17 +60,20 @@ private:
     QCheckBox *m_httpsCheckBox;
 };
 
-class GerritOptionsPage : public VcsBase::VcsBaseOptionsPage
+class GerritOptionsPage : public Core::IOptionsPage
 {
     Q_OBJECT
 
 public:
     GerritOptionsPage(const QSharedPointer<GerritParameters> &p, QObject *parent = nullptr);
-    ~GerritOptionsPage();
+    ~GerritOptionsPage() override;
 
     QWidget *widget() override;
     void apply() override;
     void finish() override;
+
+signals:
+    void settingsChanged();
 
 private:
     const QSharedPointer<GerritParameters> &m_parameters;
